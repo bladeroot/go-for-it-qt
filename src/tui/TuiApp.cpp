@@ -466,8 +466,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Switch lists: L (picker) or [ / ]
     if (seq == "L") {
-        m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
-        m_mode = Mode::ListPicker;
+        openListPicker();
         return;
     }
     if (seq == "[") {
@@ -687,6 +686,20 @@ void TuiApp::handleStatusPickerKey(const QByteArray& seq) {
     }
 }
 
+void TuiApp::openListPicker() {
+    m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
+    m_selectedListIds.clear();
+    if (m_app->isMultiListView()) {
+        const QStringList active = m_app->activeListIds();
+        for (const QString& id : active) {
+            m_selectedListIds.insert(id);
+        }
+    } else if (!m_app->currentListId().isEmpty()) {
+        m_selectedListIds.insert(m_app->currentListId());
+    }
+    m_mode = Mode::ListPicker;
+}
+
 void TuiApp::handleListPickerKey(const QByteArray& seq) {
     const int nLists = m_app->listManager()->rowCount();
     if (seq == "\033" || seq == "q" || seq == "L") {
@@ -701,7 +714,50 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
         if (nLists > 0) m_listPickerRow = qMax(0, m_listPickerRow - 1);
         return;
     }
-    if (seq == "a" || seq == "o") {
+    // Toggle multi-selection checkbox with Space
+    if (seq == " ") {
+        if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
+            const QString id = m_app->listManager()->entryAt(m_listPickerRow).id;
+            if (m_selectedListIds.contains(id)) {
+                m_selectedListIds.remove(id);
+            } else {
+                m_selectedListIds.insert(id);
+            }
+        }
+        return;
+    }
+    // Quick filter: All Lists
+    if (seq == "*" || seq == "A") {
+        m_mode = Mode::Normal;
+        m_app->showAllLists();
+        m_statusMessage = tr("Switched to All Lists (%1 lists).").arg(nLists);
+        return;
+    }
+    // Quick filter: All Local SQLite lists
+    if (seq == "l") {
+        m_mode = Mode::Normal;
+        m_app->showProviderLists(QStringLiteral("SQLite"));
+        m_statusMessage = tr("Switched to Local lists view.");
+        return;
+    }
+    // Quick filter: All Remote Trackers
+    if (seq == "t" || seq == "T") {
+        QStringList trackerIds;
+        for (int i = 0; i < nLists; ++i) {
+            const auto entry = m_app->listManager()->entryAt(i);
+            if (entry.provider != QStringLiteral("SQLite")) {
+                trackerIds.append(entry.id);
+            }
+        }
+        if (!trackerIds.isEmpty()) {
+            m_mode = Mode::Normal;
+            m_app->setMultiListFilter(trackerIds, tr("All Trackers (%1)").arg(trackerIds.size()));
+            m_statusMessage = tr("Switched to All Trackers view (%1 lists).").arg(trackerIds.size());
+            return;
+        }
+    }
+    // Add list: a, o, n, +
+    if (seq == "a" || seq == "o" || seq == "n" || seq == "+") {
         m_editingListCfg = m_app->listManager()->getListConfig(QString());
         m_editingListCfg[QStringLiteral("name")] = QStringLiteral("New List");
         m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
@@ -709,6 +765,7 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
         m_mode = Mode::ListEdit;
         return;
     }
+    // Edit list: e, i
     if ((seq == "e" || seq == "i") && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
         const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
         m_editingListCfg = m_app->listManager()->getListConfig(entry.id);
@@ -716,22 +773,27 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
         m_mode = Mode::ListEdit;
         return;
     }
+    // Delete list: d
     if (seq == "d" && nLists > 1 && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
         const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
+        m_selectedListIds.remove(entry.id);
         m_app->listManager()->removeListById(entry.id);
         m_listPickerRow = qBound(0, m_listPickerRow, m_app->listManager()->rowCount() - 1);
         m_statusMessage = tr("Removed list '%1'.").arg(entry.name);
         return;
     }
-    if (seq == "*" || seq == "A") {
-        m_mode = Mode::Normal;
-        m_app->showAllLists();
-        m_statusMessage = tr("Switched to All Lists (Unified view).");
-        return;
-    }
+    // Apply selection: Enter
     if (seq == "\r" || seq == "\n") {
         m_mode = Mode::Normal;
-        if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
+        if (m_selectedListIds.size() > 1) {
+            QStringList ids = m_selectedListIds.values();
+            m_app->setMultiListFilter(ids, tr("Selected Lists (%1)").arg(ids.size()));
+            m_statusMessage = tr("Showing %1 selected lists.").arg(ids.size());
+        } else if (m_selectedListIds.size() == 1) {
+            const QString selId = *m_selectedListIds.begin();
+            m_app->selectListById(selId);
+            m_statusMessage = tr("Switched to list '%1'.").arg(m_app->currentListName());
+        } else if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
             const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
             m_app->selectListById(entry.id);
             m_statusMessage = tr("Switched to list '%1' (%2).").arg(entry.name, entry.provider);
@@ -1256,8 +1318,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         return;
     }
     if (cmdLine == QStringLiteral("list") || cmdLine == QStringLiteral("lists") || cmdLine == QStringLiteral("ls")) {
-        m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
-        m_mode = Mode::ListPicker;
+        openListPicker();
         return;
     }
     if (cmdLine == QStringLiteral("help") || cmdLine == QStringLiteral("h")) {
@@ -1600,17 +1661,30 @@ void TuiApp::render() {
             }
         }
     } else if (m_mode == Mode::ListPicker) {
-        out += FG_CYAN + ESC_BOLD + tr("  📋 LISTS (j/k move, Enter select, *:All Lists, a:Add new, e:Edit, d:Delete, Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        out += FG_CYAN + ESC_BOLD + tr("  📋 LISTS (Space:toggle [x], Enter:apply, *:All, l:Local, t:Trackers, a/o:Add, e:Edit, d:Del, Esc:back):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         const int nLists = m_app->listManager()->rowCount();
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
             if (idx < nLists) {
                 const TodoListEntry e = m_app->listManager()->entryAt(idx);
-                const bool isCur = (e.id == m_app->currentListId());
                 const bool isSel = (idx == m_listPickerRow);
-                const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
-                const QString line = QStringLiteral("%1[%2] %3 %4")
-                    .arg(prefix, e.provider, e.name, isCur ? tr("(active)") : QString());
+                const bool isChecked = m_selectedListIds.contains(e.id);
+                const QString cursor = isSel ? QStringLiteral(" > ") : QStringLiteral("   ");
+                const QString check = isChecked ? (FG_GREEN + QStringLiteral("[x]") + ESC_RESET) : (FG_GRAY + QStringLiteral("[ ]") + ESC_RESET);
+
+                QString provColor = FG_WHITE;
+                if (e.provider == QStringLiteral("GitHub")) provColor = FG_PURPLE;
+                else if (e.provider == QStringLiteral("GitLab")) provColor = FG_ORANGE;
+                else if (e.provider == QStringLiteral("Jira")) provColor = FG_CYAN;
+                else if (e.provider == QStringLiteral("YouTrack")) provColor = FG_YELLOW;
+                else if (e.provider == QStringLiteral("SQLite")) provColor = FG_GREEN;
+
+                const QString provBadge = provColor + QStringLiteral("[%1]").arg(padRight(e.provider, 8)) + ESC_RESET;
+                const bool isCur = (e.id == m_app->currentListId() && !m_app->isMultiListView());
+                const QString activeTag = isCur ? (FG_CYAN + tr(" (active)") + ESC_RESET) : QString();
+
+                const QString line = QStringLiteral("%1 %2 %3 %4 %5")
+                    .arg(cursor, check, provBadge, e.name, activeTag);
                 out += (isSel ? (BG_SELECTED + FG_WHITE + ESC_BOLD) : FG_WHITE)
                     + padRight(line, m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
@@ -1682,19 +1756,43 @@ void TuiApp::render() {
             singleLineDesc.replace(QLatin1Char('\n'), QLatin1Char(' '));
             singleLineDesc.replace(QLatin1Char('\t'), QLatin1Char(' '));
 
+            QString provBadge;
+            int provCols = 0;
+            if (m_app->isMultiListView()) {
+                const QString prov = proxy->data(idx, TaskStoreModel::ListProviderRole).toString();
+                if (prov == QStringLiteral("GitHub")) {
+                    provBadge = FG_PURPLE + QStringLiteral("[GH] ") + ESC_RESET;
+                    provCols = 5;
+                } else if (prov == QStringLiteral("GitLab")) {
+                    provBadge = FG_ORANGE + QStringLiteral("[GL] ") + ESC_RESET;
+                    provCols = 5;
+                } else if (prov == QStringLiteral("Jira")) {
+                    provBadge = FG_CYAN + QStringLiteral("[Jira] ") + ESC_RESET;
+                    provCols = 7;
+                } else if (prov == QStringLiteral("YouTrack")) {
+                    provBadge = FG_YELLOW + QStringLiteral("[YT] ") + ESC_RESET;
+                    provCols = 5;
+                } else if (prov == QStringLiteral("SQLite")) {
+                    provBadge = FG_GREEN + QStringLiteral("[Local] ") + ESC_RESET;
+                    provCols = 8;
+                }
+            }
+
             const QString cursorMark = isSelected ? QStringLiteral(" > ") : (isActivePomodoro ? QStringLiteral(" • ") : QStringLiteral("   "));
-            const int availDescCols = qMax(10, m_cols - 14 - displayWidth(metaSuffix));
+            const int availDescCols = qMax(10, m_cols - 14 - provCols - displayWidth(metaSuffix));
             const QString cleanDesc = padRight(singleLineDesc, availDescCols);
 
             if (isSelected) {
                 out += BG_SELECTED + FG_CYAN + ESC_BOLD + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
                     + prioColor + prioStr + QLatin1Char(' ')
+                    + provBadge
                     + FG_WHITE + cleanDesc
                     + FG_PURPLE + metaSuffix
                     + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
                 out += (isActivePomodoro ? FG_CYAN : FG_GRAY) + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
                     + prioColor + prioStr + QLatin1Char(' ')
+                    + provBadge
                     + (isClosedTab() ? (FG_GRAY + ESC_STRIKE) : FG_WHITE) + cleanDesc + ESC_RESET
                     + FG_GRAY + metaSuffix + ESC_RESET + QStringLiteral("\033[K\r\n");
             }

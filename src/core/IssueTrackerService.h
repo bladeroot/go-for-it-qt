@@ -87,6 +87,7 @@ signals:
 
 private:
     static QString normalizeBaseUrl(const QString& rawUrl);
+    static QString gitHubApiBaseUrl(const QString& rawBaseUrl);
     static void applyAuthHeader(QNetworkRequest& req, const TodoListEntry& entry, bool forceBearerAuth = false);
     void setSyncing(bool value);
     void setStatusMessage(const QString& msg);

@@ -142,6 +142,23 @@ QString IssueTrackerService::normalizeBaseUrl(const QString& rawUrl) {
     return u;
 }
 
+QString IssueTrackerService::gitHubApiBaseUrl(const QString& rawBaseUrl) {
+    const QString u = normalizeBaseUrl(rawBaseUrl);
+    if (u.isEmpty()) {
+        return QStringLiteral("https://api.github.com");
+    }
+    const QUrl parsed(u);
+    const QString host = parsed.host().toLower();
+    if (host == QStringLiteral("github.com") || host == QStringLiteral("api.github.com")) {
+        return QStringLiteral("https://api.github.com");
+    }
+    // Self-hosted GitHub Enterprise Server (GHES)
+    if (u.endsWith(QStringLiteral("/api/v3"), Qt::CaseInsensitive)) {
+        return u;
+    }
+    return u + QStringLiteral("/api/v3");
+}
+
 void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEntry& entry, bool forceBearerAuth) {
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setRawHeader("Accept", "application/json");
@@ -440,31 +457,35 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
         const QString title = obj.value(QStringLiteral("title")).toString().trimmed();
         const QString body = obj.value(QStringLiteral("body")).toString().trimmed();
 
-        QString key;
-        QString prefix;
-        if (isPr) {
-            key = QStringLiteral("PR#%1").arg(number);
-            prefix = isDraft ? QStringLiteral("[DRAFT PR] ") : QStringLiteral("[PR] ");
-        } else {
-            key = QStringLiteral("GH#%1").arg(number);
-        }
+        const QString displayKey = isPr ? QStringLiteral("PR#%1").arg(number) : QStringLiteral("GH#%1").arg(number);
+        const QString prefix = isPr ? (isDraft ? QStringLiteral("[DRAFT PR] ") : QStringLiteral("[PR] ")) : QString();
 
+        QString fullRepo;
         QString repoTag;
         const QString repoUrl = obj.value(QStringLiteral("repository_url")).toString();
         if (!repoUrl.isEmpty()) {
+            const int rIdx = repoUrl.indexOf(QStringLiteral("/repos/"));
+            if (rIdx >= 0) {
+                fullRepo = repoUrl.mid(rIdx + 7);
+            }
             const int idx = repoUrl.lastIndexOf(QLatin1Char('/'));
             if (idx >= 0 && idx + 1 < repoUrl.size()) {
                 repoTag = sanitizeTagToken(repoUrl.mid(idx + 1));
             }
         }
-        if (repoTag.isEmpty()) {
+        if (fullRepo.isEmpty()) {
             const QString htmlUrl = obj.value(QStringLiteral("html_url")).toString();
-            static const QRegularExpression ghRepoRe(QStringLiteral("github\\.com/[^/]+/([^/]+)"));
+            static const QRegularExpression ghRepoRe(QStringLiteral("https?://[^/]+/([^/]+)/([^/]+)"));
             const auto match = ghRepoRe.match(htmlUrl);
             if (match.hasMatch()) {
-                repoTag = sanitizeTagToken(match.captured(1));
+                fullRepo = match.captured(1) + QLatin1Char('/') + match.captured(2);
+                repoTag = sanitizeTagToken(match.captured(2));
             }
         }
+
+        const QString key = !fullRepo.isEmpty()
+            ? (isPr ? QStringLiteral("PR#%1#%2").arg(fullRepo).arg(number) : QStringLiteral("GH#%1#%2").arg(fullRepo).arg(number))
+            : displayKey;
 
         quint8 prio = TxtTask::NoPriority;
         QStringList labelTags;
@@ -491,7 +512,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
             remoteStatus = QStringLiteral("merged");
         }
 
-        QString desc = prefix + key + QLatin1Char(' ') + (title.isEmpty() ? key : title);
+        QString desc = prefix + displayKey + QLatin1Char(' ') + (title.isEmpty() ? displayKey : title);
         if (!repoTag.isEmpty()) {
             desc += QStringLiteral(" +") + repoTag;
         }
@@ -528,21 +549,32 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabIssuesJson(const QByteA
         const int iid = obj.value(QStringLiteral("iid")).toInt();
         if (iid <= 0) continue;
 
-        const QString key = QStringLiteral("GL#%1").arg(iid);
         const QString title = obj.value(QStringLiteral("title")).toString().trimmed();
         const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
         const QString state = obj.value(QStringLiteral("state")).toString().trimmed().toLower();
 
+        QString fullProjectPath;
         QString projTag;
         const QString webUrl = obj.value(QStringLiteral("web_url")).toString();
         const int dashIdx = webUrl.indexOf(QStringLiteral("/-/"));
         if (dashIdx > 0) {
-            const QString projPath = webUrl.left(dashIdx);
-            const int lastSlash = projPath.lastIndexOf(QLatin1Char('/'));
-            if (lastSlash >= 0 && lastSlash + 1 < projPath.size()) {
-                projTag = sanitizeTagToken(projPath.mid(lastSlash + 1));
+            const int schemeIdx = webUrl.indexOf(QStringLiteral("://"));
+            const int startSlash = (schemeIdx >= 0) ? webUrl.indexOf(QLatin1Char('/'), schemeIdx + 3) : webUrl.indexOf(QLatin1Char('/'));
+            if (startSlash >= 0 && dashIdx > startSlash) {
+                fullProjectPath = webUrl.mid(startSlash + 1, dashIdx - startSlash - 1);
+            }
+            const int lastSlash = webUrl.lastIndexOf(QLatin1Char('/'), dashIdx - 1);
+            if (lastSlash >= 0 && dashIdx > lastSlash + 1) {
+                projTag = sanitizeTagToken(webUrl.mid(lastSlash + 1, dashIdx - lastSlash - 1));
             }
         }
+        const qint64 projId = obj.value(QStringLiteral("project_id")).toVariant().toLongLong();
+        const QString projectIdent = !fullProjectPath.isEmpty() ? fullProjectPath : (projId > 0 ? QString::number(projId) : QString());
+
+        const QString displayKey = QStringLiteral("GL#%1").arg(iid);
+        const QString key = !projectIdent.isEmpty()
+            ? QStringLiteral("GL#%1#%2").arg(projectIdent).arg(iid)
+            : displayKey;
 
         quint8 prio = TxtTask::NoPriority;
         QStringList labelTags;
@@ -558,7 +590,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabIssuesJson(const QByteA
 
         const quint32 estSec = obj.value(QStringLiteral("time_stats")).toObject().value(QStringLiteral("time_estimate")).toVariant().toUInt();
 
-        QString desc = key + QLatin1Char(' ') + (title.isEmpty() ? key : title);
+        QString desc = displayKey + QLatin1Char(' ') + (title.isEmpty() ? displayKey : title);
         if (!projTag.isEmpty()) {
             desc += QStringLiteral(" +") + projTag;
         }
@@ -595,7 +627,6 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
         const int iid = obj.value(QStringLiteral("iid")).toInt();
         if (iid <= 0) continue;
 
-        const QString key = QStringLiteral("MR!%1").arg(iid);
         const QString rawTitle = obj.value(QStringLiteral("title")).toString().trimmed();
         const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
         const QString state = obj.value(QStringLiteral("state")).toString().trimmed().toLower();
@@ -607,16 +638,28 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
 
         const QString prefix = isDraft ? QStringLiteral("[DRAFT MR] ") : QStringLiteral("[MR] ");
 
+        QString fullProjectPath;
         QString projTag;
         const QString webUrl = obj.value(QStringLiteral("web_url")).toString();
         const int dashIdx = webUrl.indexOf(QStringLiteral("/-/"));
         if (dashIdx > 0) {
-            const QString projPath = webUrl.left(dashIdx);
-            const int lastSlash = projPath.lastIndexOf(QLatin1Char('/'));
-            if (lastSlash >= 0 && lastSlash + 1 < projPath.size()) {
-                projTag = sanitizeTagToken(projPath.mid(lastSlash + 1));
+            const int schemeIdx = webUrl.indexOf(QStringLiteral("://"));
+            const int startSlash = (schemeIdx >= 0) ? webUrl.indexOf(QLatin1Char('/'), schemeIdx + 3) : webUrl.indexOf(QLatin1Char('/'));
+            if (startSlash >= 0 && dashIdx > startSlash) {
+                fullProjectPath = webUrl.mid(startSlash + 1, dashIdx - startSlash - 1);
+            }
+            const int lastSlash = webUrl.lastIndexOf(QLatin1Char('/'), dashIdx - 1);
+            if (lastSlash >= 0 && dashIdx > lastSlash + 1) {
+                projTag = sanitizeTagToken(webUrl.mid(lastSlash + 1, dashIdx - lastSlash - 1));
             }
         }
+        const qint64 projId = obj.value(QStringLiteral("project_id")).toVariant().toLongLong();
+        const QString projectIdent = !fullProjectPath.isEmpty() ? fullProjectPath : (projId > 0 ? QString::number(projId) : QString());
+
+        const QString displayKey = QStringLiteral("MR!%1").arg(iid);
+        const QString key = !projectIdent.isEmpty()
+            ? QStringLiteral("MR!%1!%2").arg(projectIdent).arg(iid)
+            : displayKey;
 
         quint8 prio = TxtTask::NoPriority;
         QStringList labelTags;
@@ -634,7 +677,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
 
         const QString remoteStatus = (isDraft && state == QStringLiteral("opened")) ? QStringLiteral("draft") : state;
 
-        QString desc = prefix + key + QLatin1Char(' ') + (rawTitle.isEmpty() ? key : rawTitle);
+        QString desc = prefix + displayKey + QLatin1Char(' ') + (rawTitle.isEmpty() ? displayKey : rawTitle);
         if (!projTag.isEmpty()) {
             desc += QStringLiteral(" +") + projTag;
         }
@@ -1034,10 +1077,7 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
 }
 
 void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
-    QString baseUrl = normalizeBaseUrl(entry.jiraUrl);
-    if (baseUrl.isEmpty()) {
-        baseUrl = QStringLiteral("https://api.github.com");
-    }
+    const QString apiUrl = gitHubApiBaseUrl(entry.jiraUrl);
 
     setSyncing(true);
     setStatusMessage(tr("Syncing issues and pull requests from GitHub..."));
@@ -1051,7 +1091,7 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
         }
     }
 
-    QUrl url(baseUrl + QStringLiteral("/search/issues"));
+    QUrl url(apiUrl + QStringLiteral("/search/issues"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("q"), queryStr);
     query.addQueryItem(QStringLiteral("sort"), QStringLiteral("updated"));
@@ -1226,31 +1266,40 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         });
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+        QString repo;
         QString numStr;
-        for (const QChar& c : issueKey) {
-            if (c.isDigit()) numStr.append(c);
+        if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                repo = parts.at(1);
+                numStr = parts.at(2);
+            } else if (parts.size() == 2) {
+                numStr = parts.at(1);
+            }
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
         }
         if (numStr.isEmpty()) return;
 
-        QString repo;
-        const QString jql = listEntry.jiraJql.trimmed();
-        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-        const auto m = repoRe.match(jql);
-        if (m.hasMatch()) {
-            repo = m.captured(1);
-        } else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) {
-            repo = jql;
+        if (repo.isEmpty()) {
+            const QString jql = listEntry.jiraJql.trimmed();
+            static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = repoRe.match(jql);
+            if (m.hasMatch()) {
+                repo = m.captured(1);
+            } else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) {
+                repo = jql;
+            }
         }
         if (repo.isEmpty()) {
-            static const QRegularExpression urlRepoRe(QStringLiteral("github\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto um = urlRepoRe.match(baseUrl);
             if (um.hasMatch()) repo = um.captured(1);
         }
         if (repo.isEmpty()) return;
 
-        const QString apiUrl = baseUrl.contains(QStringLiteral("api.github.com"))
-            ? baseUrl
-            : QStringLiteral("https://api.github.com");
+        const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
         QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr + QStringLiteral("/comments"));
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
@@ -1269,19 +1318,40 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         });
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
         const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+        QString proj;
         QString iid;
-        for (const QChar& c : issueKey) {
-            if (c.isDigit()) iid.append(c);
+        bool isMr = false;
+        if (issueKey.contains(QLatin1Char('!'))) {
+            isMr = true;
+            const QStringList parts = issueKey.split(QLatin1Char('!'));
+            if (parts.size() >= 3) {
+                proj = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                iid = parts.at(1);
+            }
+        } else if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                proj = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                iid = parts.at(1);
+            }
+        }
+        if (iid.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
         }
         if (iid.isEmpty()) return;
 
-        const bool isMr = issueKey.contains(QLatin1Char('!')) || issueKey.contains(QStringLiteral("MR"));
         const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
 
-        QString proj = listEntry.jiraJql.trimmed();
-        if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
         if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("gitlab\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            proj = listEntry.jiraJql.trimmed();
+            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        }
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto m = glUrlRe.match(baseUrl);
             if (m.hasMatch()) proj = m.captured(1);
         }
@@ -1541,24 +1611,37 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             setStatusMessage(tr("Updated description on YouTrack issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
+        QString repo;
         QString numStr;
-        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                repo = parts.at(1);
+                numStr = parts.at(2);
+            } else if (parts.size() == 2) {
+                numStr = parts.at(1);
+            }
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
         if (numStr.isEmpty()) return;
 
-        QString repo;
-        const QString jql = listEntry.jiraJql.trimmed();
-        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-        const auto m = repoRe.match(jql);
-        if (m.hasMatch()) repo = m.captured(1);
-        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
         if (repo.isEmpty()) {
-            static const QRegularExpression urlRepoRe(QStringLiteral("github\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const QString jql = listEntry.jiraJql.trimmed();
+            static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = repoRe.match(jql);
+            if (m.hasMatch()) repo = m.captured(1);
+            else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+        }
+        if (repo.isEmpty()) {
+            static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto um = urlRepoRe.match(baseUrl);
             if (um.hasMatch()) repo = um.captured(1);
         }
         if (repo.isEmpty()) return;
 
-        const QString apiUrl = baseUrl.contains(QStringLiteral("api.github.com")) ? baseUrl : QStringLiteral("https://api.github.com");
+        const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
         QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr);
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
@@ -1574,17 +1657,40 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             setStatusMessage(tr("Updated description on GitHub issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        QString proj;
         QString iid;
-        for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        bool isMr = false;
+        if (issueKey.contains(QLatin1Char('!'))) {
+            isMr = true;
+            const QStringList parts = issueKey.split(QLatin1Char('!'));
+            if (parts.size() >= 3) {
+                proj = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                iid = parts.at(1);
+            }
+        } else if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                proj = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                iid = parts.at(1);
+            }
+        }
+        if (iid.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        }
         if (iid.isEmpty()) return;
 
-        const bool isMr = issueKey.contains(QLatin1Char('!')) || issueKey.contains(QStringLiteral("MR"));
         const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
 
-        QString proj = listEntry.jiraJql.trimmed();
-        if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
         if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("gitlab\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            proj = listEntry.jiraJql.trimmed();
+            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        }
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto m = glUrlRe.match(baseUrl);
             if (m.hasMatch()) proj = m.captured(1);
         }
@@ -1672,24 +1778,37 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             setStatusMessage(tr("Posted comment to YouTrack issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
+        QString repo;
         QString numStr;
-        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                repo = parts.at(1);
+                numStr = parts.at(2);
+            } else if (parts.size() == 2) {
+                numStr = parts.at(1);
+            }
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
         if (numStr.isEmpty()) return;
 
-        QString repo;
-        const QString jql = listEntry.jiraJql.trimmed();
-        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-        const auto m = repoRe.match(jql);
-        if (m.hasMatch()) repo = m.captured(1);
-        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
         if (repo.isEmpty()) {
-            static const QRegularExpression urlRepoRe(QStringLiteral("github\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const QString jql = listEntry.jiraJql.trimmed();
+            static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = repoRe.match(jql);
+            if (m.hasMatch()) repo = m.captured(1);
+            else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+        }
+        if (repo.isEmpty()) {
+            static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto um = urlRepoRe.match(baseUrl);
             if (um.hasMatch()) repo = um.captured(1);
         }
         if (repo.isEmpty()) return;
 
-        const QString apiUrl = baseUrl.contains(QStringLiteral("api.github.com")) ? baseUrl : QStringLiteral("https://api.github.com");
+        const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
         QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr + QStringLiteral("/comments"));
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
@@ -1705,17 +1824,40 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             setStatusMessage(tr("Posted comment to GitHub issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        QString proj;
         QString iid;
-        for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        bool isMr = false;
+        if (issueKey.contains(QLatin1Char('!'))) {
+            isMr = true;
+            const QStringList parts = issueKey.split(QLatin1Char('!'));
+            if (parts.size() >= 3) {
+                proj = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                iid = parts.at(1);
+            }
+        } else if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                proj = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                iid = parts.at(1);
+            }
+        }
+        if (iid.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        }
         if (iid.isEmpty()) return;
 
-        const bool isMr = issueKey.contains(QLatin1Char('!')) || issueKey.contains(QStringLiteral("MR"));
         const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
 
-        QString proj = listEntry.jiraJql.trimmed();
-        if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
         if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("gitlab\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            proj = listEntry.jiraJql.trimmed();
+            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        }
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto m = glUrlRe.match(baseUrl);
             if (m.hasMatch()) proj = m.captured(1);
         }

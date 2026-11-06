@@ -2,6 +2,7 @@
 
 #include "core/AppController.h"
 #include <QObject>
+#include <QSet>
 #include <QSocketNotifier>
 #include <QTimer>
 #include <termios.h>
@@ -52,6 +53,7 @@ private:
     void handleSettingsKey(const QByteArray& seq);
     void handleMarkdownViewKey(const QByteArray& seq);
     void handleHelpKey(const QByteArray& seq);
+    void openListPicker();
     void openTaskMarkdownView();
     void editTaskDetailsInVim();
     void addTaskCommentInVim();
@@ -83,6 +85,7 @@ private:
     int m_scrollOffset = 0;
     int m_detailsScroll = 0;
     int m_listPickerRow = 0;
+    QSet<QString> m_selectedListIds;
     int m_settingsRow = 0;
     int m_listEditRow = 0;
     QVariantMap m_editingListCfg;

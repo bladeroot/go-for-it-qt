@@ -218,7 +218,7 @@ private slots:
         QCOMPARE(items.size(), 2);
 
         // Item 1: Issue
-        QCOMPARE(items[0].key, QStringLiteral("GH#42"));
+        QCOMPARE(items[0].key, QStringLiteral("GH#bladeroot/go-for-it-qt#42"));
         QVERIFY(items[0].description.contains(QStringLiteral("GH#42 Fix timer crash on startup")));
         QVERIFY(items[0].description.contains(QStringLiteral("+go-for-it-qt")));
         QVERIFY(items[0].description.contains(QStringLiteral("+bug")));
@@ -227,7 +227,7 @@ private slots:
         QCOMPARE(items[0].remoteStatus, QStringLiteral("open"));
 
         // Item 2: Draft Pull Request
-        QCOMPARE(items[1].key, QStringLiteral("PR#99"));
+        QCOMPARE(items[1].key, QStringLiteral("PR#bladeroot/go-for-it-qt#99"));
         QVERIFY(items[1].description.startsWith(QStringLiteral("[DRAFT PR] PR#99 Add GitHub and GitLab integrations")));
         QCOMPARE(items[1].remoteStatus, QStringLiteral("draft"));
     }
@@ -252,7 +252,7 @@ private slots:
 
         const QVector<RemoteIssueItem> issues = IssueTrackerService::parseGitLabIssuesJson(glIssuesJson);
         QCOMPARE(issues.size(), 1);
-        QCOMPARE(issues[0].key, QStringLiteral("GL#15"));
+        QCOMPARE(issues[0].key, QStringLiteral("GL#group/myproject#15"));
         QVERIFY(issues[0].description.contains(QStringLiteral("GL#15 Implement dark mode toggle")));
         QVERIFY(issues[0].description.contains(QStringLiteral("+myproject")));
         QCOMPARE(issues[0].remoteStatus, QStringLiteral("opened"));
@@ -278,7 +278,7 @@ private slots:
 
         const QVector<RemoteIssueItem> mrs = IssueTrackerService::parseGitLabMergeRequestsJson(glMrsJson);
         QCOMPARE(mrs.size(), 1);
-        QCOMPARE(mrs[0].key, QStringLiteral("MR!7"));
+        QCOMPARE(mrs[0].key, QStringLiteral("MR!group/myproject!7"));
         QVERIFY(mrs[0].description.startsWith(QStringLiteral("[DRAFT MR] MR!7 Draft: Refactor network layer")));
         QCOMPARE(mrs[0].remoteStatus, QStringLiteral("draft"));
         QCOMPARE(mrs[0].durationSeconds, 1800U);

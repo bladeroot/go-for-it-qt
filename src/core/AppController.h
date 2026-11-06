@@ -76,7 +76,7 @@ public:
     Q_INVOKABLE void selectListById(const QString& listId);
     Q_INVOKABLE void showAllLists();
     Q_INVOKABLE void showProviderLists(const QString& provider);
-    Q_INVOKABLE void setMultiListFilter(const QStringList& listIds);
+    Q_INVOKABLE void setMultiListFilter(const QStringList& listIds, const QString& customTitle = QString());
     Q_INVOKABLE void syncCurrentList();
     Q_INVOKABLE void syncAllRemoteLists();
     Q_INVOKABLE void addNewTask(const QString& simpleText);

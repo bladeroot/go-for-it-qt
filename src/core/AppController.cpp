@@ -230,7 +230,7 @@ void AppController::showProviderLists(const QString& provider) {
     }
 }
 
-void AppController::setMultiListFilter(const QStringList& listIds) {
+void AppController::setMultiListFilter(const QStringList& listIds, const QString& customTitle) {
     if (listIds.isEmpty()) {
         showAllLists();
         return;
@@ -242,7 +242,7 @@ void AppController::setMultiListFilter(const QStringList& listIds) {
 
     m_isMultiListView = true;
     m_activeFilterListIds = listIds;
-    m_currentFilterTitle = tr("%1 Lists").arg(listIds.size());
+    m_currentFilterTitle = customTitle.trimmed().isEmpty() ? tr("%1 Lists").arg(listIds.size()) : customTitle.trimmed();
     m_currentListName = m_currentFilterTitle;
 
     m_taskManager.setActiveLists(listIds, listIds.first(), true);
