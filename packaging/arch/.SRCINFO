@@ -1,0 +1,23 @@
+pkgbase = go-for-it-qt
+	pkgdesc = A stylish to-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync (Qt 6)
+	pkgver = 1.9.5
+	pkgrel = 1
+	url = https://github.com/bladeroot/go-for-it-qt
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-or-later
+	makedepends = cmake
+	makedepends = git
+	makedepends = ninja
+	depends = gcc-libs
+	depends = glibc
+	depends = hicolor-icon-theme
+	depends = qt6-base
+	depends = qt6-declarative
+	depends = qt6-multimedia
+	provides = go-for-it-qt
+	conflicts = go-for-it-qt-git
+	source = git+https://github.com/bladeroot/go-for-it-qt.git#branch=main
+	sha256sums = SKIP
+
+pkgname = go-for-it-qt
