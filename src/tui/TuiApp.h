@@ -20,6 +20,7 @@ public:
         Command,
         StatusPicker,
         ListPicker,
+        MarkdownView,
         Help
     };
 
@@ -27,6 +28,7 @@ public:
     ~TuiApp() override;
 
     bool start();
+    void openMarkdownFile(const QString& filePath);
 
 private slots:
     void onStdinActivated();
@@ -42,7 +44,11 @@ private:
     void handleInputLineKey(const QByteArray& seq);
     void handleStatusPickerKey(const QByteArray& seq);
     void handleListPickerKey(const QByteArray& seq);
+    void handleMarkdownViewKey(const QByteArray& seq);
     void handleHelpKey(const QByteArray& seq);
+    void openTaskMarkdownView();
+    static QStringList renderMarkdownToAnsi(const QString& markdown, int maxWidth);
+    static QString formatInlineMarkdown(const QString& text);
 
     void executeExCommand(const QString& cmdLine);
     void switchViewTab(int tabIndex);
@@ -75,6 +81,9 @@ private:
     QString m_inputBuffer;
     int m_inputCursor = 0;
     QString m_statusMessage;
+    QString m_markdownTitle;
+    QString m_markdownContent;
+    int m_markdownScroll = 0;
 };
 
 } // namespace gofi

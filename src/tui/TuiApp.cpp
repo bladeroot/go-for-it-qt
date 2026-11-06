@@ -1,6 +1,8 @@
 #include "TuiApp.h"
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFileInfo>
+#include <QRegularExpression>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -213,6 +215,9 @@ void TuiApp::handleKeySequence(const QByteArray& seq) {
         break;
     case Mode::ListPicker:
         handleListPickerKey(seq);
+        break;
+    case Mode::MarkdownView:
+        handleMarkdownViewKey(seq);
         break;
     case Mode::Help:
         handleHelpKey(seq);
@@ -456,6 +461,12 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         return;
     }
 
+    // Open Full-Screen Markdown Viewer for task description & comments: v or M
+    if (seq == "v" || seq == "M") {
+        openTaskMarkdownView();
+        return;
+    }
+
     // Toggle preview pane: p
     if (seq == "p") {
         m_showPreview = !m_showPreview;
@@ -636,6 +647,215 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
     }
 }
 
+
+void TuiApp::openMarkdownFile(const QString& filePath) {
+    const QString content = m_app->readMarkdownFile(filePath);
+    if (content.isEmpty()) {
+        m_statusMessage = tr("Could not open Markdown file: %1").arg(filePath);
+        return;
+    }
+    m_markdownTitle = QStringLiteral("📄 %1").arg(QFileInfo(filePath).fileName());
+    m_markdownContent = content;
+    m_markdownScroll = 0;
+    m_mode = Mode::MarkdownView;
+}
+
+void TuiApp::openTaskMarkdownView() {
+    TaskFilterProxyModel* proxy = currentProxy();
+    if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
+        return;
+    }
+    const QModelIndex idx = proxy->index(m_selectedRow, 0);
+    const QString desc = proxy->data(idx, TaskStoreModel::DescriptionRole).toString();
+    const QString details = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
+    const QVariantList comments = proxy->data(idx, TaskStoreModel::CommentsRole).toList();
+    const QString status = proxy->data(idx, TaskStoreModel::StatusRole).toString();
+
+    m_markdownTitle = QStringLiteral("%1 [%2]").arg(desc, statusLabel(status));
+    QString fullMd = QStringLiteral("# %1\n\n").arg(desc);
+    if (!details.trimmed().isEmpty()) {
+        fullMd += details.trimmed() + QStringLiteral("\n\n");
+    } else {
+        fullMd += QStringLiteral("*No description provided (press `E` to edit description).*\n\n");
+    }
+    if (!comments.isEmpty()) {
+        fullMd += QStringLiteral("---\n## 💬 Comments (%1)\n\n").arg(comments.size());
+        for (const QVariant& cv : comments) {
+            const QVariantMap cm = cv.toMap();
+            fullMd += QStringLiteral("### %1 (%2)\n%3\n\n").arg(
+                cm.value(QStringLiteral("author")).toString(),
+                cm.value(QStringLiteral("created")).toString(),
+                cm.value(QStringLiteral("body")).toString().trimmed()
+            );
+        }
+    }
+    m_markdownContent = fullMd;
+    m_markdownScroll = 0;
+    m_mode = Mode::MarkdownView;
+}
+
+QString TuiApp::formatInlineMarkdown(const QString& text) {
+    QString s = text;
+    // Links: [label](url)
+    static const QRegularExpression linkRe(QStringLiteral("\\[([^\\]]+)\\]\\(([^\\)]+)\\)"));
+    s.replace(linkRe, QStringLiteral("\033[4m\033[38;5;81m\\1\033[0m\033[38;5;244m (\\2)\033[38;5;255m"));
+    // Inline code: `code`
+    static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+    s.replace(codeRe, QStringLiteral("\033[48;5;236m\033[38;5;209m \\1 \033[0m\033[38;5;255m"));
+    // Bold: **text**
+    static const QRegularExpression boldRe(QStringLiteral("\\*\\*([^\\*]+)\\*\\*"));
+    s.replace(boldRe, QStringLiteral("\033[1m\033[38;5;255m\\1\033[22m"));
+    // Italic: *text*
+    static const QRegularExpression italicRe(QStringLiteral("(?<!\\*)\\*([^\\*]+)\\*(?!\\*)"));
+    s.replace(italicRe, QStringLiteral("\033[3m\033[38;5;114m\\1\033[23m\033[38;5;255m"));
+    return s;
+}
+
+QStringList TuiApp::renderMarkdownToAnsi(const QString& markdown, int maxWidth) {
+    QStringList out;
+    const int wrapCols = qMax(20, maxWidth - 4);
+    const QStringList rawLines = markdown.split(QLatin1Char('\n'));
+    bool inCodeBlock = false;
+    QString codeLang;
+
+    for (const QString& rawLine : rawLines) {
+        const QString trimmed = rawLine.trimmed();
+
+        // Fenced code blocks ```
+        if (trimmed.startsWith(QStringLiteral("```"))) {
+            if (!inCodeBlock) {
+                inCodeBlock = true;
+                codeLang = trimmed.mid(3).trimmed();
+                const QString label = codeLang.isEmpty() ? QStringLiteral(" code ") : QStringLiteral(" %1 ").arg(codeLang);
+                const int dashLen = qMax(2, wrapCols - static_cast<int>(label.size()) - 4);
+                out.append(FG_GRAY + QStringLiteral("  ╭─") + FG_YELLOW + label + FG_GRAY + QString(dashLen, QChar(0x2500)) + QStringLiteral("╮") + ESC_RESET);
+            } else {
+                inCodeBlock = false;
+                out.append(FG_GRAY + QStringLiteral("  ╰") + QString(qMax(2, wrapCols - 2), QChar(0x2500)) + QStringLiteral("╯") + ESC_RESET);
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            out.append(FG_GRAY + QStringLiteral("  │ ") + FG_ORANGE + truncateVisible(rawLine, wrapCols - 4) + ESC_RESET);
+            continue;
+        }
+
+        if (trimmed.isEmpty()) {
+            out.append(QString());
+            continue;
+        }
+
+        // Horizontal rule
+        if (trimmed == QStringLiteral("---") || trimmed == QStringLiteral("***") || trimmed == QStringLiteral("___")) {
+            out.append(FG_GRAY + QStringLiteral("  ") + QString(wrapCols, QChar(0x2500)) + ESC_RESET);
+            continue;
+        }
+
+        // Headings (#, ##, ###)
+        if (trimmed.startsWith(QLatin1Char('#'))) {
+            int level = 0;
+            while (level < trimmed.size() && trimmed.at(level) == QLatin1Char('#')) {
+                ++level;
+            }
+            const QString hText = trimmed.mid(level).trimmed();
+            if (level == 1) {
+                out.append(ESC_BOLD + FG_CYAN + QStringLiteral("  █ ") + hText + ESC_RESET);
+                out.append(FG_CYAN + QStringLiteral("  ") + QString(qMin(wrapCols, static_cast<int>(hText.size()) + 4), QChar(0x2550)) + ESC_RESET);
+            } else if (level == 2) {
+                out.append(ESC_BOLD + FG_YELLOW + QStringLiteral("  ◆ ") + hText + ESC_RESET);
+            } else {
+                out.append(ESC_BOLD + FG_PURPLE + QStringLiteral("  ▸ ") + hText + ESC_RESET);
+            }
+            continue;
+        }
+
+        // Blockquotes (> )
+        if (trimmed.startsWith(QStringLiteral("> "))) {
+            const QString qBody = trimmed.mid(2);
+            out.append(FG_CYAN + QStringLiteral("  ┃ ") + FG_GRAY + formatInlineMarkdown(truncateVisible(qBody, wrapCols - 4)) + ESC_RESET);
+            continue;
+        }
+
+        // Task list checkboxes (- [x] / - [ ])
+        if (trimmed.startsWith(QStringLiteral("- [x] "), Qt::CaseInsensitive) || trimmed.startsWith(QStringLiteral("* [x] "), Qt::CaseInsensitive)) {
+            out.append(FG_GREEN + QStringLiteral("  ☑ ") + FG_GRAY + ESC_STRIKE + truncateVisible(trimmed.mid(6), wrapCols - 4) + ESC_RESET);
+            continue;
+        }
+        if (trimmed.startsWith(QStringLiteral("- [ ] ")) || trimmed.startsWith(QStringLiteral("* [ ] "))) {
+            out.append(FG_YELLOW + QStringLiteral("  ☐ ") + FG_WHITE + formatInlineMarkdown(truncateVisible(trimmed.mid(6), wrapCols - 4)) + ESC_RESET);
+            continue;
+        }
+
+        // Bullet lists (- / * / •)
+        if (trimmed.startsWith(QStringLiteral("- ")) || trimmed.startsWith(QStringLiteral("* ")) || trimmed.startsWith(QStringLiteral("• "))) {
+            const QString itemBody = trimmed.mid(2);
+            out.append(FG_CYAN + QStringLiteral("  • ") + FG_WHITE + formatInlineMarkdown(truncateVisible(itemBody, wrapCols - 4)) + ESC_RESET);
+            continue;
+        }
+
+        // Markdown tables (| ... |)
+        if (trimmed.startsWith(QLatin1Char('|')) && trimmed.endsWith(QLatin1Char('|'))) {
+            QString tableLine = trimmed;
+            tableLine.replace(QLatin1Char('|'), FG_CYAN + QStringLiteral(" │ ") + FG_WHITE);
+            out.append(QStringLiteral("  ") + tableLine + ESC_RESET);
+            continue;
+        }
+
+        // Word-wrap normal paragraph lines
+        QString rem = rawLine;
+        while (rem.size() > wrapCols) {
+            int splitPos = rem.lastIndexOf(QLatin1Char(' '), wrapCols);
+            if (splitPos <= 0) splitPos = wrapCols;
+            out.append(QStringLiteral("  ") + FG_WHITE + formatInlineMarkdown(rem.left(splitPos).trimmed()) + ESC_RESET);
+            rem = rem.mid(splitPos).trimmed();
+        }
+        if (!rem.isEmpty()) {
+            out.append(QStringLiteral("  ") + FG_WHITE + formatInlineMarkdown(rem) + ESC_RESET);
+        }
+    }
+    return out;
+}
+
+void TuiApp::handleMarkdownViewKey(const QByteArray& seq) {
+    if (seq == "\033" || seq == "q" || seq == "v" || seq == "M") {
+        m_mode = Mode::Normal;
+        return;
+    }
+    if (seq == "j" || seq == "\033[B" || seq == "\r" || seq == "\n") {
+        ++m_markdownScroll;
+        return;
+    }
+    if (seq == "k" || seq == "\033[A") {
+        m_markdownScroll = qMax(0, m_markdownScroll - 1);
+        return;
+    }
+    if (seq == "d" || seq == "\x04" || seq == " " || seq == "\033[6~") {
+        m_markdownScroll += 10;
+        return;
+    }
+    if (seq == "u" || seq == "\x15" || seq == "\033[5~") {
+        m_markdownScroll = qMax(0, m_markdownScroll - 10);
+        return;
+    }
+    if (seq == "g") {
+        m_markdownScroll = 0;
+        return;
+    }
+    if (seq == "G") {
+        m_markdownScroll = 100000;
+        return;
+    }
+    if (seq == "E" || seq == "e") {
+        if (currentProxy()->rowCount() > 0) {
+            const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
+            m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::DetailsRole).toString().replace(QLatin1Char('\n'), QStringLiteral(" \\n "));
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditDetails;
+        }
+    }
+}
+
 void TuiApp::handleHelpKey(const QByteArray& seq) {
     if (seq == "\033" || seq == "q" || seq == "?" || seq == "\r" || seq == "\n") {
         m_mode = Mode::Normal;
@@ -682,6 +902,15 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     }
     if (cmdLine == QStringLiteral("help") || cmdLine == QStringLiteral("h")) {
         m_mode = Mode::Help;
+        return;
+    }
+    if (cmdLine == QStringLiteral("md") || cmdLine == QStringLiteral("view")) {
+        openTaskMarkdownView();
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("md ")) || cmdLine.startsWith(QStringLiteral("view "))) {
+        const QString path = cmdLine.section(QLatin1Char(' '), 1).trimmed();
+        openMarkdownFile(path);
         return;
     }
     if (cmdLine.startsWith(QStringLiteral("add "))) {
@@ -830,6 +1059,7 @@ void TuiApp::render() {
             QStringLiteral("  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)"),
             QStringLiteral("  r / Ctrl+r                        Sync current list with Jira / YouTrack"),
             QStringLiteral("  L or [ / ]                        Open List Picker (L) or cycle previous/next list ([ / ])"),
+            QStringLiteral("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
             QStringLiteral("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
             QStringLiteral("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
         };
@@ -839,6 +1069,22 @@ void TuiApp::render() {
                     + truncateVisible(helpLines.at(r), m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
                 out += QStringLiteral("\033[K\r\n");
+            }
+        }
+    } else if (m_mode == Mode::MarkdownView) {
+        out += BG_HEADER + FG_CYAN + ESC_BOLD
+            + padRight(QStringLiteral(" 📖 MARKDOWN VIEWER: %1  (j/k/d/u/g/G scroll, E edit, q/Esc close)").arg(m_markdownTitle), m_cols)
+            + ESC_RESET + QStringLiteral("\033[K\r\n");
+        const QStringList mdLines = renderMarkdownToAnsi(m_markdownContent, m_cols);
+        const int availRows = bodyRows - 1;
+        const int maxScroll = qMax(0, static_cast<int>(mdLines.size()) - availRows);
+        m_markdownScroll = qBound(0, m_markdownScroll, maxScroll);
+        for (int r = 0; r < availRows; ++r) {
+            const int idx = m_markdownScroll + r;
+            if (idx < mdLines.size()) {
+                out += mdLines.at(idx) + QStringLiteral("\033[K\r\n");
+            } else {
+                out += FG_GRAY + QStringLiteral(" ~") + ESC_RESET + QStringLiteral("\033[K\r\n");
             }
         }
     } else if (m_mode == Mode::ListPicker) {
@@ -950,11 +1196,9 @@ void TuiApp::render() {
 
                 previewLines.append(ESC_BOLD + FG_CYAN + QStringLiteral("  %1  [%2]").arg(desc, statusLabel(status)) + ESC_RESET);
                 if (!details.isEmpty()) {
-                    for (const QString& rawLine : details.split(QLatin1Char('\n'))) {
-                        previewLines.append(FG_WHITE + QStringLiteral("  ") + truncateVisible(rawLine, m_cols - 4) + ESC_RESET);
-                    }
+                    previewLines.append(renderMarkdownToAnsi(details, m_cols));
                 } else {
-                    previewLines.append(FG_GRAY + QStringLiteral("  (No detailed description — press 'E' to add)") + ESC_RESET);
+                    previewLines.append(FG_GRAY + QStringLiteral("  (No detailed description — press 'E' to add, 'v' for full MD viewer)") + ESC_RESET);
                 }
 
                 if (!comments.isEmpty()) {
@@ -962,9 +1206,7 @@ void TuiApp::render() {
                     for (const QVariant& cv : comments) {
                         const QVariantMap cm = cv.toMap();
                         previewLines.append(FG_PURPLE + QStringLiteral("  • %1 (%2):").arg(cm.value(QStringLiteral("author")).toString(), cm.value(QStringLiteral("created")).toString()) + ESC_RESET);
-                        for (const QString& cl : cm.value(QStringLiteral("body")).toString().split(QLatin1Char('\n'))) {
-                            previewLines.append(FG_GRAY + QStringLiteral("    ") + truncateVisible(cl, m_cols - 6) + ESC_RESET);
-                        }
+                        previewLines.append(renderMarkdownToAnsi(cm.value(QStringLiteral("body")).toString(), m_cols - 2));
                     }
                 }
             } else {
@@ -999,6 +1241,8 @@ void TuiApp::render() {
         modeTag = BG_MODE_CMD + QStringLiteral(" STATUS ") + ESC_RESET;
     } else if (m_mode == Mode::ListPicker) {
         modeTag = BG_MODE_CMD + QStringLiteral(" LISTS ") + ESC_RESET;
+    } else if (m_mode == Mode::MarkdownView) {
+        modeTag = BG_MODE_CMD + QStringLiteral(" MARKDOWN ") + ESC_RESET;
     } else if (m_mode == Mode::Help) {
         modeTag = BG_MODE_CMD + QStringLiteral(" HELP ") + ESC_RESET;
     }

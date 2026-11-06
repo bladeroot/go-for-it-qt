@@ -1,55 +1,95 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 Dialog {
     id: detailsDialog
-    title: issueKey !== "" ? (issueKey + " — " + qsTr("Task Details")) : qsTr("Task Details & Comments")
+    title: taskTitle !== "" ? taskTitle : qsTr("Task Details & Markdown Viewer")
     anchors.centerIn: parent
-    width: 460
-    height: 460
+    width: 680
+    height: 540
     modal: true
     standardButtons: Dialog.Save | Dialog.Close
 
-    property bool isDoneList: false
-    property int proxyRow: -1
-    property string issueKey: ""
+    property bool fromDoneList: false
+    property int taskRow: -1
     property string taskTitle: ""
+    property string taskStatus: "todo"
     property string taskDetails: ""
     property var taskComments: []
+    property bool editMode: false
+    property string loadedFilePath: ""
 
-    function openForTask(doneList, row, key, titleText, detailsText, commentsList) {
-        isDoneList = doneList
-        proxyRow = row
-        issueKey = key || ""
-        taskTitle = titleText || ""
-        taskDetails = detailsText || ""
+    function openForTask(isDoneList, rowIdx, titleStr, statusStr, detailsStr, commentsList) {
+        fromDoneList = isDoneList
+        taskRow = rowIdx
+        taskTitle = titleStr
+        taskStatus = statusStr || "todo"
+        taskDetails = detailsStr || ""
         taskComments = commentsList || []
         detailsArea.text = taskDetails
+        loadedFilePath = ""
+        editMode = (taskDetails.trim() === "")
         detailsTabBar.currentIndex = 0
         open()
+    }
+
+    FileDialog {
+        id: mdFileDialog
+        title: qsTr("Open Markdown (.md) File")
+        nameFilters: [qsTr("Markdown files (*.md *.markdown *.txt)"), qsTr("All files (*)")]
+        onAccepted: {
+            let path = selectedFile.toString()
+            if (path.startsWith("file://")) {
+                path = path.substring(7)
+            }
+            const content = app.readMarkdownFile(path)
+            if (content !== "") {
+                detailsDialog.loadedFilePath = path
+                detailsArea.text = content
+                detailsDialog.editMode = false
+            }
+        }
     }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 8
 
-        Label {
+        RowLayout {
             Layout.fillWidth: true
-            text: detailsDialog.taskTitle
-            font.bold: true
-            wrapMode: Text.WordWrap
+            spacing: 8
+
+            TabBar {
+                id: detailsTabBar
+                Layout.fillWidth: true
+                TabButton { text: qsTr("Markdown Description") }
+                TabButton { text: qsTr("Comments (%1)").arg(detailsDialog.taskComments ? detailsDialog.taskComments.length : 0) }
+            }
+
+            Button {
+                visible: detailsTabBar.currentIndex === 0
+                text: detailsDialog.editMode ? qsTr("👁 Preview MD") : qsTr("✎ Edit MD")
+                onClicked: detailsDialog.editMode = !detailsDialog.editMode
+            }
+
+            Button {
+                visible: detailsTabBar.currentIndex === 0
+                text: qsTr("📂 Open .md...")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Open and view a local Markdown (.md) file")
+                onClicked: mdFileDialog.open()
+            }
         }
 
-        TabBar {
-            id: detailsTabBar
+        Label {
+            visible: detailsDialog.loadedFilePath !== "" && detailsTabBar.currentIndex === 0
+            text: qsTr("Viewing file: %1").arg(detailsDialog.loadedFilePath)
+            font.pixelSize: 11
+            opacity: 0.75
+            elide: Text.ElideMiddle
             Layout.fillWidth: true
-            TabButton {
-                text: qsTr("Description")
-            }
-            TabButton {
-                text: qsTr("Comments (%1)").arg(detailsDialog.taskComments ? detailsDialog.taskComments.length : 0)
-            }
         }
 
         StackLayout {
@@ -57,19 +97,42 @@ Dialog {
             Layout.fillHeight: true
             currentIndex: detailsTabBar.currentIndex
 
-            // Tab 1: Full Description
-            ScrollView {
-                clip: true
-                TextArea {
-                    id: detailsArea
-                    width: detailsDialog.availableWidth
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    placeholderText: qsTr("No description provided. You can add notes or task description here...")
+            // Tab 1: Markdown Preview & Editor
+            StackLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: detailsDialog.editMode ? 1 : 0
+
+                // 0: Rendered Markdown View
+                ScrollView {
+                    clip: true
+                    TextArea {
+                        id: markdownPreview
+                        readOnly: true
+                        textFormat: TextEdit.MarkdownText
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        text: detailsArea.text.trim() !== ""
+                            ? detailsArea.text
+                            : qsTr("*No description yet — click **✎ Edit MD** or **📂 Open .md...** above.*")
+                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                    }
+                }
+
+                // 1: Raw Markdown Editor
+                ScrollView {
+                    clip: true
+                    TextArea {
+                        id: detailsArea
+                        placeholderText: qsTr("Write task description or notes in Markdown (# Heading, **bold**, `code`, - list)...")
+                        wrapMode: TextArea.Wrap
+                        selectByMouse: true
+                        font.family: "monospace"
+                    }
                 }
             }
 
-            // Tab 2: Comments
+            // Tab 2: Comments List (also rendered as Markdown!)
             ListView {
                 id: commentsListView
                 clip: true
@@ -79,6 +142,7 @@ Dialog {
                 delegate: Frame {
                     required property var modelData
                     width: commentsListView.width
+                    padding: 8
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -87,23 +151,23 @@ Dialog {
                         RowLayout {
                             Layout.fillWidth: true
                             Label {
-                                text: modelData.author || ""
+                                text: modelData.author || qsTr("Author")
                                 font.bold: true
-                                font.pixelSize: 12
+                                Layout.fillWidth: true
                             }
-                            Item { Layout.fillWidth: true }
                             Label {
                                 text: modelData.created || ""
                                 font.pixelSize: 11
-                                opacity: 0.65
+                                opacity: 0.7
                             }
                         }
 
                         Label {
                             Layout.fillWidth: true
-                            text: modelData.body || ""
+                            textFormat: Text.MarkdownText
                             wrapMode: Text.WordWrap
-                            textFormat: Text.PlainText
+                            text: modelData.body || ""
+                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
                         }
                     }
                 }
@@ -111,7 +175,7 @@ Dialog {
                 Label {
                     anchors.centerIn: parent
                     visible: !detailsDialog.taskComments || detailsDialog.taskComments.length === 0
-                    text: qsTr("No comments on this task.")
+                    text: qsTr("No comments synced for this task.")
                     opacity: 0.6
                 }
             }
@@ -119,8 +183,8 @@ Dialog {
     }
 
     onAccepted: {
-        if (proxyRow >= 0) {
-            app.updateTaskDetails(isDoneList, proxyRow, detailsArea.text)
+        if (taskRow >= 0) {
+            app.updateTaskDetails(fromDoneList, taskRow, detailsArea.text)
         }
     }
 }

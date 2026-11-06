@@ -30,10 +30,12 @@ int main(int argc, char* argv[]) {
     QCommandLineOption logFileOption(QStringLiteral("logfile"), QStringLiteral("CSV file to log activities to."), QStringLiteral("FILE"));
     QCommandLineOption loadOption(QStringLiteral("load"), QStringLiteral("Load the list specified by ID."), QStringLiteral("LIST-ID"));
     QCommandLineOption dbOption(QStringLiteral("db"), QStringLiteral("Custom SQLite database file path."), QStringLiteral("DB-FILE"));
+    QCommandLineOption mdOption(QStringLiteral("md"), QStringLiteral("Open a Markdown (.md) file directly in the Vim Markdown viewer."), QStringLiteral("MD-FILE"));
     parser.addOption(listOption);
     parser.addOption(logFileOption);
     parser.addOption(loadOption);
     parser.addOption(dbOption);
+    parser.addOption(mdOption);
     parser.process(app);
 
     gofi::AppController controller(parser.value(logFileOption), parser.value(dbOption));
@@ -56,6 +58,9 @@ int main(int argc, char* argv[]) {
         QTextStream err(stderr);
         err << "Error: go-for-it-tui requires an interactive terminal (TTY).\n";
         return 1;
+    }
+    if (parser.isSet(mdOption)) {
+        tui.openMarkdownFile(parser.value(mdOption));
     }
     return app.exec();
 }

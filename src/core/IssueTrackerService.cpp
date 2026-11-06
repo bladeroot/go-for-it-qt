@@ -19,7 +19,7 @@ QString sanitizeTagToken(const QString& raw) {
     return out;
 }
 
-// Extracts plain text from either a Jira v2 string or Jira v3 Atlassian Document Format (ADF) JSON object
+// Extracts Markdown from either a Jira v2 string or Jira v3 Atlassian Document Format (ADF) JSON object
 QString extractJiraRichText(const QJsonValue& val) {
     if (val.isString()) {
         return val.toString().trimmed();
@@ -36,10 +36,37 @@ QString extractJiraRichText(const QJsonValue& val) {
         const QJsonObject obj = val.toObject();
         const QString nodeType = obj.value(QStringLiteral("type")).toString();
         if (nodeType == QStringLiteral("text")) {
-            return obj.value(QStringLiteral("text")).toString();
+            QString txt = obj.value(QStringLiteral("text")).toString();
+            const QJsonArray marks = obj.value(QStringLiteral("marks")).toArray();
+            for (const QJsonValue& mVal : marks) {
+                const QJsonObject mObj = mVal.toObject();
+                const QString mType = mObj.value(QStringLiteral("type")).toString();
+                if (mType == QStringLiteral("code")) {
+                    txt = QLatin1Char('`') + txt + QLatin1Char('`');
+                } else if (mType == QStringLiteral("strong")) {
+                    txt = QStringLiteral("**") + txt + QStringLiteral("**");
+                } else if (mType == QStringLiteral("em")) {
+                    txt = QLatin1Char('*') + txt + QLatin1Char('*');
+                } else if (mType == QStringLiteral("strike")) {
+                    txt = QStringLiteral("~~") + txt + QStringLiteral("~~");
+                } else if (mType == QStringLiteral("link")) {
+                    const QString href = mObj.value(QStringLiteral("attrs")).toObject().value(QStringLiteral("href")).toString();
+                    if (!href.isEmpty()) {
+                        txt = QStringLiteral("[%1](%2)").arg(txt, href);
+                    }
+                }
+            }
+            return txt;
         }
         if (nodeType == QStringLiteral("hardBreak")) {
             return QStringLiteral("\n");
+        }
+        if (nodeType == QStringLiteral("rule")) {
+            return QStringLiteral("\n---\n");
+        }
+        if (nodeType == QStringLiteral("inlineCard")) {
+            const QString url = obj.value(QStringLiteral("attrs")).toObject().value(QStringLiteral("url")).toString();
+            return url.isEmpty() ? QString() : QStringLiteral("<%1>").arg(url);
         }
         QString inner;
         if (obj.contains(QStringLiteral("content"))) {
@@ -51,12 +78,26 @@ QString extractJiraRichText(const QJsonValue& val) {
             if (nodeType == QStringLiteral("doc") || nodeType == QStringLiteral("bulletList") || nodeType == QStringLiteral("orderedList")) {
                 inner = blockParts.join(QStringLiteral("\n"));
             } else if (nodeType == QStringLiteral("listItem")) {
-                inner = QStringLiteral("• ") + blockParts.join(QString()).trimmed();
+                inner = QStringLiteral("- ") + blockParts.join(QString()).trimmed();
+            } else if (nodeType == QStringLiteral("blockquote")) {
+                QStringList qLines;
+                for (const QString& l : blockParts.join(QString()).trimmed().split(QLatin1Char('\n'))) {
+                    qLines.append(QStringLiteral("> ") + l);
+                }
+                inner = qLines.join(QStringLiteral("\n")) + QStringLiteral("\n");
             } else {
                 inner = blockParts.join(QString());
             }
         }
-        if (nodeType == QStringLiteral("paragraph") || nodeType == QStringLiteral("heading") || nodeType == QStringLiteral("codeBlock")) {
+        if (nodeType == QStringLiteral("heading")) {
+            const int level = qBound(1, obj.value(QStringLiteral("attrs")).toObject().value(QStringLiteral("level")).toInt(2), 6);
+            return QString(level, QLatin1Char('#')) + QLatin1Char(' ') + inner.trimmed() + QStringLiteral("\n\n");
+        }
+        if (nodeType == QStringLiteral("codeBlock")) {
+            const QString lang = obj.value(QStringLiteral("attrs")).toObject().value(QStringLiteral("language")).toString();
+            return QStringLiteral("```") + lang + QStringLiteral("\n") + inner.trimmed() + QStringLiteral("\n```\n\n");
+        }
+        if (nodeType == QStringLiteral("paragraph")) {
             return inner + QStringLiteral("\n");
         }
         return inner;

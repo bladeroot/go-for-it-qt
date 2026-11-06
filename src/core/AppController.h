@@ -76,6 +76,7 @@ public:
     Q_INVOKABLE bool changeDatabasePath(const QString& newDbPath, bool copyExisting = true);
     Q_INVOKABLE bool exportBackup(const QString& targetFilePath);
     Q_INVOKABLE bool importBackup(const QString& sourceFilePath);
+    Q_INVOKABLE QString readMarkdownFile(const QString& filePath) const;
 
 signals:
     void showingOverviewChanged();

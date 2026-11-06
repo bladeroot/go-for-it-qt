@@ -1,5 +1,8 @@
 #include "AppController.h"
 #include "DatabaseManager.h"
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QSettings>
 
 namespace gofi {
@@ -259,6 +262,18 @@ bool AppController::changeDatabasePath(const QString& newDbPath, bool copyExisti
 
 bool AppController::exportBackup(const QString& targetFilePath) {
     return DatabaseManager::instance().exportDatabaseBackup(targetFilePath);
+}
+
+QString AppController::readMarkdownFile(const QString& filePath) const {
+    QString cleanPath = filePath.trimmed();
+    if (cleanPath.startsWith(QStringLiteral("~/"))) {
+        cleanPath = QDir::homePath() + cleanPath.mid(1);
+    }
+    QFile f(cleanPath);
+    if (!f.exists() || !f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    return QString::fromUtf8(f.readAll());
 }
 
 bool AppController::importBackup(const QString& sourceFilePath) {
