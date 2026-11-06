@@ -1265,16 +1265,77 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     m_statusMessage = tr("Unknown command: :%1 (try :help, :sync, :sort, :clear, :list, :q)").arg(cmdLine);
 }
 
+namespace {
+int codepointDisplayWidth(uint32_t cp) {
+    if (cp == 0 || cp < 0x20 || (cp >= 0x7F && cp < 0xA0)) return 0;
+    // Combining marks and variation selectors
+    if ((cp >= 0x0300 && cp <= 0x036F) || (cp >= 0xFE00 && cp <= 0xFE0F)) return 0;
+    // Wide emoji / symbols / CJK blocks
+    if (cp >= 0x1F000 ||
+        (cp >= 0x231A && cp <= 0x23FA) ||
+        (cp >= 0x2614 && cp <= 0x2615) ||
+        (cp >= 0x2648 && cp <= 0x2653) ||
+        cp == 0x267F || cp == 0x2693 || cp == 0x26A1 ||
+        (cp >= 0x26AA && cp <= 0x26AB) ||
+        (cp >= 0x26BD && cp <= 0x26BE) ||
+        (cp >= 0x26C4 && cp <= 0x26C5) ||
+        cp == 0x26CE || cp == 0x26D4 || cp == 0x26EA ||
+        (cp >= 0x26F2 && cp <= 0x26F5) ||
+        cp == 0x26FA || cp == 0x26FD || cp == 0x2705 ||
+        (cp >= 0x270A && cp <= 0x270B) ||
+        cp == 0x2728 || cp == 0x274C || cp == 0x274E ||
+        (cp >= 0x2753 && cp <= 0x2755) || cp == 0x2757 ||
+        (cp >= 0x2795 && cp <= 0x2797) || cp == 0x27B0 || cp == 0x27BF ||
+        (cp >= 0x2B1B && cp <= 0x2B1C) || cp == 0x2B50 || cp == 0x2B55 ||
+        (cp >= 0x2E80 && cp <= 0xA4CF) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) ||
+        (cp >= 0xF900 && cp <= 0xFAFF) ||
+        (cp >= 0xFE10 && cp <= 0xFE6F) ||
+        (cp >= 0xFF00 && cp <= 0xFF60) ||
+        (cp >= 0xFFE0 && cp <= 0xFFE6)) {
+        return 2;
+    }
+    return 1;
+}
+
+int displayWidth(const QString& str) {
+    int w = 0;
+    const QList<uint> ucs4 = str.toUcs4();
+    for (uint cp : ucs4) {
+        w += codepointDisplayWidth(cp);
+    }
+    return w;
+}
+} // namespace
+
 QString TuiApp::truncateVisible(const QString& str, int maxCols) {
     if (maxCols <= 0) return {};
-    if (str.size() <= maxCols) return str;
-    if (maxCols <= 1) return str.left(maxCols);
-    return str.left(maxCols - 1) + QStringLiteral("…");
+    if (displayWidth(str) <= maxCols) return str;
+    if (maxCols <= 1) return QStringLiteral("…");
+    QString res;
+    int curCols = 0;
+    for (int i = 0; i < str.size(); ++i) {
+        uint cp = str.at(i).unicode();
+        int step = 1;
+        if (str.at(i).isHighSurrogate() && i + 1 < str.size() && str.at(i + 1).isLowSurrogate()) {
+            cp = QChar::surrogateToUcs4(str.at(i), str.at(i + 1));
+            step = 2;
+        }
+        const int cw = codepointDisplayWidth(cp);
+        if (curCols + cw > maxCols - 1) {
+            break;
+        }
+        res += str.mid(i, step);
+        curCols += cw;
+        if (step == 2) ++i;
+    }
+    return res + QStringLiteral("…");
 }
 
 QString TuiApp::padRight(const QString& str, int width) {
-    if (str.size() >= width) return truncateVisible(str, width);
-    return str + QString(width - static_cast<int>(str.size()), QLatin1Char(' '));
+    const int dw = displayWidth(str);
+    if (dw >= width) return truncateVisible(str, width);
+    return str + QString(width - dw, QLatin1Char(' '));
 }
 
 QString TuiApp::formatSeconds(uint secs) {
@@ -1308,7 +1369,7 @@ void TuiApp::render() {
     const QString syncInfo = m_app->issueTracker()->isSyncing()
         ? tr("⟳ Syncing...")
         : tr("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
-    const int headerGap = qMax(1, m_cols - static_cast<int>(listBadge.size()) - static_cast<int>(syncInfo.size()) - 1);
+    const int headerGap = qMax(1, m_cols - displayWidth(listBadge) - displayWidth(syncInfo) - 1);
     out += BG_HEADER + FG_CYAN + ESC_BOLD + listBadge + ESC_RESET + BG_HEADER
         + QString(headerGap, QLatin1Char(' ')) + FG_GRAY + syncInfo + QLatin1Char(' ') + ESC_RESET + QStringLiteral("\033[K\r\n");
 
@@ -1316,24 +1377,31 @@ void TuiApp::render() {
     // Row 2: Pomodoro Timer Banner
     // -------------------------------------------------------------------------
     TaskTimer* timer = m_app->timer();
-    const QString stateBadge = timer->isRunning()
-        ? (timer->isBreakActive() ? (FG_GREEN + tr("☕ BREAK RUNNING")) : (FG_ORANGE + tr("▶ WORK RUNNING")))
-        : (timer->isBreakActive() ? (FG_GREEN + tr("☕ BREAK PAUSED"))  : (FG_YELLOW + tr("⏸ TIMER READY")));
-    const QString clockStr = formatSeconds(timer->remainingSeconds());
+    const QString stateColor = timer->isRunning()
+        ? (timer->isBreakActive() ? FG_GREEN : FG_ORANGE)
+        : (timer->isBreakActive() ? FG_GREEN : FG_YELLOW);
+    const QString stateText = timer->isRunning()
+        ? (timer->isBreakActive() ? tr("♦ BREAK RUNNING") : tr("▶ WORK RUNNING"))
+        : (timer->isBreakActive() ? tr("♦ BREAK PAUSED")  : tr("‖ TIMER READY"));
+    const QString paddedState = padRight(stateText, 20);
+    const QString clockStr = padRight(formatSeconds(timer->remainingSeconds()), 7);
     const int barWidth = 16;
     const int filled = qBound(0, static_cast<int>(timer->progress() * barWidth), barWidth);
     const QString progBar = QStringLiteral("[")
         + QString(filled, QChar(0x2588))
         + QString(barWidth - filled, QChar(0x2591))
         + QStringLiteral("]");
-    const QString activeTaskTitle = timer->hasActiveTask()
-        ? truncateVisible(timer->activeTaskDescription(), qMax(15, m_cols - 52))
-        : tr("No active task");
+    // Total prefix columns: 1 (" ") + 20 (state) + 2 ("  ") + 7 (clock) + 1 (" ") + 18 (progBar) + 4 (" │ ") = 53
+    const int availActiveCols = qMax(8, m_cols - 54);
+    QString rawActiveDesc = timer->hasActiveTask() ? timer->activeTaskDescription() : tr("No active task");
+    rawActiveDesc.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    rawActiveDesc.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    const QString activeTaskTitle = truncateVisible(rawActiveDesc, availActiveCols);
 
-    out += QStringLiteral(" ") + ESC_BOLD + stateBadge + ESC_RESET
-        + QStringLiteral("  ⏱ ") + ESC_BOLD + FG_WHITE + clockStr + ESC_RESET
+    out += QStringLiteral(" ") + ESC_BOLD + stateColor + paddedState + ESC_RESET
+        + QStringLiteral("  ") + ESC_BOLD + FG_WHITE + clockStr + ESC_RESET
         + QStringLiteral(" ") + FG_CYAN + progBar + ESC_RESET
-        + QStringLiteral("  🎯 ") + FG_WHITE + activeTaskTitle + ESC_RESET + QStringLiteral("\033[K\r\n");
+        + FG_GRAY + QStringLiteral(" │ ") + FG_WHITE + activeTaskTitle + ESC_RESET + QStringLiteral("\033[K\r\n");
 
     // -------------------------------------------------------------------------
     // Row 3: View / Status Filter Tabs (1..6)
@@ -1530,7 +1598,7 @@ void TuiApp::render() {
                 statusBadge = QStringLiteral("[▶]");
                 statusColor = FG_CYAN;
             } else if (status == QStringLiteral("paused")) {
-                statusBadge = QStringLiteral("[⏸]");
+                statusBadge = QStringLiteral("[=]");
                 statusColor = FG_YELLOW;
             } else if (status == QStringLiteral("done")) {
                 statusBadge = QStringLiteral("[✓]");
@@ -1548,15 +1616,20 @@ void TuiApp::render() {
             }
 
             QString metaSuffix;
-            if (!details.isEmpty()) metaSuffix += QStringLiteral(" 📄");
-            if (!comments.isEmpty()) metaSuffix += QStringLiteral(" 💬%1").arg(comments.size());
+            if (!details.isEmpty()) metaSuffix += QStringLiteral(" [MD]");
+            if (!comments.isEmpty()) metaSuffix += QStringLiteral(" [#%1]").arg(comments.size());
             if (durSec > 0 || timerSec > 0) {
                 metaSuffix += QStringLiteral(" [%1/%2]").arg(formatSeconds(timerSec), formatSeconds(durSec));
             }
 
+            QString singleLineDesc = desc;
+            singleLineDesc.replace(QLatin1Char('\r'), QLatin1Char(' '));
+            singleLineDesc.replace(QLatin1Char('\n'), QLatin1Char(' '));
+            singleLineDesc.replace(QLatin1Char('\t'), QLatin1Char(' '));
+
             const QString cursorMark = isSelected ? QStringLiteral(" > ") : (isActivePomodoro ? QStringLiteral(" • ") : QStringLiteral("   "));
-            const int availDescCols = qMax(10, m_cols - 12 - static_cast<int>(metaSuffix.size()));
-            const QString cleanDesc = truncateVisible(desc, availDescCols);
+            const int availDescCols = qMax(10, m_cols - 12 - displayWidth(metaSuffix));
+            const QString cleanDesc = padRight(singleLineDesc, availDescCols);
 
             if (isSelected) {
                 out += BG_SELECTED + FG_CYAN + ESC_BOLD + cursorMark + statusColor + statusBadge + QLatin1Char(' ')

@@ -140,9 +140,22 @@ ItemDelegate {
             }
         }
 
+        Label {
+            visible: !rowDelegate.editing && (rowDelegate.duration > 0 || rowDelegate.timerValue > 0)
+            Layout.preferredWidth: 68
+            horizontalAlignment: Text.AlignRight
+            text: Math.floor(rowDelegate.timerValue / 60) + "m / " + Math.round(rowDelegate.duration / 60) + "m"
+            font.italic: true
+            font.pixelSize: 11
+            opacity: 0.75
+        }
+
         ToolButton {
             id: statusBtn
             visible: !rowDelegate.editing
+            Layout.preferredWidth: 108
+            Layout.minimumWidth: 108
+            Layout.maximumWidth: 108
             implicitHeight: 22
             leftPadding: 6
             rightPadding: 6
@@ -188,14 +201,6 @@ ItemDelegate {
                     onTriggered: Qt.callLater(function() { app.changeTaskStatus(rowDelegate.isDoneList, rowDelegate.index, "canceled") })
                 }
             }
-        }
-
-        Label {
-            visible: !rowDelegate.editing && rowDelegate.duration > 0
-            text: Math.floor(rowDelegate.timerValue / 60) + "m / " + Math.round(rowDelegate.duration / 60) + "m"
-            font.italic: true
-            font.pixelSize: 11
-            opacity: 0.75
         }
 
         ToolButton {
