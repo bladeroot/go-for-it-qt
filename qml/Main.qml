@@ -6,8 +6,8 @@ import "dialogs"
 
 ApplicationWindow {
     id: rootWindow
-    width: 440
-    height: 580
+    width: app.settings.windowWidth
+    height: app.settings.windowHeight
     minimumWidth: 320
     minimumHeight: 420
     visible: true
@@ -27,13 +27,29 @@ ApplicationWindow {
     palette.highlight: "#3daee9"
     palette.highlightedText: "#ffffff"
 
+    function persistGeometry() {
+        app.settings.saveWindowGeometry(rootWindow.width, rootWindow.height, rootWindow.x, rootWindow.y)
+    }
+
+    onWidthChanged: if (visible) app.settings.windowWidth = width
+    onHeightChanged: if (visible) app.settings.windowHeight = height
+
     Component.onCompleted: {
+        if (app.settings.windowX >= 0 && app.settings.windowY >= 0) {
+            rootWindow.x = app.settings.windowX
+            rootWindow.y = app.settings.windowY
+        }
         if (typeof showAboutOnStart !== "undefined" && showAboutOnStart) {
             aboutDialog.open()
         }
     }
 
+    Component.onDestruction: {
+        rootWindow.persistGeometry()
+    }
+
     onClosing: function(close) {
+        rootWindow.persistGeometry()
         if (!rootWindow.forceQuit && app.timer.running) {
             close.accepted = false
             rootWindow.hide()
@@ -48,6 +64,7 @@ ApplicationWindow {
             rootWindow.requestActivate()
         }
         function onQuitRequested() {
+            rootWindow.persistGeometry()
             rootWindow.forceQuit = true
             app.timer.stop()
             Qt.quit()
@@ -135,6 +152,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Q"
         onActivated: {
+            rootWindow.persistGeometry()
             rootWindow.forceQuit = true
             app.timer.stop()
             Qt.quit()

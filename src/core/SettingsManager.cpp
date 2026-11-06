@@ -314,6 +314,50 @@ void SettingsManager::setWindowPosition(const QPoint& pos) {
     DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("SavedState/window_pos"), pos);
 }
 
+void SettingsManager::setWindowWidth(int w) {
+    const int clamped = qMax(320, w);
+    const QSize cur = windowSize();
+    if (cur.width() == clamped) return;
+    setWindowSize(QSize(clamped, cur.height()));
+    emit windowGeometryChanged();
+}
+
+void SettingsManager::setWindowHeight(int h) {
+    const int clamped = qMax(420, h);
+    const QSize cur = windowSize();
+    if (cur.height() == clamped) return;
+    setWindowSize(QSize(cur.width(), clamped));
+    emit windowGeometryChanged();
+}
+
+void SettingsManager::setWindowX(int x) {
+    const QPoint cur = windowPosition();
+    if (cur.x() == x) return;
+    setWindowPosition(QPoint(x, cur.y()));
+    emit windowGeometryChanged();
+}
+
+void SettingsManager::setWindowY(int y) {
+    const QPoint cur = windowPosition();
+    if (cur.y() == y) return;
+    setWindowPosition(QPoint(cur.x(), y));
+    emit windowGeometryChanged();
+}
+
+void SettingsManager::saveWindowGeometry(int w, int h, int x, int y) {
+    if (w >= 320 && h >= 420) {
+        setWindowSize(QSize(w, h));
+        DatabaseManager::instance().setSetting(QStringLiteral("window_width"), QString::number(w));
+        DatabaseManager::instance().setSetting(QStringLiteral("window_height"), QString::number(h));
+    }
+    if (x >= 0 && y >= 0) {
+        setWindowPosition(QPoint(x, y));
+        DatabaseManager::instance().setSetting(QStringLiteral("window_x"), QString::number(x));
+        DatabaseManager::instance().setSetting(QStringLiteral("window_y"), QString::number(y));
+    }
+    m_settings.sync();
+}
+
 QString SettingsManager::lastLoadedListId() const {
     return m_settings.value(QStringLiteral("SavedState/last_list_id")).toString();
 }

@@ -36,6 +36,10 @@ class SettingsManager : public QObject {
     Q_PROPERTY(double breakEndSoundVolume READ breakEndSoundVolume WRITE setBreakEndSoundVolume NOTIFY soundSettingsChanged)
     Q_PROPERTY(bool trayIndicatorEnabled READ trayIndicatorEnabled WRITE setTrayIndicatorEnabled NOTIFY pluginsChanged)
     Q_PROPERTY(bool launcherIndicatorEnabled READ launcherIndicatorEnabled WRITE setLauncherIndicatorEnabled NOTIFY pluginsChanged)
+    Q_PROPERTY(int windowWidth READ windowWidth WRITE setWindowWidth NOTIFY windowGeometryChanged)
+    Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowGeometryChanged)
+    Q_PROPERTY(int windowX READ windowX WRITE setWindowX NOTIFY windowGeometryChanged)
+    Q_PROPERTY(int windowY READ windowY WRITE setWindowY NOTIFY windowGeometryChanged)
 
 public:
     enum TimerMode {
@@ -140,6 +144,20 @@ public:
     [[nodiscard]] QPoint windowPosition() const;
     void setWindowPosition(const QPoint& pos);
 
+    [[nodiscard]] int windowWidth() const { return qMax(320, windowSize().width()); }
+    void setWindowWidth(int w);
+
+    [[nodiscard]] int windowHeight() const { return qMax(420, windowSize().height()); }
+    void setWindowHeight(int h);
+
+    [[nodiscard]] int windowX() const { return windowPosition().x(); }
+    void setWindowX(int x);
+
+    [[nodiscard]] int windowY() const { return windowPosition().y(); }
+    void setWindowY(int y);
+
+    Q_INVOKABLE void saveWindowGeometry(int w, int h, int x, int y);
+
     [[nodiscard]] QString lastLoadedListId() const;
     void setLastLoadedListId(const QString& id);
 
@@ -156,6 +174,7 @@ signals:
     void appearanceChanged();
     void soundSettingsChanged();
     void pluginsChanged();
+    void windowGeometryChanged();
 
 private:
     void rebuildSchedule();
