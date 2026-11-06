@@ -406,13 +406,33 @@ void SettingsManager::setAutoSyncIntervalMinutes(int minutes) {
 }
 
 bool SettingsManager::notifyOnTaskChanges() const {
-    return m_settings.value(QStringLiteral("Notifications/notify_on_task_changes"), true).toBool();
+    return notifyTaskChangesSound() || notifyTaskChangesPopup();
 }
 
 void SettingsManager::setNotifyOnTaskChanges(bool value) {
-    if (notifyOnTaskChanges() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("notify_on_task_changes"), value ? QStringLiteral("1") : QStringLiteral("0"));
-    m_settings.setValue(QStringLiteral("Notifications/notify_on_task_changes"), value);
+    setNotifyTaskChangesSound(value);
+    setNotifyTaskChangesPopup(value);
+}
+
+bool SettingsManager::notifyTaskChangesSound() const {
+    return m_settings.value(QStringLiteral("Notifications/notify_task_changes_sound"), true).toBool();
+}
+
+void SettingsManager::setNotifyTaskChangesSound(bool value) {
+    if (notifyTaskChangesSound() == value) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("notify_task_changes_sound"), value ? QStringLiteral("1") : QStringLiteral("0"));
+    m_settings.setValue(QStringLiteral("Notifications/notify_task_changes_sound"), value);
+    emit soundSettingsChanged();
+}
+
+bool SettingsManager::notifyTaskChangesPopup() const {
+    return m_settings.value(QStringLiteral("Notifications/notify_task_changes_popup"), true).toBool();
+}
+
+void SettingsManager::setNotifyTaskChangesPopup(bool value) {
+    if (notifyTaskChangesPopup() == value) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("notify_task_changes_popup"), value ? QStringLiteral("1") : QStringLiteral("0"));
+    m_settings.setValue(QStringLiteral("Notifications/notify_task_changes_popup"), value);
     emit soundSettingsChanged();
 }
 

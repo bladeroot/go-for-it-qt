@@ -42,11 +42,10 @@ void NotificationService::playSoundFile(const QString& presetOrPath, double volu
 }
 
 void NotificationService::notifyTaskEvent(const QString& title, const QString& body) {
-    if (m_settings && !m_settings->notifyOnTaskChanges()) {
-        return;
+    if (!m_settings || m_settings->notifyTaskChangesPopup()) {
+        sendDesktopNotification(title, body);
     }
-    sendDesktopNotification(title, body);
-    if (m_settings && !m_settings->muteSounds()) {
+    if (m_settings && m_settings->notifyTaskChangesSound() && !m_settings->muteSounds()) {
         const QString sound = m_settings->reminderSoundFile().isEmpty()
             ? QStringLiteral("bell.ogg")
             : m_settings->reminderSoundFile();

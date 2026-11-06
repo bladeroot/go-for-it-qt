@@ -175,9 +175,15 @@ Dialog {
                     }
 
                     CheckBox {
-                        text: qsTr("Notify (sound & popup) on new tasks and status changes")
-                        checked: app.settings.notifyOnTaskChanges
-                        onToggled: app.settings.notifyOnTaskChanges = checked
+                        text: qsTr("Notify with sound on new tasks or status changes")
+                        checked: app.settings.notifyTaskChangesSound
+                        onToggled: app.settings.notifyTaskChangesSound = checked
+                    }
+
+                    CheckBox {
+                        text: qsTr("Notify with system popup on new tasks or status changes")
+                        checked: app.settings.notifyTaskChangesPopup
+                        onToggled: app.settings.notifyTaskChangesPopup = checked
                     }
 
                     MenuSeparator { Layout.fillWidth: true }

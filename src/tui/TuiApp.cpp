@@ -788,7 +788,7 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
         return;
     }
     if (seq == "j" || seq == "\033[B") {
-        m_settingsRow = qMin(13, m_settingsRow + 1);
+        m_settingsRow = qMin(14, m_settingsRow + 1);
         return;
     }
     if (seq == "k" || seq == "\033[A") {
@@ -856,10 +856,12 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
             m_inputCursor = static_cast<int>(m_inputBuffer.size());
             m_mode = Mode::EditSettingValue;
         } else if (m_settingsRow == 11) {
-            s->setNotifyOnTaskChanges(!s->notifyOnTaskChanges());
+            s->setNotifyTaskChangesSound(!s->notifyTaskChangesSound());
         } else if (m_settingsRow == 12) {
-            s->setStartMinimized(!s->startMinimized());
+            s->setNotifyTaskChangesPopup(!s->notifyTaskChangesPopup());
         } else if (m_settingsRow == 13) {
+            s->setStartMinimized(!s->startMinimized());
+        } else if (m_settingsRow == 14) {
             s->setStartInTray(!s->startInTray());
         }
     }
@@ -1532,7 +1534,8 @@ void TuiApp::render() {
             tr("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
             tr("Language (Enter to cycle)       : [%1] (system/uk/de/fr/es/it/en)").arg(s->language()),
             tr("Auto-Sync Jira/YouTrack (min)   : %1 min").arg(s->autoSyncIntervalMinutes()),
-            tr("Notify On New/Changed Tasks     : %1").arg(s->notifyOnTaskChanges() ? tr("[ON]") : tr("[OFF]")),
+            tr("Sound On New/Changed Tasks      : %1").arg(s->notifyTaskChangesSound() ? tr("[ON]") : tr("[OFF]")),
+            tr("Popup On New/Changed Tasks      : %1").arg(s->notifyTaskChangesPopup() ? tr("[ON]") : tr("[OFF]")),
             tr("GUI Start Minimized             : %1").arg(s->startMinimized() ? tr("[ON]") : tr("[OFF]")),
             tr("GUI Start In System Tray        : %1").arg(s->startInTray() ? tr("[ON]") : tr("[OFF]"))
         };

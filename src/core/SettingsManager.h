@@ -44,6 +44,8 @@ class SettingsManager : public QObject {
     Q_PROPERTY(bool startInTray READ startInTray WRITE setStartInTray NOTIFY startupBehaviorChanged)
     Q_PROPERTY(int autoSyncIntervalMinutes READ autoSyncIntervalMinutes WRITE setAutoSyncIntervalMinutes NOTIFY autoSyncChanged)
     Q_PROPERTY(bool notifyOnTaskChanges READ notifyOnTaskChanges WRITE setNotifyOnTaskChanges NOTIFY soundSettingsChanged)
+    Q_PROPERTY(bool notifyTaskChangesSound READ notifyTaskChangesSound WRITE setNotifyTaskChangesSound NOTIFY soundSettingsChanged)
+    Q_PROPERTY(bool notifyTaskChangesPopup READ notifyTaskChangesPopup WRITE setNotifyTaskChangesPopup NOTIFY soundSettingsChanged)
 
 public:
     enum TimerMode {
@@ -174,6 +176,12 @@ public:
 
     [[nodiscard]] bool notifyOnTaskChanges() const;
     void setNotifyOnTaskChanges(bool value);
+
+    [[nodiscard]] bool notifyTaskChangesSound() const;
+    void setNotifyTaskChangesSound(bool value);
+
+    [[nodiscard]] bool notifyTaskChangesPopup() const;
+    void setNotifyTaskChangesPopup(bool value);
 
     [[nodiscard]] QString lastLoadedListId() const;
     void setLastLoadedListId(const QString& id);
