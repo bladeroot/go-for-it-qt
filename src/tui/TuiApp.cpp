@@ -208,6 +208,8 @@ void TuiApp::handleKeySequence(const QByteArray& seq) {
     case Mode::EditDetails:
     case Mode::Search:
     case Mode::Command:
+    case Mode::EditSettingValue:
+    case Mode::EditListField:
         handleInputLineKey(seq);
         break;
     case Mode::StatusPicker:
@@ -215,6 +217,12 @@ void TuiApp::handleKeySequence(const QByteArray& seq) {
         break;
     case Mode::ListPicker:
         handleListPickerKey(seq);
+        break;
+    case Mode::ListEdit:
+        handleListEditKey(seq);
+        break;
+    case Mode::Settings:
+        handleSettingsKey(seq);
         break;
     case Mode::MarkdownView:
         handleMarkdownViewKey(seq);
@@ -436,6 +444,13 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         return;
     }
 
+    // Open Settings: O (Shift+o)
+    if (seq == "O") {
+        m_settingsRow = 0;
+        m_mode = Mode::Settings;
+        return;
+    }
+
     // Switch lists: L (picker) or [ / ]
     if (seq == "L") {
         m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
@@ -517,7 +532,13 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             m_app->todoProxyModel()->setFilterQuery(QString());
             m_app->doneProxyModel()->setFilterQuery(QString());
         }
-        m_mode = Mode::Normal;
+        if (m_mode == Mode::EditSettingValue) {
+            m_mode = Mode::Settings;
+        } else if (m_mode == Mode::EditListField) {
+            m_mode = Mode::ListEdit;
+        } else {
+            m_mode = Mode::Normal;
+        }
         return;
     }
     // Enter commits
@@ -550,6 +571,34 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             clampSelection();
         } else if (prevMode == Mode::Command) {
             executeExCommand(text);
+        } else if (prevMode == Mode::EditSettingValue) {
+            m_mode = Mode::Settings;
+            if (m_settingsRow == 0) {
+                m_app->settings()->setTaskDuration(qBound(60, text.toInt() * 60, 86400));
+            } else if (m_settingsRow == 1) {
+                m_app->settings()->setBreakDuration(qBound(60, text.toInt() * 60, 86400));
+            } else if (m_settingsRow == 2) {
+                m_app->settings()->setReminderTime(qBound(0, text.toInt(), 3600));
+            } else if (m_settingsRow == 7 && !text.isEmpty()) {
+                if (m_app->changeDatabasePath(text, true)) {
+                    m_statusMessage = tr("Database moved to: %1").arg(m_app->databasePath());
+                } else {
+                    m_statusMessage = tr("Failed to move database to: %1").arg(text);
+                }
+            } else if (m_settingsRow == 8 && !text.isEmpty()) {
+                if (m_app->exportBackup(text)) {
+                    m_statusMessage = tr("Backup exported to: %1").arg(text);
+                } else {
+                    m_statusMessage = tr("Failed to export backup to: %1").arg(text);
+                }
+            }
+        } else if (prevMode == Mode::EditListField) {
+            m_mode = Mode::ListEdit;
+            if (m_listEditRow == 0) m_editingListCfg[QStringLiteral("name")] = text;
+            else if (m_listEditRow == 2) m_editingListCfg[QStringLiteral("jiraUrl")] = text;
+            else if (m_listEditRow == 3) m_editingListCfg[QStringLiteral("jiraUser")] = text;
+            else if (m_listEditRow == 4) m_editingListCfg[QStringLiteral("apiToken")] = text;
+            else if (m_listEditRow == 5) m_editingListCfg[QStringLiteral("jiraJql")] = text;
         }
         return;
     }
@@ -637,12 +686,143 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
         if (nLists > 0) m_listPickerRow = qMax(0, m_listPickerRow - 1);
         return;
     }
+    if (seq == "a" || seq == "o") {
+        m_editingListCfg = m_app->listManager()->getListConfig(QString());
+        m_editingListCfg[QStringLiteral("name")] = QStringLiteral("New List");
+        m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
+        m_listEditRow = 0;
+        m_mode = Mode::ListEdit;
+        return;
+    }
+    if ((seq == "e" || seq == "i") && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
+        const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
+        m_editingListCfg = m_app->listManager()->getListConfig(entry.id);
+        m_listEditRow = 0;
+        m_mode = Mode::ListEdit;
+        return;
+    }
+    if (seq == "d" && nLists > 1 && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
+        const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
+        m_app->listManager()->removeListById(entry.id);
+        m_listPickerRow = qBound(0, m_listPickerRow, m_app->listManager()->rowCount() - 1);
+        m_statusMessage = tr("Removed list '%1'.").arg(entry.name);
+        return;
+    }
     if (seq == "\r" || seq == "\n") {
         m_mode = Mode::Normal;
         if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
             const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
             m_app->selectListById(entry.id);
             m_statusMessage = tr("Switched to list '%1' (%2).").arg(entry.name, entry.provider);
+        }
+    }
+}
+
+void TuiApp::handleListEditKey(const QByteArray& seq) {
+    if (seq == "\033" || seq == "q") {
+        m_mode = Mode::ListPicker;
+        return;
+    }
+    if (seq == "j" || seq == "\033[B") {
+        m_listEditRow = qMin(7, m_listEditRow + 1);
+        return;
+    }
+    if (seq == "k" || seq == "\033[A") {
+        m_listEditRow = qMax(0, m_listEditRow - 1);
+        return;
+    }
+    if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i" || seq == "h" || seq == "l") {
+        if (m_listEditRow == 1) {
+            // Cycle provider: SQLite -> Jira -> YouTrack
+            const QString cur = m_editingListCfg.value(QStringLiteral("provider")).toString();
+            if (cur == QStringLiteral("SQLite")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
+            else if (cur == QStringLiteral("Jira")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("YouTrack");
+            else m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("SQLite");
+            return;
+        }
+        if (m_listEditRow == 6) {
+            m_editingListCfg[QStringLiteral("autoWorklog")] = !m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool();
+            return;
+        }
+        if (m_listEditRow == 7) {
+            // Save & Activate List
+            const QVariantMap check = m_app->listManager()->validateAndCheckConflicts(m_editingListCfg);
+            if (!check.value(QStringLiteral("valid")).toBool()) {
+                m_statusMessage = check.value(QStringLiteral("error")).toString();
+                return;
+            }
+            const QString savedId = m_app->listManager()->saveListConfig(m_editingListCfg, QStringLiteral("keep"));
+            m_app->selectListById(savedId);
+            m_mode = Mode::Normal;
+            m_statusMessage = tr("Saved and activated list '%1'.").arg(m_editingListCfg.value(QStringLiteral("name")).toString());
+            return;
+        }
+        // Text fields (0, 2, 3, 4, 5)
+        if (m_listEditRow == 0) m_inputBuffer = m_editingListCfg.value(QStringLiteral("name")).toString();
+        else if (m_listEditRow == 2) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraUrl")).toString();
+        else if (m_listEditRow == 3) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraUser")).toString();
+        else if (m_listEditRow == 4) m_inputBuffer = m_editingListCfg.value(QStringLiteral("apiToken")).toString();
+        else if (m_listEditRow == 5) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraJql")).toString();
+        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_mode = Mode::EditListField;
+    }
+}
+
+void TuiApp::handleSettingsKey(const QByteArray& seq) {
+    if (seq == "\033" || seq == "q" || seq == "O") {
+        m_mode = Mode::Normal;
+        return;
+    }
+    if (seq == "j" || seq == "\033[B") {
+        m_settingsRow = qMin(8, m_settingsRow + 1);
+        return;
+    }
+    if (seq == "k" || seq == "\033[A") {
+        m_settingsRow = qMax(0, m_settingsRow - 1);
+        return;
+    }
+    SettingsManager* s = m_app->settings();
+    if (seq == "h" || seq == "-" || seq == "\033[D") {
+        if (m_settingsRow == 0) s->setTaskDuration(qMax(60, s->taskDuration() - 60));
+        else if (m_settingsRow == 1) s->setBreakDuration(qMax(60, s->breakDuration() - 60));
+        else if (m_settingsRow == 2) s->setReminderTime(qMax(0, s->reminderTime() - 10));
+        return;
+    }
+    if (seq == "l" || seq == "+" || seq == "=" || seq == "\033[C") {
+        if (m_settingsRow == 0) s->setTaskDuration(qMin(86400, s->taskDuration() + 60));
+        else if (m_settingsRow == 1) s->setBreakDuration(qMin(86400, s->breakDuration() + 60));
+        else if (m_settingsRow == 2) s->setReminderTime(qMin(3600, s->reminderTime() + 10));
+        return;
+    }
+    if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i") {
+        if (m_settingsRow == 0) {
+            m_inputBuffer = QString::number(s->taskDuration() / 60);
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditSettingValue;
+        } else if (m_settingsRow == 1) {
+            m_inputBuffer = QString::number(s->breakDuration() / 60);
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditSettingValue;
+        } else if (m_settingsRow == 2) {
+            m_inputBuffer = QString::number(s->reminderTime());
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditSettingValue;
+        } else if (m_settingsRow == 3) {
+            s->setMuteSounds(!s->muteSounds());
+        } else if (m_settingsRow == 4) {
+            s->setUseDarkTheme(!s->useDarkTheme());
+        } else if (m_settingsRow == 5) {
+            s->setNewTasksOnTop(!s->newTasksOnTop());
+        } else if (m_settingsRow == 6) {
+            s->setResetTimerOnTaskSwitch(!s->resetTimerOnTaskSwitch());
+        } else if (m_settingsRow == 7) {
+            m_inputBuffer = m_app->databasePath();
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditSettingValue;
+        } else if (m_settingsRow == 8) {
+            m_inputBuffer = m_app->databasePath() + QStringLiteral(".backup.db");
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditSettingValue;
         }
     }
 }
@@ -895,6 +1075,11 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         clampSelection();
         return;
     }
+    if (cmdLine == QStringLiteral("set") || cmdLine == QStringLiteral("settings") || cmdLine == QStringLiteral("config")) {
+        m_settingsRow = 0;
+        m_mode = Mode::Settings;
+        return;
+    }
     if (cmdLine == QStringLiteral("list") || cmdLine == QStringLiteral("lists") || cmdLine == QStringLiteral("ls")) {
         m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
         m_mode = Mode::ListPicker;
@@ -967,7 +1152,7 @@ void TuiApp::render() {
         .arg(m_app->currentListName(), m_app->currentListProvider());
     const QString syncInfo = m_app->issueTracker()->isSyncing()
         ? QStringLiteral("⟳ Syncing...")
-        : QStringLiteral("[L:Lists] [r:Sync] [?:Help]");
+        : QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
     const int headerGap = qMax(1, m_cols - static_cast<int>(listBadge.size()) - static_cast<int>(syncInfo.size()) - 1);
     out += BG_HEADER + FG_CYAN + ESC_BOLD + listBadge + ESC_RESET + BG_HEADER
         + QString(headerGap, QLatin1Char(' ')) + FG_GRAY + syncInfo + QLatin1Char(' ') + ESC_RESET + QStringLiteral("\033[K\r\n");
@@ -1058,7 +1243,8 @@ void TuiApp::render() {
             QStringLiteral("  Enter                             Set selected task as active Pomodoro task"),
             QStringLiteral("  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)"),
             QStringLiteral("  r / Ctrl+r                        Sync current list with Jira / YouTrack"),
-            QStringLiteral("  L or [ / ]                        Open List Picker (L) or cycle previous/next list ([ / ])"),
+            QStringLiteral("  L (a:Add, e:Edit, d:Delete)       Open List Manager (create/edit SQLite, Jira, YouTrack lists)"),
+            QStringLiteral("  O or :set / :settings             Open Global Settings (Timer, Notifications, Storage/DB Backup)"),
             QStringLiteral("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
             QStringLiteral("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
             QStringLiteral("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
@@ -1087,8 +1273,59 @@ void TuiApp::render() {
                 out += FG_GRAY + QStringLiteral(" ~") + ESC_RESET + QStringLiteral("\033[K\r\n");
             }
         }
+    } else if (m_mode == Mode::Settings || m_mode == Mode::EditSettingValue) {
+        out += FG_CYAN + ESC_BOLD + QStringLiteral("  ⚙ SETTINGS (j/k move, Enter/Space/h/l change, q/Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        SettingsManager* s = m_app->settings();
+        const QStringList settingItems = {
+            QStringLiteral("Pomodoro Work Duration (min)    : %1 min").arg(s->taskDuration() / 60),
+            QStringLiteral("Pomodoro Break Duration (min)   : %1 min").arg(s->breakDuration() / 60),
+            QStringLiteral("Reminder Before End (sec)       : %1 sec").arg(s->reminderTime()),
+            QStringLiteral("Mute Sound Notifications        : %1").arg(s->muteSounds() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
+            QStringLiteral("GUI Dark Theme                  : %1").arg(s->useDarkTheme() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
+            QStringLiteral("Add New Tasks On Top            : %1").arg(s->newTasksOnTop() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
+            QStringLiteral("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
+            QStringLiteral("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
+            QStringLiteral("Export SQLite Database Backup   : [Press Enter to export .db backup]")
+        };
+        for (int r = 1; r < bodyRows; ++r) {
+            const int idx = r - 1;
+            if (idx < settingItems.size()) {
+                const bool isSel = (idx == m_settingsRow);
+                const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
+                out += (isSel ? (BG_SELECTED + FG_WHITE + ESC_BOLD) : FG_WHITE)
+                    + padRight(prefix + settingItems.at(idx), m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
+            } else {
+                out += QStringLiteral("\033[K\r\n");
+            }
+        }
+    } else if (m_mode == Mode::ListEdit || m_mode == Mode::EditListField) {
+        out += FG_CYAN + ESC_BOLD + QStringLiteral("  ✎ EDIT LIST CONFIGURATION (j/k move, Enter/Space edit, q/Esc cancel):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        const QString prov = m_editingListCfg.value(QStringLiteral("provider")).toString();
+        const QString tokenRaw = m_editingListCfg.value(QStringLiteral("apiToken")).toString();
+        const QString tokenMasked = tokenRaw.isEmpty() ? QStringLiteral("(empty)") : (tokenRaw.left(4) + QStringLiteral("••••••••"));
+        const QStringList editItems = {
+            QStringLiteral("1. List Name                    : %1").arg(m_editingListCfg.value(QStringLiteral("name")).toString()),
+            QStringLiteral("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack)").arg(prov),
+            QStringLiteral("3. Server URL                   : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUrl")).toString()),
+            QStringLiteral("4. Jira Email / Username        : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUser")).toString()),
+            QStringLiteral("5. API Token / Permanent Token  : %1").arg(tokenMasked),
+            QStringLiteral("6. JQL / Search Query           : %1").arg(m_editingListCfg.value(QStringLiteral("jiraJql")).toString()),
+            QStringLiteral("7. Auto-log Pomodoro Worklog    : %1").arg(m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
+            QStringLiteral("8. >>> [ SAVE & ACTIVATE LIST ] <<<")
+        };
+        for (int r = 1; r < bodyRows; ++r) {
+            const int idx = r - 1;
+            if (idx < editItems.size()) {
+                const bool isSel = (idx == m_listEditRow);
+                const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
+                out += (isSel ? (BG_SELECTED + (idx == 7 ? FG_GREEN : FG_WHITE) + ESC_BOLD) : (idx == 7 ? FG_GREEN : FG_WHITE))
+                    + padRight(prefix + editItems.at(idx), m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
+            } else {
+                out += QStringLiteral("\033[K\r\n");
+            }
+        }
     } else if (m_mode == Mode::ListPicker) {
-        out += FG_CYAN + ESC_BOLD + QStringLiteral("  SELECT LIST (j/k to move, Enter to select, Esc to cancel):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        out += FG_CYAN + ESC_BOLD + QStringLiteral("  📋 LISTS (j/k move, Enter select, a:Add new, e:Edit Jira/YouTrack, d:Delete, Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         const int nLists = m_app->listManager()->rowCount();
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
@@ -1267,6 +1504,8 @@ void TuiApp::render() {
         out += FG_CYAN + ESC_BOLD + QStringLiteral("/") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::Command) {
         out += FG_ORANGE + ESC_BOLD + QStringLiteral(":") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+    } else if (m_mode == Mode::EditSettingValue || m_mode == Mode::EditListField) {
+        out += FG_YELLOW + ESC_BOLD + QStringLiteral("Enter value: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::StatusPicker) {
         out += FG_YELLOW + ESC_BOLD
             + QStringLiteral("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")

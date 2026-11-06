@@ -20,6 +20,10 @@ public:
         Command,
         StatusPicker,
         ListPicker,
+        ListEdit,
+        Settings,
+        EditSettingValue,
+        EditListField,
         MarkdownView,
         Help
     };
@@ -44,6 +48,8 @@ private:
     void handleInputLineKey(const QByteArray& seq);
     void handleStatusPickerKey(const QByteArray& seq);
     void handleListPickerKey(const QByteArray& seq);
+    void handleListEditKey(const QByteArray& seq);
+    void handleSettingsKey(const QByteArray& seq);
     void handleMarkdownViewKey(const QByteArray& seq);
     void handleHelpKey(const QByteArray& seq);
     void openTaskMarkdownView();
@@ -75,6 +81,9 @@ private:
     int m_scrollOffset = 0;
     int m_detailsScroll = 0;
     int m_listPickerRow = 0;
+    int m_settingsRow = 0;
+    int m_listEditRow = 0;
+    QVariantMap m_editingListCfg;
     bool m_showPreview = true;
     char m_pendingKey = 0; // for 'g' (gg), 'd' (dd), 'c' (cw)
 
