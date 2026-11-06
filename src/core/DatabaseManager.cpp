@@ -596,13 +596,14 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     QSqlDatabase database = db();
     QSqlQuery check(database);
     check.prepare(QStringLiteral(
-        "SELECT id, duration_seconds FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
+        "SELECT id, duration_seconds, details FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
     ));
     check.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     check.bindValue(QStringLiteral(":jira_key"), nonNullString(issueKey));
     if (check.exec() && check.next()) {
         const qint64 existingId = check.value(0).toLongLong();
         const quint32 existingDur = check.value(1).toUInt();
+        const QString existingDetails = check.value(2).toString();
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
             "UPDATE tasks SET description = :description, done = :done, status = :status, "
@@ -614,7 +615,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":status"), nonNullString(normStatus));
         upd.bindValue(QStringLiteral(":priority"), static_cast<int>(priority));
         upd.bindValue(QStringLiteral(":duration"), durationSeconds > 0 ? durationSeconds : existingDur);
-        upd.bindValue(QStringLiteral(":details"), nonNullString(details));
+        upd.bindValue(QStringLiteral(":details"), !details.trimmed().isEmpty() ? nonNullString(details) : nonNullString(existingDetails));
         upd.bindValue(QStringLiteral(":comments_json"), nonNullString(serializeCommentsList(comments)));
         upd.bindValue(QStringLiteral(":id"), existingId);
         return upd.exec();

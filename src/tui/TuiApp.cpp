@@ -1,7 +1,10 @@
 #include "TuiApp.h"
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QRegularExpression>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -391,13 +394,10 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         return;
     }
 
-    // Edit selected task details: E
+    // Edit selected task details in $EDITOR / nvim / vim: E
     if (seq == "E") {
         if (count > 0) {
-            const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
-            m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::DetailsRole).toString().replace(QLatin1Char('\n'), QStringLiteral(" \\n "));
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditDetails;
+            editTaskDetailsInVim();
         }
         return;
     }
@@ -840,6 +840,69 @@ void TuiApp::openMarkdownFile(const QString& filePath) {
     m_mode = Mode::MarkdownView;
 }
 
+
+void TuiApp::editTaskDetailsInVim() {
+    TaskFilterProxyModel* proxy = currentProxy();
+    if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
+        return;
+    }
+    const QModelIndex idx = proxy->index(m_selectedRow, 0);
+    const QString currentDetails = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
+
+    const QString tmpPath = QStringLiteral("/tmp/gofi-task-details-%1.md").arg(QCoreApplication::applicationPid());
+    {
+        QFile out(tmpPath);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            m_statusMessage = tr("Failed to create temporary Markdown file in /tmp.");
+            return;
+        }
+        out.write(currentDetails.toUtf8());
+        out.close();
+    }
+
+    QString editor = qEnvironmentVariable("VISUAL").trimmed();
+    if (editor.isEmpty()) editor = qEnvironmentVariable("EDITOR").trimmed();
+    if (editor.isEmpty()) {
+        for (const QString& cand : {QStringLiteral("nvim"), QStringLiteral("vim"), QStringLiteral("vi"), QStringLiteral("nano")}) {
+            if (!QStandardPaths::findExecutable(cand).isEmpty()) {
+                editor = cand;
+                break;
+            }
+        }
+    }
+
+    if (editor.isEmpty()) {
+        // Fallback to inline prompt if no terminal editor is installed
+        m_inputBuffer = currentDetails.isEmpty() ? QString() : currentDetails;
+        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_mode = Mode::EditDetails;
+        return;
+    }
+
+    if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
+    disableRawMode();
+
+    const int rc = QProcess::execute(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), editor + QStringLiteral(" \"") + tmpPath + QStringLiteral("\"")});
+
+    enableRawMode();
+    updateTerminalSize();
+    if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
+
+    QFile in(tmpPath);
+    if (rc == 0 && in.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString updatedMd = QString::fromUtf8(in.readAll());
+        in.close();
+        m_app->updateTaskDetails(isClosedTab(), m_selectedRow, updatedMd);
+        if (m_mode == Mode::MarkdownView) {
+            openTaskMarkdownView();
+        }
+        m_statusMessage = tr("Markdown description saved (%1 bytes).").arg(updatedMd.toUtf8().size());
+    } else {
+        m_statusMessage = tr("Markdown edit canceled.");
+    }
+    QFile::remove(tmpPath);
+}
+
 void TuiApp::openTaskMarkdownView() {
     TaskFilterProxyModel* proxy = currentProxy();
     if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
@@ -1028,10 +1091,7 @@ void TuiApp::handleMarkdownViewKey(const QByteArray& seq) {
     }
     if (seq == "E" || seq == "e") {
         if (currentProxy()->rowCount() > 0) {
-            const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
-            m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::DetailsRole).toString().replace(QLatin1Char('\n'), QStringLiteral(" \\n "));
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditDetails;
+            editTaskDetailsInVim();
         }
     }
 }
