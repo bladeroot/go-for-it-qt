@@ -4,9 +4,9 @@ import QtQuick.Layouts
 
 Dialog {
     id: contributeDialog
-    title: qsTr("Contributions and Donations")
+    title: qsTr("Contributions and Support")
     anchors.centerIn: parent
-    width: 400
+    width: 420
     modal: true
     standardButtons: Dialog.Close
 
@@ -23,22 +23,11 @@ Dialog {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            text: qsTr("Submitting code, artwork, translations or documentation is a great way of contributing to the project:")
+            text: qsTr("Submitting code, bug reports, translations or documentation is a great way of contributing to the project:")
         }
 
         Label {
-            text: "<a href=\"https://github.com/JMoerman/Go-For-It\">https://github.com/JMoerman/Go-For-It</a>"
-            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            text: qsTr("If you really like this app, you can buy the author a drink:")
-        }
-
-        Label {
-            text: "<a href=\"https://jmoerman.github.io/donate/\">https://jmoerman.github.io/donate/</a>"
+            text: "<a href=\"https://github.com/bladeroot/go-for-it-qt\">https://github.com/bladeroot/go-for-it-qt</a>"
             onLinkActivated: function(link) { Qt.openUrlExternally(link) }
         }
     }

@@ -6,7 +6,7 @@ Dialog {
     id: aboutDialog
     title: qsTr("About Go for It Qt")
     anchors.centerIn: parent
-    width: 400
+    width: 420
     modal: true
     standardButtons: Dialog.Close
 
@@ -32,7 +32,13 @@ Dialog {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             font.pixelSize: 12
-            text: qsTr("Based on Go-For-It! by Jonathan Moerman & Manuel Kehl\nArtwork: Micah Ilbery\nLicense: GNU GPL v3")
+            text: qsTr("Author (Go for It Qt): Yurii Myronchuk (@bladeroot)\nBased on Go-For-It! by Jonathan Moerman & Manuel Kehl\nArtwork: Micah Ilbery\nLicense: GNU GPL v3")
+        }
+
+        Label {
+            text: "<a href=\"https://github.com/bladeroot/go-for-it-qt\">https://github.com/bladeroot/go-for-it-qt</a>"
+            font.pixelSize: 12
+            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
         }
     }
 }
