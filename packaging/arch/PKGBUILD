@@ -1,4 +1,4 @@
-# Maintainer: Yurii Myronchuk <yurii.myronchuk@gmail.com>
+# Maintainer: Yurii Myronchuk <bladeroot@gmail.com>
 pkgname=go-for-it-qt
 pkgver=1.9.5
 pkgrel=1
