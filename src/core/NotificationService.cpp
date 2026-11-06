@@ -41,6 +41,19 @@ void NotificationService::playSoundFile(const QString& presetOrPath, double volu
     m_player->play();
 }
 
+void NotificationService::notifyTaskEvent(const QString& title, const QString& body) {
+    if (m_settings && !m_settings->notifyOnTaskChanges()) {
+        return;
+    }
+    sendDesktopNotification(title, body);
+    if (m_settings && !m_settings->muteSounds()) {
+        const QString sound = m_settings->reminderSoundFile().isEmpty()
+            ? QStringLiteral("bell.ogg")
+            : m_settings->reminderSoundFile();
+        playSoundFile(sound, m_settings->reminderSoundVolume());
+    }
+}
+
 QVariantList NotificationService::availableSoundPresets() const {
     return {
         QVariantMap{{QStringLiteral("id"), QStringLiteral("singing-bowl.ogg")},   {QStringLiteral("name"), tr("Singing bowl")}},

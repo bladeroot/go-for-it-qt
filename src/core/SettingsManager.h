@@ -40,6 +40,10 @@ class SettingsManager : public QObject {
     Q_PROPERTY(int windowHeight READ windowHeight WRITE setWindowHeight NOTIFY windowGeometryChanged)
     Q_PROPERTY(int windowX READ windowX WRITE setWindowX NOTIFY windowGeometryChanged)
     Q_PROPERTY(int windowY READ windowY WRITE setWindowY NOTIFY windowGeometryChanged)
+    Q_PROPERTY(bool startMinimized READ startMinimized WRITE setStartMinimized NOTIFY startupBehaviorChanged)
+    Q_PROPERTY(bool startInTray READ startInTray WRITE setStartInTray NOTIFY startupBehaviorChanged)
+    Q_PROPERTY(int autoSyncIntervalMinutes READ autoSyncIntervalMinutes WRITE setAutoSyncIntervalMinutes NOTIFY autoSyncChanged)
+    Q_PROPERTY(bool notifyOnTaskChanges READ notifyOnTaskChanges WRITE setNotifyOnTaskChanges NOTIFY soundSettingsChanged)
 
 public:
     enum TimerMode {
@@ -92,6 +96,7 @@ public:
 
     [[nodiscard]] QString language() const;
     void setLanguage(const QString& lang);
+    [[nodiscard]] QString effectiveLanguage() const;
     [[nodiscard]] bool isUkrainianActive() const;
 
     [[nodiscard]] int colorScheme() const;
@@ -158,6 +163,18 @@ public:
 
     Q_INVOKABLE void saveWindowGeometry(int w, int h, int x, int y);
 
+    [[nodiscard]] bool startMinimized() const;
+    void setStartMinimized(bool value);
+
+    [[nodiscard]] bool startInTray() const;
+    void setStartInTray(bool value);
+
+    [[nodiscard]] int autoSyncIntervalMinutes() const;
+    void setAutoSyncIntervalMinutes(int minutes);
+
+    [[nodiscard]] bool notifyOnTaskChanges() const;
+    void setNotifyOnTaskChanges(bool value);
+
     [[nodiscard]] QString lastLoadedListId() const;
     void setLastLoadedListId(const QString& id);
 
@@ -175,6 +192,8 @@ signals:
     void soundSettingsChanged();
     void pluginsChanged();
     void windowGeometryChanged();
+    void startupBehaviorChanged();
+    void autoSyncChanged();
 
 private:
     void rebuildSchedule();

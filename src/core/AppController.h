@@ -12,6 +12,7 @@
 #include "TaskTimer.h"
 #include "UkTranslator.h"
 #include <QObject>
+#include <QTimer>
 
 namespace gofi {
 
@@ -61,6 +62,7 @@ public:
 
     Q_INVOKABLE void selectListById(const QString& listId);
     Q_INVOKABLE void syncCurrentList();
+    Q_INVOKABLE void syncAllRemoteLists();
     Q_INVOKABLE void addNewTask(const QString& simpleText);
     Q_INVOKABLE void toggleTaskDone(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus);
@@ -98,6 +100,7 @@ private slots:
 private:
     void syncActiveTaskToTimer();
     void applyLanguageTranslator();
+    void updateAutoSyncTimer();
 
     SettingsManager m_settings;
     UkTranslator m_ukTranslator;
@@ -111,6 +114,7 @@ private:
     TaskFilterProxyModel m_doneProxy;
     ActivityLog m_activityLog;
     DesktopIntegration m_desktopIntegration;
+    QTimer m_autoSyncTimer;
 
     QString m_currentListId;
     QString m_currentListName;

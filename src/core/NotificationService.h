@@ -17,6 +17,7 @@ public:
     explicit NotificationService(SettingsManager* settings, TaskTimer* timer, QObject* parent = nullptr);
 
     Q_INVOKABLE void playSoundFile(const QString& presetOrPath, double volume = 1.0);
+    Q_INVOKABLE void notifyTaskEvent(const QString& title, const QString& body);
     Q_INVOKABLE QVariantList availableSoundPresets() const;
 
     static QUrl resolveSoundUrl(const QString& presetOrPath);

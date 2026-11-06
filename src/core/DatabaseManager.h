@@ -68,7 +68,9 @@ public:
                                quint8 priority,
                                quint32 durationSeconds,
                                const QString& details = {},
-                               const QVariantList& comments = {});
+                               const QVariantList& comments = {},
+                               bool* outIsNew = nullptr,
+                               QString* outOldStatus = nullptr);
 
     // Activity Log
     qint64 insertActivityLog(const QString& listId,

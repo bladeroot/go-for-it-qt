@@ -51,6 +51,32 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
             }
         }
     });
+    connect(&m_issueTracker, &IssueTrackerService::trackerChangesDetected, this,
+            [this](const QString& listName, const QStringList& newIssues, const QStringList& statusChanges) {
+        QStringList lines;
+        if (!newIssues.isEmpty()) {
+            lines.append(tr("New tasks (%1):").arg(newIssues.size()));
+            for (int i = 0; i < qMin(3, static_cast<int>(newIssues.size())); ++i) {
+                lines.append(QStringLiteral("• ") + newIssues.at(i));
+            }
+        }
+        if (!statusChanges.isEmpty()) {
+            lines.append(tr("Status changed (%1):").arg(statusChanges.size()));
+            for (int i = 0; i < qMin(3, static_cast<int>(statusChanges.size())); ++i) {
+                lines.append(QStringLiteral("• ") + statusChanges.at(i));
+            }
+        }
+        if (!lines.isEmpty()) {
+            m_notifications.notifyTaskEvent(
+                tr("Updates in '%1'").arg(listName),
+                lines.join(QLatin1Char('\n'))
+            );
+        }
+    });
+
+    connect(&m_autoSyncTimer, &QTimer::timeout, this, &AppController::syncAllRemoteLists);
+    connect(&m_settings, &SettingsManager::autoSyncChanged, this, &AppController::updateAutoSyncTimer);
+    updateAutoSyncTimer();
 
     connect(m_taskManager.todoModel(), &TaskStoreModel::countChanged, this, &AppController::onTodoListCountChanged);
     connect(&m_listManager, &ListManagerModel::listRemoved, this, [this](const QString& id) {
@@ -130,10 +156,23 @@ void AppController::syncCurrentList() {
     }
 }
 
+void AppController::syncAllRemoteLists() {
+    if (m_issueTracker.isSyncing()) return;
+    for (int i = 0; i < m_listManager.rowCount(); ++i) {
+        const TodoListEntry entry = m_listManager.entryAt(i);
+        if (entry.provider == QStringLiteral("Jira") || entry.provider == QStringLiteral("YouTrack")) {
+            m_issueTracker.syncListIssues(entry);
+        }
+    }
+}
+
 void AppController::addNewTask(const QString& simpleText) {
     m_taskManager.addNewTask(simpleText, m_settings.newTasksOnTop(), m_taskManager.addCreationDates());
     if (m_activeTodoRow < 0 && m_taskManager.todoModel()->rowCount() > 0) {
         setActiveTodoRow(0);
+    }
+    if (!simpleText.trimmed().isEmpty()) {
+        m_notifications.notifyTaskEvent(tr("New task added"), simpleText.trimmed());
     }
 }
 
@@ -144,8 +183,13 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     if (sourceRow < 0) return;
 
     const QModelIndex idx = store->index(sourceRow, 0);
+    const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
     const bool currentDone = store->data(idx, TaskStoreModel::DoneRole).toBool();
     store->setData(idx, !currentDone, TaskStoreModel::DoneRole);
+    m_notifications.notifyTaskEvent(
+        tr("Task status changed"),
+        QStringLiteral("%1 → %2").arg(desc, !currentDone ? tr("Done") : tr("To-Do"))
+    );
 }
 
 void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus) {
@@ -154,7 +198,16 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
     if (sourceRow < 0) return;
 
+    const QModelIndex idx = store->index(sourceRow, 0);
+    const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
+    const QString oldStatus = store->data(idx, TaskStoreModel::StatusRole).toString();
     store->setTaskStatus(sourceRow, newStatus);
+    if (oldStatus != newStatus) {
+        m_notifications.notifyTaskEvent(
+            tr("Task status changed"),
+            QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
+        );
+    }
 }
 
 void AppController::updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText) {
@@ -398,8 +451,19 @@ void AppController::onTodoListCountChanged() {
 void AppController::applyLanguageTranslator() {
     if (!QCoreApplication::instance()) return;
     QCoreApplication::removeTranslator(&m_ukTranslator);
-    if (m_settings.isUkrainianActive()) {
+    const QString eff = m_settings.effectiveLanguage();
+    if (eff != QStringLiteral("en")) {
+        m_ukTranslator.setLanguageCode(eff);
         QCoreApplication::installTranslator(&m_ukTranslator);
+    }
+}
+
+void AppController::updateAutoSyncTimer() {
+    const int mins = m_settings.autoSyncIntervalMinutes();
+    if (mins > 0) {
+        m_autoSyncTimer.start(mins * 60 * 1000);
+    } else {
+        m_autoSyncTimer.stop();
     }
 }
 

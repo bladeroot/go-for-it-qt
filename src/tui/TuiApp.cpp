@@ -603,6 +603,8 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
                 } else {
                     m_statusMessage = tr("Failed to export backup to: %1").arg(text);
                 }
+            } else if (m_settingsRow == 10) {
+                m_app->settings()->setAutoSyncIntervalMinutes(qBound(0, text.toInt(), 1440));
             }
         } else if (prevMode == Mode::EditListField) {
             m_mode = Mode::ListEdit;
@@ -786,7 +788,7 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
         return;
     }
     if (seq == "j" || seq == "\033[B") {
-        m_settingsRow = qMin(9, m_settingsRow + 1);
+        m_settingsRow = qMin(13, m_settingsRow + 1);
         return;
     }
     if (seq == "k" || seq == "\033[A") {
@@ -798,12 +800,14 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
         if (m_settingsRow == 0) s->setTaskDuration(qMax(60, s->taskDuration() - 60));
         else if (m_settingsRow == 1) s->setBreakDuration(qMax(60, s->breakDuration() - 60));
         else if (m_settingsRow == 2) s->setReminderTime(qMax(0, s->reminderTime() - 10));
+        else if (m_settingsRow == 10) s->setAutoSyncIntervalMinutes(qMax(0, s->autoSyncIntervalMinutes() - 1));
         return;
     }
     if (seq == "l" || seq == "+" || seq == "=" || seq == "\033[C") {
         if (m_settingsRow == 0) s->setTaskDuration(qMin(86400, s->taskDuration() + 60));
         else if (m_settingsRow == 1) s->setBreakDuration(qMin(86400, s->breakDuration() + 60));
         else if (m_settingsRow == 2) s->setReminderTime(qMin(3600, s->reminderTime() + 10));
+        else if (m_settingsRow == 10) s->setAutoSyncIntervalMinutes(qMin(1440, s->autoSyncIntervalMinutes() + 1));
         return;
     }
     if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i") {
@@ -836,10 +840,27 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
             m_inputCursor = static_cast<int>(m_inputBuffer.size());
             m_mode = Mode::EditSettingValue;
         } else if (m_settingsRow == 9) {
-            const QString cur = s->language();
-            if (cur == QStringLiteral("system")) s->setLanguage(QStringLiteral("uk"));
-            else if (cur == QStringLiteral("uk")) s->setLanguage(QStringLiteral("en"));
-            else s->setLanguage(QStringLiteral("system"));
+            static const QStringList langs = {
+                QStringLiteral("system"),
+                QStringLiteral("uk"),
+                QStringLiteral("de"),
+                QStringLiteral("fr"),
+                QStringLiteral("es"),
+                QStringLiteral("it"),
+                QStringLiteral("en")
+            };
+            const int idx = langs.indexOf(s->language());
+            s->setLanguage(langs.at((idx + 1) % langs.size()));
+        } else if (m_settingsRow == 10) {
+            m_inputBuffer = QString::number(s->autoSyncIntervalMinutes());
+            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_mode = Mode::EditSettingValue;
+        } else if (m_settingsRow == 11) {
+            s->setNotifyOnTaskChanges(!s->notifyOnTaskChanges());
+        } else if (m_settingsRow == 12) {
+            s->setStartMinimized(!s->startMinimized());
+        } else if (m_settingsRow == 13) {
+            s->setStartInTray(!s->startInTray());
         }
     }
 }
@@ -1509,7 +1530,11 @@ void TuiApp::render() {
             tr("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? tr("[ON]") : tr("[OFF]")),
             tr("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
             tr("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
-            tr("Language (Enter to cycle)       : [%1] (system / uk / en)").arg(s->language())
+            tr("Language (Enter to cycle)       : [%1] (system/uk/de/fr/es/it/en)").arg(s->language()),
+            tr("Auto-Sync Jira/YouTrack (min)   : %1 min").arg(s->autoSyncIntervalMinutes()),
+            tr("Notify On New/Changed Tasks     : %1").arg(s->notifyOnTaskChanges() ? tr("[ON]") : tr("[OFF]")),
+            tr("GUI Start Minimized             : %1").arg(s->startMinimized() ? tr("[ON]") : tr("[OFF]")),
+            tr("GUI Start In System Tray        : %1").arg(s->startInTray() ? tr("[ON]") : tr("[OFF]"))
         };
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;

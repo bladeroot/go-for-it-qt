@@ -53,6 +53,28 @@ Dialog {
                         }
                     }
 
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("Auto-sync Jira / YouTrack (minutes, 0 = off):"); Layout.fillWidth: true }
+                        SpinBox {
+                            from: 0; to: 1440
+                            value: app.settings.autoSyncIntervalMinutes
+                            onValueModified: app.settings.autoSyncIntervalMinutes = value
+                        }
+                    }
+
+                    CheckBox {
+                        text: qsTr("Start minimized")
+                        checked: app.settings.startMinimized
+                        onToggled: app.settings.startMinimized = checked
+                    }
+
+                    CheckBox {
+                        text: qsTr("Start minimized to system tray")
+                        checked: app.settings.startInTray
+                        onToggled: app.settings.startInTray = checked
+                    }
+
                     MenuSeparator { Layout.fillWidth: true }
                     Label { text: qsTr("Timer"); font.bold: true }
 
@@ -150,6 +172,12 @@ Dialog {
                             value: app.settings.reminderTime
                             onValueModified: app.settings.reminderTime = value
                         }
+                    }
+
+                    CheckBox {
+                        text: qsTr("Notify (sound & popup) on new tasks and status changes")
+                        checked: app.settings.notifyOnTaskChanges
+                        onToggled: app.settings.notifyOnTaskChanges = checked
                     }
 
                     MenuSeparator { Layout.fillWidth: true }
@@ -279,14 +307,24 @@ Dialog {
                         model: [
                             { id: "system", label: qsTr("System (Auto)") },
                             { id: "uk", label: "Українська (Ukrainian)" },
+                            { id: "de", label: "Deutsch (German)" },
+                            { id: "fr", label: "Français (French)" },
+                            { id: "es", label: "Español (Spanish)" },
+                            { id: "it", label: "Italiano (Italian)" },
                             { id: "en", label: "English" }
                         ]
                         textRole: "label"
                         valueRole: "id"
                         Component.onCompleted: {
-                            if (app.settings.language === "uk") currentIndex = 1
-                            else if (app.settings.language === "en") currentIndex = 2
-                            else currentIndex = 0
+                            const cur = app.settings.language
+                            let found = 0
+                            for (let i = 0; i < model.length; ++i) {
+                                if (model[i].id === cur) {
+                                    found = i
+                                    break
+                                }
+                            }
+                            currentIndex = found
                         }
                         onActivated: function(idx) {
                             app.settings.language = model[idx].id

@@ -10,7 +10,7 @@ ApplicationWindow {
     height: app.settings.windowHeight
     minimumWidth: 320
     minimumHeight: 420
-    visible: true
+    visible: !app.settings.startInTray
     title: app.showingOverview ? qsTr("Go for It Qt — Lists") : (app.currentListName + " — Go for It Qt")
 
     property int currentActivityTab: 0 // 0: To-Do, 1: Timer, 2: Done
@@ -38,6 +38,11 @@ ApplicationWindow {
         if (app.settings.windowX >= 0 && app.settings.windowY >= 0) {
             rootWindow.x = app.settings.windowX
             rootWindow.y = app.settings.windowY
+        }
+        if (app.settings.startInTray) {
+            rootWindow.hide()
+        } else if (app.settings.startMinimized) {
+            rootWindow.showMinimized()
         }
         if (typeof showAboutOnStart !== "undefined" && showAboutOnStart) {
             aboutDialog.open()

@@ -650,16 +650,31 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
 
         const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
         DatabaseManager& db = DatabaseManager::instance();
+        QStringList newIssues;
+        QStringList statusChanges;
         for (const RemoteIssueItem& item : items) {
             const QString localStatus = mapRemoteStatusToLocal(
                 item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
             );
-            db.upsertRemoteIssueTask(entry.id, item.key, item.description, localStatus, item.priority, item.durationSeconds, item.details, item.comments);
+            bool isNew = false;
+            QString oldStatus;
+            db.upsertRemoteIssueTask(
+                entry.id, item.key, item.description, localStatus, item.priority,
+                item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
+            );
+            if (isNew) {
+                newIssues.append(item.description);
+            } else if (!oldStatus.isEmpty() && oldStatus != localStatus) {
+                statusChanges.append(QStringLiteral("%1: %2 → %3").arg(item.key, oldStatus, localStatus));
+            }
         }
 
         setSyncing(false);
         setStatusMessage(tr("Synced %1 issues from Jira.").arg(items.size()));
         emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
+        if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
+            emit trackerChangesDetected(entry.name, newIssues, statusChanges);
+        }
     });
 }
 
@@ -705,16 +720,31 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
 
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(reply->readAll());
         DatabaseManager& db = DatabaseManager::instance();
+        QStringList newIssues;
+        QStringList statusChanges;
         for (const RemoteIssueItem& item : items) {
             const QString localStatus = mapRemoteStatusToLocal(
                 item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
             );
-            db.upsertRemoteIssueTask(entry.id, item.key, item.description, localStatus, item.priority, item.durationSeconds, item.details, item.comments);
+            bool isNew = false;
+            QString oldStatus;
+            db.upsertRemoteIssueTask(
+                entry.id, item.key, item.description, localStatus, item.priority,
+                item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
+            );
+            if (isNew) {
+                newIssues.append(item.description);
+            } else if (!oldStatus.isEmpty() && oldStatus != localStatus) {
+                statusChanges.append(QStringLiteral("%1: %2 → %3").arg(item.key, oldStatus, localStatus));
+            }
         }
 
         setSyncing(false);
         setStatusMessage(tr("Synced %1 issues from YouTrack.").arg(items.size()));
         emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
+        if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
+            emit trackerChangesDetected(entry.name, newIssues, statusChanges);
+        }
     });
 }
 

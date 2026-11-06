@@ -74,6 +74,7 @@ signals:
     void syncingChanged();
     void statusMessageChanged();
     void listIssuesSynced(const QString& listId, int count);
+    void trackerChangesDetected(const QString& listName, const QStringList& newIssues, const QStringList& statusChanges);
     void syncFailed(const QString& listId, const QString& error);
     void worklogPosted(const QString& issueKey, quint32 loggedSeconds);
     void remoteStatusesLoaded(const QVariantList& statuses);

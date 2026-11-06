@@ -11,6 +11,9 @@ class UkTranslator : public QTranslator {
 public:
     explicit UkTranslator(QObject* parent = nullptr);
 
+    void setLanguageCode(const QString& code);
+    [[nodiscard]] QString languageCode() const { return m_langCode; }
+
     [[nodiscard]] bool isEmpty() const override { return false; }
     [[nodiscard]] QString translate(const char* context,
                                     const char* sourceText,
@@ -18,7 +21,8 @@ public:
                                     int n = -1) const override;
 
 private:
-    QHash<QString, QString> m_dict;
+    QString m_langCode = QStringLiteral("uk");
+    QHash<QString, QHash<QString, QString>> m_dicts;
 };
 
 } // namespace gofi

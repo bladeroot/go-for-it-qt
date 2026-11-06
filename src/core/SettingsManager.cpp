@@ -138,16 +138,26 @@ void SettingsManager::setLanguage(const QString& lang) {
     emit languageChanged();
 }
 
+QString SettingsManager::effectiveLanguage() const {
+    const QString lang = language().trimmed().toLower();
+    for (const QString& code : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
+                                QStringLiteral("es"), QStringLiteral("it"), QStringLiteral("en")}) {
+        if (lang == code || lang.startsWith(code + QLatin1Char('_')) || lang.startsWith(code + QLatin1Char('-'))) {
+            return code;
+        }
+    }
+    const QString sysName = QLocale::system().name().toLower();
+    for (const QString& code : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
+                                QStringLiteral("es"), QStringLiteral("it")}) {
+        if (sysName == code || sysName.startsWith(code + QLatin1Char('_')) || sysName.startsWith(code + QLatin1Char('-'))) {
+            return code;
+        }
+    }
+    return QStringLiteral("en");
+}
+
 bool SettingsManager::isUkrainianActive() const {
-    const QString lang = language();
-    if (lang == QStringLiteral("uk") || lang.startsWith(QStringLiteral("uk_"))) {
-        return true;
-    }
-    if (lang == QStringLiteral("en") || lang.startsWith(QStringLiteral("en_"))) {
-        return false;
-    }
-    return QLocale::system().language() == QLocale::Ukrainian
-        || QLocale::system().name().startsWith(QStringLiteral("uk"), Qt::CaseInsensitive);
+    return effectiveLanguage() == QStringLiteral("uk");
 }
 
 int SettingsManager::colorScheme() const {
@@ -356,6 +366,54 @@ void SettingsManager::saveWindowGeometry(int w, int h, int x, int y) {
         DatabaseManager::instance().setSetting(QStringLiteral("window_y"), QString::number(y));
     }
     m_settings.sync();
+}
+
+bool SettingsManager::startMinimized() const {
+    return m_settings.value(QStringLiteral("Behavior/start_minimized"), false).toBool();
+}
+
+void SettingsManager::setStartMinimized(bool value) {
+    if (startMinimized() == value) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("start_minimized"), value ? QStringLiteral("1") : QStringLiteral("0"));
+    m_settings.setValue(QStringLiteral("Behavior/start_minimized"), value);
+    emit startupBehaviorChanged();
+}
+
+bool SettingsManager::startInTray() const {
+    return m_settings.value(QStringLiteral("Behavior/start_in_tray"), false).toBool();
+}
+
+void SettingsManager::setStartInTray(bool value) {
+    if (startInTray() == value) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("start_in_tray"), value ? QStringLiteral("1") : QStringLiteral("0"));
+    m_settings.setValue(QStringLiteral("Behavior/start_in_tray"), value);
+    if (value && !trayIndicatorEnabled()) {
+        setTrayIndicatorEnabled(true);
+    }
+    emit startupBehaviorChanged();
+}
+
+int SettingsManager::autoSyncIntervalMinutes() const {
+    return qBound(0, m_settings.value(QStringLiteral("Behavior/auto_sync_interval_minutes"), 10).toInt(), 1440);
+}
+
+void SettingsManager::setAutoSyncIntervalMinutes(int minutes) {
+    const int clamped = qBound(0, minutes, 1440);
+    if (autoSyncIntervalMinutes() == clamped) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("auto_sync_interval_minutes"), QString::number(clamped));
+    m_settings.setValue(QStringLiteral("Behavior/auto_sync_interval_minutes"), clamped);
+    emit autoSyncChanged();
+}
+
+bool SettingsManager::notifyOnTaskChanges() const {
+    return m_settings.value(QStringLiteral("Notifications/notify_on_task_changes"), true).toBool();
+}
+
+void SettingsManager::setNotifyOnTaskChanges(bool value) {
+    if (notifyOnTaskChanges() == value) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("notify_on_task_changes"), value ? QStringLiteral("1") : QStringLiteral("0"));
+    m_settings.setValue(QStringLiteral("Notifications/notify_on_task_changes"), value);
+    emit soundSettingsChanged();
 }
 
 QString SettingsManager::lastLoadedListId() const {

@@ -587,8 +587,12 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
                                             quint8 priority,
                                             quint32 durationSeconds,
                                             const QString& details,
-                                            const QVariantList& comments)
+                                            const QVariantList& comments,
+                                            bool* outIsNew,
+                                            QString* outOldStatus)
 {
+    if (outIsNew) *outIsNew = false;
+    if (outOldStatus) outOldStatus->clear();
     if (listId.isEmpty() || issueKey.isEmpty()) return false;
     const QString normStatus = localStatus.isEmpty() ? QStringLiteral("todo") : localStatus;
     const bool isDone = TxtTask::isClosedStatus(normStatus);
@@ -596,7 +600,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     QSqlDatabase database = db();
     QSqlQuery check(database);
     check.prepare(QStringLiteral(
-        "SELECT id, duration_seconds, details FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
+        "SELECT id, duration_seconds, details, status FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
     ));
     check.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     check.bindValue(QStringLiteral(":jira_key"), nonNullString(issueKey));
@@ -604,6 +608,8 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         const qint64 existingId = check.value(0).toLongLong();
         const quint32 existingDur = check.value(1).toUInt();
         const QString existingDetails = check.value(2).toString();
+        const QString prevStatus = check.value(3).toString();
+        if (outOldStatus) *outOldStatus = prevStatus;
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
             "UPDATE tasks SET description = :description, done = :done, status = :status, "
@@ -620,6 +626,8 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":id"), existingId);
         return upd.exec();
     }
+
+    if (outIsNew) *outIsNew = true;
 
     QSqlQuery maxOrderQ(database);
     maxOrderQ.prepare(QStringLiteral("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks WHERE list_id = :list_id AND done = :done"));
