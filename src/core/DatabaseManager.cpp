@@ -408,20 +408,35 @@ bool DatabaseManager::updateListsOrder(const QVector<TodoListEntry>& entries) {
     return database.commit();
 }
 
-QVector<TxtTask> DatabaseManager::loadTasks(const QString& listId, bool done) const {
+QVector<TxtTask> DatabaseManager::loadTasks(const QStringList& listIds, bool done) const {
     QVector<TxtTask> result;
-    if (listId.isEmpty()) {
-        return result;
+    const bool matchAll = listIds.isEmpty() || listIds.contains(QStringLiteral("__ALL__")) || listIds.contains(QStringLiteral("*"));
+
+    QString sql = QStringLiteral(
+        "SELECT t.id, t.description, t.done, t.status, t.priority, t.creation_date, t.completion_date, "
+        "t.duration_seconds, t.timer_seconds, t.jira_key, t.jira_synced_seconds, t.details, t.comments_json, t.is_viewed, "
+        "t.list_id, COALESCE(l.name, ''), COALESCE(l.provider, 'SQLite') "
+        "FROM tasks t LEFT JOIN lists l ON t.list_id = l.id "
+        "WHERE t.done = :done "
+    );
+
+    if (!matchAll) {
+        QStringList placeholders;
+        for (int i = 0; i < listIds.size(); ++i) {
+            placeholders.append(QStringLiteral(":lid_%1").arg(i));
+        }
+        sql += QStringLiteral("AND t.list_id IN (%1) ").arg(placeholders.join(QLatin1Char(',')));
     }
+    sql += QStringLiteral("ORDER BY t.sort_order ASC, t.id ASC");
+
     QSqlQuery q(db());
-    q.prepare(QStringLiteral(
-        "SELECT id, description, done, status, priority, creation_date, completion_date, "
-        "duration_seconds, timer_seconds, jira_key, jira_synced_seconds, details, comments_json, is_viewed "
-        "FROM tasks WHERE list_id = :list_id AND done = :done "
-        "ORDER BY sort_order ASC, id ASC"
-    ));
-    q.bindValue(QStringLiteral(":list_id"), listId);
+    q.prepare(sql);
     q.bindValue(QStringLiteral(":done"), done ? 1 : 0);
+    if (!matchAll) {
+        for (int i = 0; i < listIds.size(); ++i) {
+            q.bindValue(QStringLiteral(":lid_%1").arg(i), listIds.at(i));
+        }
+    }
     if (!q.exec()) {
         return result;
     }
@@ -440,23 +455,49 @@ QVector<TxtTask> DatabaseManager::loadTasks(const QString& listId, bool done) co
         const QString details = q.value(11).toString();
         const QVariantList comments = deserializeCommentsList(q.value(12).toString());
         const bool isViewed = q.value(13).isNull() ? true : (q.value(13).toInt() != 0);
+        const QString lId = q.value(14).toString();
+        const QString lName = q.value(15).toString();
+        const QString lProvider = q.value(16).toString();
 
         result.append(TxtTask::fromDatabase(
-            id, desc, isDone, status, prio, cDate, compDate, duration, timerVal, jiraKey, jiraSynced, details, comments, isViewed
+            id, desc, isDone, status, prio, cDate, compDate, duration, timerVal,
+            jiraKey, jiraSynced, details, comments, isViewed, lId, lName, lProvider
         ));
     }
     return result;
 }
 
-int DatabaseManager::countAllTasksInList(const QString& listId) const {
-    if (listId.isEmpty()) return 0;
+QVector<TxtTask> DatabaseManager::loadTasks(const QString& listId, bool done) const {
+    if (listId.isEmpty()) return {};
+    return loadTasks(QStringList{listId}, done);
+}
+
+int DatabaseManager::countAllTasksInLists(const QStringList& listIds) const {
+    const bool matchAll = listIds.isEmpty() || listIds.contains(QStringLiteral("__ALL__")) || listIds.contains(QStringLiteral("*"));
+    QString sql = QStringLiteral("SELECT COUNT(*) FROM tasks ");
+    if (!matchAll) {
+        QStringList placeholders;
+        for (int i = 0; i < listIds.size(); ++i) {
+            placeholders.append(QStringLiteral(":lid_%1").arg(i));
+        }
+        sql += QStringLiteral("WHERE list_id IN (%1)").arg(placeholders.join(QLatin1Char(',')));
+    }
     QSqlQuery q(db());
-    q.prepare(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE list_id = :list_id"));
-    q.bindValue(QStringLiteral(":list_id"), listId);
+    q.prepare(sql);
+    if (!matchAll) {
+        for (int i = 0; i < listIds.size(); ++i) {
+            q.bindValue(QStringLiteral(":lid_%1").arg(i), listIds.at(i));
+        }
+    }
     if (q.exec() && q.next()) {
         return q.value(0).toInt();
     }
     return 0;
+}
+
+int DatabaseManager::countAllTasksInList(const QString& listId) const {
+    if (listId.isEmpty()) return 0;
+    return countAllTasksInLists(QStringList{listId});
 }
 
 qint64 DatabaseManager::insertTask(const QString& listId, const TxtTask& task, int sortOrder) {

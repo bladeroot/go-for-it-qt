@@ -59,6 +59,12 @@ QVariant TaskStoreModel::data(const QModelIndex& index, int role) const {
         return t.comments();
     case IsViewedRole:
         return t.isViewed();
+    case ListIdRole:
+        return t.listId();
+    case ListNameRole:
+        return t.listName();
+    case ListProviderRole:
+        return t.listProvider();
     default:
         return {};
     }
@@ -156,7 +162,10 @@ QHash<int, QByteArray> TaskStoreModel::roleNames() const {
         {JiraKeyRole, "jiraKey"},
         {DetailsRole, "details"},
         {CommentsRole, "comments"},
-        {IsViewedRole, "isViewed"}
+        {IsViewedRole, "isViewed"},
+        {ListIdRole, "listId"},
+        {ListNameRole, "listName"},
+        {ListProviderRole, "listProvider"}
     };
 }
 

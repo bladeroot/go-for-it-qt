@@ -452,7 +452,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Sync current list (Jira / YouTrack / SQLite): r or Ctrl+R
     if (seq == "r" || seq == "\x12") {
-        m_statusMessage = tr("Syncing list '%1'...").arg(m_app->currentListName());
+        m_statusMessage = tr("Syncing list '%1'...").arg(m_app->currentFilterTitle());
         m_app->syncCurrentList();
         return;
     }
@@ -723,6 +723,12 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
         m_statusMessage = tr("Removed list '%1'.").arg(entry.name);
         return;
     }
+    if (seq == "*" || seq == "A") {
+        m_mode = Mode::Normal;
+        m_app->showAllLists();
+        m_statusMessage = tr("Switched to All Lists (Unified view).");
+        return;
+    }
     if (seq == "\r" || seq == "\n") {
         m_mode = Mode::Normal;
         if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
@@ -748,10 +754,12 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
     }
     if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i" || seq == "h" || seq == "l") {
         if (m_listEditRow == 1) {
-            // Cycle provider: SQLite -> Jira -> YouTrack
+            // Cycle provider: SQLite -> Jira -> YouTrack -> GitHub -> GitLab
             const QString cur = m_editingListCfg.value(QStringLiteral("provider")).toString();
             if (cur == QStringLiteral("SQLite")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
             else if (cur == QStringLiteral("Jira")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("YouTrack");
+            else if (cur == QStringLiteral("YouTrack")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("GitHub");
+            else if (cur == QStringLiteral("GitHub")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("GitLab");
             else m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("SQLite");
             return;
         }
@@ -1216,7 +1224,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         return;
     }
     if (cmdLine == QStringLiteral("w") || cmdLine == QStringLiteral("sync") || cmdLine == QStringLiteral("e")) {
-        m_statusMessage = tr("Syncing '%1'...").arg(m_app->currentListName());
+        m_statusMessage = tr("Syncing '%1'...").arg(m_app->currentFilterTitle());
         m_app->syncCurrentList();
         return;
     }
@@ -1390,7 +1398,7 @@ void TuiApp::render() {
     // Row 1: Top Header Bar (App + Active List + Sync state)
     // -------------------------------------------------------------------------
     const QString listBadge = QStringLiteral(" 🍅 Go for It Qt [VIM TUI] │ 📋 %1 (%2) ")
-        .arg(m_app->currentListName(), m_app->currentListProvider());
+        .arg(m_app->currentFilterTitle(), m_app->currentListProvider());
     const QString syncInfo = m_app->issueTracker()->isSyncing()
         ? tr("⟳ Syncing...")
         : tr("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
@@ -1572,7 +1580,7 @@ void TuiApp::render() {
         const QString tokenMasked = tokenRaw.isEmpty() ? tr("(empty)") : (tokenRaw.left(4) + QStringLiteral("••••••••"));
         const QStringList editItems = {
             tr("1. List Name                    : %1").arg(m_editingListCfg.value(QStringLiteral("name")).toString()),
-            tr("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack)").arg(prov),
+            tr("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack / GitHub / GitLab)").arg(prov),
             tr("3. Server URL                   : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUrl")).toString()),
             tr("4. Jira Email / Username        : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUser")).toString()),
             tr("5. API Token / Permanent Token  : %1").arg(tokenMasked),
@@ -1592,7 +1600,7 @@ void TuiApp::render() {
             }
         }
     } else if (m_mode == Mode::ListPicker) {
-        out += FG_CYAN + ESC_BOLD + tr("  📋 LISTS (j/k move, Enter select, a:Add new, e:Edit Jira/YouTrack, d:Delete, Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        out += FG_CYAN + ESC_BOLD + tr("  📋 LISTS (j/k move, Enter select, *:All Lists, a:Add new, e:Edit, d:Delete, Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         const int nLists = m_app->listManager()->rowCount();
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
@@ -1765,7 +1773,7 @@ void TuiApp::render() {
         .arg(totalTasks > 0 ? (m_selectedRow + 1) : 0)
         .arg(totalTasks);
     out += modeTag + BG_HEADER + FG_WHITE
-        + padRight(QStringLiteral(" %1 │ %2").arg(m_app->currentListName(), posTag), m_cols - 9)
+        + padRight(QStringLiteral(" %1 │ %2").arg(m_app->currentFilterTitle(), posTag), m_cols - 9)
         + ESC_RESET + QStringLiteral("\033[K\r\n");
 
     // -------------------------------------------------------------------------

@@ -18,6 +18,8 @@ ItemDelegate {
     required property string details
     required property var comments
     required property bool isViewed
+    required property string listName
+    required property string listProvider
 
     property int totalCount: 0
     property bool isDoneList: false
@@ -120,6 +122,30 @@ ItemDelegate {
             text: rowDelegate.priorityString
             font.bold: true
             color: palette.highlight
+        }
+
+        Rectangle {
+            visible: !rowDelegate.editing && app.isMultiListView && rowDelegate.listName !== ""
+            implicitHeight: 18
+            implicitWidth: listBadgeLabel.implicitWidth + 8
+            radius: 3
+            color: {
+                if (rowDelegate.listProvider === "GitHub") return "#24292f"
+                if (rowDelegate.listProvider === "GitLab") return "#e24329"
+                if (rowDelegate.listProvider === "Jira") return "#0052cc"
+                if (rowDelegate.listProvider === "YouTrack") return "#e02f5c"
+                return "#5c6b73"
+            }
+            opacity: 0.85
+
+            Label {
+                id: listBadgeLabel
+                anchors.centerIn: parent
+                text: rowDelegate.listName
+                font.pixelSize: 9
+                font.bold: true
+                color: "#ffffff"
+            }
         }
 
         Label {

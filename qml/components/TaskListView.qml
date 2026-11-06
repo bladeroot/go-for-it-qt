@@ -19,11 +19,11 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Sync status / error bar for Jira & YouTrack lists
+        // Sync status / error bar for remote lists
         Rectangle {
             id: syncStatusBanner
             Layout.fillWidth: true
-            visible: (app.currentListProvider === "Jira" || app.currentListProvider === "YouTrack")
+            visible: app.isCurrentListRemote
                      && (app.issueTracker.syncing || app.issueTracker.lastStatusMessage !== "")
             implicitHeight: statusRow.implicitHeight + 10
             color: app.issueTracker.lastStatusMessage.indexOf("error") >= 0
@@ -42,7 +42,7 @@ Item {
                     wrapMode: Text.WordWrap
                     font.pixelSize: 11
                     text: app.issueTracker.syncing
-                        ? qsTr("Syncing with %1...").arg(app.currentListProvider)
+                        ? qsTr("Syncing remote issues (%1)...").arg(app.currentFilterTitle)
                         : app.issueTracker.lastStatusMessage
                 }
 

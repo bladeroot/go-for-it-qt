@@ -29,8 +29,19 @@ void TaskManager::setActiveList(const QString& listId,
                                 bool addCreationDates)
 {
     m_listId = listId;
+    m_listIds = QStringList{listId};
     m_addCreationDates = addCreationDates;
     loadFromDatabase(addDefaultTodosIfNew);
+}
+
+void TaskManager::setActiveLists(const QStringList& listIds,
+                                 const QString& primaryListId,
+                                 bool addCreationDates)
+{
+    m_listIds = listIds;
+    m_listId = primaryListId.isEmpty() ? (listIds.isEmpty() ? QString() : listIds.first()) : primaryListId;
+    m_addCreationDates = addCreationDates;
+    loadFromDatabase(false);
 }
 
 void TaskManager::addNewTask(const QString& simpleText, bool onTop, bool addCreationDate) {
@@ -120,14 +131,14 @@ void TaskManager::onDoneTasksReordered() {
 }
 
 void TaskManager::loadFromDatabase(bool addDefaultsIfEmpty) {
-    if (m_listId.isEmpty()) {
+    if (m_listIds.isEmpty() && m_listId.isEmpty()) {
         m_todoStore.clear();
         m_doneStore.clear();
         return;
     }
 
     DatabaseManager& db = DatabaseManager::instance();
-    if (addDefaultsIfEmpty && db.countAllTasksInList(m_listId) == 0) {
+    if (m_listIds.size() == 1 && !m_listId.isEmpty() && addDefaultsIfEmpty && db.countAllTasksInList(m_listId) == 0) {
         const QStringList defaults = {
             QStringLiteral("Choose a task from the list or add a new one @GoForIt"),
             QStringLiteral("Switch to the Timer tab and start working +Productivity duration:25m"),
@@ -139,8 +150,9 @@ void TaskManager::loadFromDatabase(bool addDefaultsIfEmpty) {
         }
     }
 
-    m_todoStore.setTasks(db.loadTasks(m_listId, false));
-    m_doneStore.setTasks(db.loadTasks(m_listId, true));
+    const QStringList queryIds = m_listIds.isEmpty() ? QStringList{m_listId} : m_listIds;
+    m_todoStore.setTasks(db.loadTasks(queryIds, false));
+    m_doneStore.setTasks(db.loadTasks(queryIds, true));
 }
 
 } // namespace gofi

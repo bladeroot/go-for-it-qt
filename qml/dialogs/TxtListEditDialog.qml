@@ -19,6 +19,8 @@ Dialog {
     readonly property string selectedProvider: {
         if (providerCombo.currentIndex === 1) return "Jira"
         if (providerCombo.currentIndex === 2) return "YouTrack"
+        if (providerCombo.currentIndex === 3) return "GitHub"
+        if (providerCombo.currentIndex === 4) return "GitLab"
         return "SQLite"
     }
 
@@ -100,6 +102,8 @@ Dialog {
         const cfg = app.listManager.getListConfig(listId)
         if (cfg.provider === "Jira") providerCombo.currentIndex = 1
         else if (cfg.provider === "YouTrack") providerCombo.currentIndex = 2
+        else if (cfg.provider === "GitHub") providerCombo.currentIndex = 3
+        else if (cfg.provider === "GitLab") providerCombo.currentIndex = 4
         else providerCombo.currentIndex = 0
 
         nameField.text = cfg.name || ""
@@ -150,7 +154,7 @@ Dialog {
             TabButton { text: qsTr("General & Sync") }
             TabButton {
                 text: qsTr("Statuses")
-                enabled: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "YouTrack"
+                enabled: listEditDialog.selectedProvider !== "SQLite"
             }
             TabButton { text: qsTr("Timer") }
         }
@@ -174,7 +178,9 @@ Dialog {
                         model: [
                             qsTr("Local List (SQLite)"),
                             qsTr("Jira (Cloud / Data Center)"),
-                            qsTr("JetBrains YouTrack")
+                            qsTr("JetBrains YouTrack"),
+                            qsTr("GitHub (Issues & Pull Requests)"),
+                            qsTr("GitLab (Issues & Merge Requests)")
                         ]
                     }
 
@@ -188,7 +194,7 @@ Dialog {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 6
-                        visible: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "YouTrack"
+                        visible: listEditDialog.selectedProvider !== "SQLite"
 
                         MenuSeparator { Layout.fillWidth: true }
                         Label {
@@ -196,13 +202,22 @@ Dialog {
                             font.bold: true
                         }
 
-                        Label { text: qsTr("Server URL:") }
+                        Label {
+                            text: listEditDialog.selectedProvider === "GitHub"
+                                ? qsTr("Server URL (leave empty for https://api.github.com):")
+                                : (listEditDialog.selectedProvider === "GitLab"
+                                    ? qsTr("Server URL (leave empty for https://gitlab.com):")
+                                    : qsTr("Server URL:"))
+                        }
                         TextField {
                             id: jiraUrlField
                             Layout.fillWidth: true
-                            placeholderText: listEditDialog.selectedProvider === "Jira"
-                                ? "https://your-domain.atlassian.net"
-                                : "https://youtrack.example.com"
+                            placeholderText: {
+                                if (listEditDialog.selectedProvider === "GitHub") return "https://api.github.com"
+                                if (listEditDialog.selectedProvider === "GitLab") return "https://gitlab.com"
+                                if (listEditDialog.selectedProvider === "Jira") return "https://your-domain.atlassian.net"
+                                return "https://youtrack.example.com"
+                            }
                         }
 
                         Label {
@@ -217,9 +232,12 @@ Dialog {
                         }
 
                         Label {
-                            text: listEditDialog.selectedProvider === "Jira"
-                                ? qsTr("API Token / Personal Access Token:")
-                                : qsTr("Permanent Token (perm:...):")
+                            text: {
+                                if (listEditDialog.selectedProvider === "GitHub") return qsTr("Personal Access Token (optional for public repos):")
+                                if (listEditDialog.selectedProvider === "GitLab") return qsTr("Personal Access Token (glpat-...):")
+                                if (listEditDialog.selectedProvider === "Jira") return qsTr("API Token / Personal Access Token:")
+                                return qsTr("Permanent Token (perm:...):")
+                            }
                         }
                         TextField {
                             id: apiTokenField
@@ -229,16 +247,22 @@ Dialog {
                         }
 
                         Label {
-                            text: listEditDialog.selectedProvider === "Jira"
-                                ? qsTr("JQL Filter (optional):")
-                                : qsTr("YouTrack Search Query (optional):")
+                            text: {
+                                if (listEditDialog.selectedProvider === "GitHub") return qsTr("Search Query or repo (e.g. owner/repo, default: is:open involves:@me):")
+                                if (listEditDialog.selectedProvider === "GitLab") return qsTr("Project Path or ID (e.g. group/project, or empty for all):")
+                                if (listEditDialog.selectedProvider === "Jira") return qsTr("JQL Filter (optional):")
+                                return qsTr("YouTrack Search Query (optional):")
+                            }
                         }
                         TextField {
                             id: jiraJqlField
                             Layout.fillWidth: true
-                            placeholderText: listEditDialog.selectedProvider === "Jira"
-                                ? "assignee = currentUser() ORDER BY updated DESC"
-                                : "for: me sort by: updated desc"
+                            placeholderText: {
+                                if (listEditDialog.selectedProvider === "GitHub") return "owner/repo is:open"
+                                if (listEditDialog.selectedProvider === "GitLab") return "group/project"
+                                if (listEditDialog.selectedProvider === "Jira") return "assignee = currentUser() ORDER BY updated DESC"
+                                return "for: me sort by: updated desc"
+                            }
                         }
 
                         CheckBox {

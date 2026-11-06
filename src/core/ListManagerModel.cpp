@@ -178,6 +178,11 @@ QString ListManagerModel::saveListConfig(const QVariantMap& config, const QStrin
     entry.reminderTime = config.value(QStringLiteral("reminderTime"), -1).toInt();
     entry.customSchedule.fromVariantList(config.value(QStringLiteral("customSchedule")).toList());
     entry.jiraUrl = config.value(QStringLiteral("jiraUrl")).toString().trimmed();
+    if (entry.provider == QStringLiteral("GitHub") && entry.jiraUrl.isEmpty()) {
+        entry.jiraUrl = QStringLiteral("https://api.github.com");
+    } else if (entry.provider == QStringLiteral("GitLab") && entry.jiraUrl.isEmpty()) {
+        entry.jiraUrl = QStringLiteral("https://gitlab.com");
+    }
     entry.jiraUser = config.value(QStringLiteral("jiraUser")).toString().trimmed();
     entry.jiraJql = config.value(QStringLiteral("jiraJql")).toString().trimmed();
     entry.apiToken = config.value(QStringLiteral("apiToken")).toString().trimmed();

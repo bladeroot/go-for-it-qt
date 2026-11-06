@@ -179,9 +179,146 @@ private slots:
         QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("On Hold")), QStringLiteral("paused"));
         QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Resolved")), QStringLiteral("done"));
         QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Won't Fix")), QStringLiteral("canceled"));
+        QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("merged")), QStringLiteral("done"));
+        QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("draft")), QStringLiteral("paused"));
 
         QVariantMap customMap{{QStringLiteral("Custom Review"), QStringLiteral("paused")}};
         QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Custom Review"), {}, customMap), QStringLiteral("paused"));
+    }
+
+    void testGitHubIssuesAndPullRequestsParser() {
+        const QByteArray ghJson = QByteArray(
+            "{"
+            "  \"total_count\": 2,"
+            "  \"items\": ["
+            "    {"
+            "      \"number\": 42,"
+            "      \"title\": \"Fix timer crash on startup\","
+            "      \"body\": \"Detailed markdown issue body\","
+            "      \"state\": \"open\","
+            "      \"draft\": false,"
+            "      \"labels\": [{\"name\": \"bug\"}, {\"name\": \"urgent\"}],"
+            "      \"repository_url\": \"https://api.github.com/repos/bladeroot/go-for-it-qt\""
+            "    },"
+            "    {"
+            "      \"number\": 99,"
+            "      \"title\": \"Add GitHub and GitLab integrations\","
+            "      \"body\": \"PR description with markdown\","
+            "      \"state\": \"open\","
+            "      \"draft\": true,"
+            "      \"pull_request\": {\"url\": \"https://api.github.com/repos/bladeroot/go-for-it-qt/pulls/99\"},"
+            "      \"labels\": [{\"name\": \"feature\"}],"
+            "      \"repository_url\": \"https://api.github.com/repos/bladeroot/go-for-it-qt\""
+            "    }"
+            "  ]"
+            "}"
+        );
+
+        const QVector<RemoteIssueItem> items = IssueTrackerService::parseGitHubIssuesJson(ghJson);
+        QCOMPARE(items.size(), 2);
+
+        // Item 1: Issue
+        QCOMPARE(items[0].key, QStringLiteral("GH#42"));
+        QVERIFY(items[0].description.contains(QStringLiteral("GH#42 Fix timer crash on startup")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+go-for-it-qt")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+bug")));
+        QVERIFY(items[0].description.contains(QStringLiteral("@open")));
+        QCOMPARE(items[0].details, QStringLiteral("Detailed markdown issue body"));
+        QCOMPARE(items[0].remoteStatus, QStringLiteral("open"));
+
+        // Item 2: Draft Pull Request
+        QCOMPARE(items[1].key, QStringLiteral("PR#99"));
+        QVERIFY(items[1].description.startsWith(QStringLiteral("[DRAFT PR] PR#99 Add GitHub and GitLab integrations")));
+        QCOMPARE(items[1].remoteStatus, QStringLiteral("draft"));
+    }
+
+    void testGitLabIssuesAndMergeRequestsParser() {
+        const QByteArray glIssuesJson = QByteArray(
+            "["
+            "  {"
+            "    \"id\": 101,"
+            "    \"iid\": 15,"
+            "    \"title\": \"Implement dark mode toggle\","
+            "    \"description\": \"GitLab issue details\","
+            "    \"state\": \"opened\","
+            "    \"labels\": [\"enhancement\"],"
+            "    \"web_url\": \"https://gitlab.com/group/myproject/-/issues/15\","
+            "    \"time_stats\": {"
+            "      \"time_estimate\": 3600"
+            "    }"
+            "  }"
+            "]"
+        );
+
+        const QVector<RemoteIssueItem> issues = IssueTrackerService::parseGitLabIssuesJson(glIssuesJson);
+        QCOMPARE(issues.size(), 1);
+        QCOMPARE(issues[0].key, QStringLiteral("GL#15"));
+        QVERIFY(issues[0].description.contains(QStringLiteral("GL#15 Implement dark mode toggle")));
+        QVERIFY(issues[0].description.contains(QStringLiteral("+myproject")));
+        QCOMPARE(issues[0].remoteStatus, QStringLiteral("opened"));
+        QCOMPARE(issues[0].durationSeconds, 3600U);
+
+        const QByteArray glMrsJson = QByteArray(
+            "["
+            "  {"
+            "    \"id\": 202,"
+            "    \"iid\": 7,"
+            "    \"title\": \"Draft: Refactor network layer\","
+            "    \"description\": \"MR details\","
+            "    \"state\": \"opened\","
+            "    \"draft\": true,"
+            "    \"labels\": [\"refactoring\"],"
+            "    \"web_url\": \"https://gitlab.com/group/myproject/-/merge_requests/7\","
+            "    \"time_stats\": {"
+            "      \"time_estimate\": 1800"
+            "    }"
+            "  }"
+            "]"
+        );
+
+        const QVector<RemoteIssueItem> mrs = IssueTrackerService::parseGitLabMergeRequestsJson(glMrsJson);
+        QCOMPARE(mrs.size(), 1);
+        QCOMPARE(mrs[0].key, QStringLiteral("MR!7"));
+        QVERIFY(mrs[0].description.startsWith(QStringLiteral("[DRAFT MR] MR!7 Draft: Refactor network layer")));
+        QCOMPARE(mrs[0].remoteStatus, QStringLiteral("draft"));
+        QCOMPARE(mrs[0].durationSeconds, 1800U);
+    }
+
+    void testMultiListDatabaseLoading() {
+        DatabaseManager& db = DatabaseManager::instance();
+        db.initialize(QStringLiteral(":memory:"));
+
+        TodoListEntry l1;
+        l1.id = QStringLiteral("list_gh");
+        l1.name = QStringLiteral("GitHub Repo");
+        l1.provider = QStringLiteral("GitHub");
+        db.saveList(l1, 0);
+
+        TodoListEntry l2;
+        l2.id = QStringLiteral("list_local");
+        l2.name = QStringLiteral("Personal");
+        l2.provider = QStringLiteral("SQLite");
+        db.saveList(l2, 1);
+
+        TxtTask t1 = TxtTask::fromSimpleTxt(QStringLiteral("PR#1 Fix bug"), false, false);
+        db.insertTask(l1.id, t1, 0);
+
+        TxtTask t2 = TxtTask::fromSimpleTxt(QStringLiteral("Buy milk"), false, false);
+        db.insertTask(l2.id, t2, 0);
+
+        // Load specific list
+        const QVector<TxtTask> ghTasks = db.loadTasks(l1.id, false);
+        QCOMPARE(ghTasks.size(), 1);
+        QCOMPARE(ghTasks[0].listName(), QStringLiteral("GitHub Repo"));
+        QCOMPARE(ghTasks[0].listProvider(), QStringLiteral("GitHub"));
+
+        // Load multiple lists
+        const QVector<TxtTask> bothTasks = db.loadTasks(QStringList{l1.id, l2.id}, false);
+        QCOMPARE(bothTasks.size(), 2);
+
+        // Load all lists with "__ALL__"
+        const QVector<TxtTask> allTasks = db.loadTasks(QStringList{QStringLiteral("__ALL__")}, false);
+        QCOMPARE(allTasks.size(), 2);
     }
 
     void testUnviewedAndTotalCounters() {

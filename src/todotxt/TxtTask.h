@@ -43,10 +43,22 @@ public:
                                 quint32 jiraSyncedSeconds = 0,
                                 const QString& details = {},
                                 const QVariantList& comments = {},
-                                bool isViewed = true);
+                                bool isViewed = true,
+                                const QString& listId = {},
+                                const QString& listName = {},
+                                const QString& listProvider = {});
 
     [[nodiscard]] qint64 id() const noexcept { return m_id; }
     void setId(qint64 id) noexcept { m_id = id; }
+
+    [[nodiscard]] const QString& listId() const noexcept { return m_listId; }
+    void setListId(const QString& id) { m_listId = id; }
+
+    [[nodiscard]] const QString& listName() const noexcept { return m_listName; }
+    void setListName(const QString& name) { m_listName = name; }
+
+    [[nodiscard]] const QString& listProvider() const noexcept { return m_listProvider; }
+    void setListProvider(const QString& provider) { m_listProvider = provider; }
 
     [[nodiscard]] const QString& jiraKey() const noexcept { return m_jiraKey; }
     void setJiraKey(const QString& key) { m_jiraKey = key; }
@@ -130,6 +142,9 @@ private:
     quint8 m_priority = NoPriority;
     bool m_done = false;
     bool m_isViewed = true;
+    QString m_listId;
+    QString m_listName;
+    QString m_listProvider;
 };
 
 } // namespace gofi

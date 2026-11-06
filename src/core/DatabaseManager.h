@@ -52,7 +52,9 @@ public:
     bool updateListsOrder(const QVector<TodoListEntry>& entries);
 
     // Tasks CRUD
+    [[nodiscard]] QVector<TxtTask> loadTasks(const QStringList& listIds, bool done) const;
     [[nodiscard]] QVector<TxtTask> loadTasks(const QString& listId, bool done) const;
+    [[nodiscard]] int countAllTasksInLists(const QStringList& listIds) const;
     [[nodiscard]] int countAllTasksInList(const QString& listId) const;
     qint64 insertTask(const QString& listId, const TxtTask& task, int sortOrder);
     bool updateTask(const TxtTask& task);

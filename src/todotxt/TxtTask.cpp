@@ -85,7 +85,10 @@ TxtTask TxtTask::fromDatabase(qint64 id,
                               quint32 jiraSyncedSeconds,
                               const QString& details,
                               const QVariantList& comments,
-                              bool isViewed)
+                              bool isViewed,
+                              const QString& listId,
+                              const QString& listName,
+                              const QString& listProvider)
 {
     TxtTask task;
     task.m_id = id;
@@ -103,6 +106,9 @@ TxtTask TxtTask::fromDatabase(qint64 id,
     task.m_details = details;
     task.m_comments = comments;
     task.m_isViewed = isViewed;
+    task.m_listId = listId;
+    task.m_listName = listName;
+    task.m_listProvider = listProvider;
     return task;
 }
 

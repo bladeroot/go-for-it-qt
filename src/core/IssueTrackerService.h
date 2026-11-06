@@ -63,8 +63,13 @@ public:
     // Pure JSON parsers & status mapper (also used by unit tests)
     static QVector<RemoteIssueItem> parseJiraIssuesJson(const QByteArray& jsonBytes);
     static QVector<RemoteIssueItem> parseYouTrackIssuesJson(const QByteArray& jsonBytes);
+    static QVector<RemoteIssueItem> parseGitHubIssuesJson(const QByteArray& jsonBytes);
+    static QVector<RemoteIssueItem> parseGitLabIssuesJson(const QByteArray& jsonBytes);
+    static QVector<RemoteIssueItem> parseGitLabMergeRequestsJson(const QByteArray& jsonBytes);
     static QVariantList parseJiraStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
     static QVariantList parseYouTrackStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
+    static QVariantList parseGitHubStatuses(const QVariantMap& existingMapping = {});
+    static QVariantList parseGitLabStatuses(const QVariantMap& existingMapping = {});
     static QString mapRemoteStatusToLocal(const QString& remoteStatus,
                                           const QString& categoryHint = {},
                                           const QVariantMap& customMapping = {});
@@ -88,6 +93,9 @@ private:
 
     void fetchJiraIssues(const TodoListEntry& entry, int endpointStage = 0, bool forceBearerAuth = false);
     void fetchYouTrackIssues(const TodoListEntry& entry);
+    void fetchGitHubIssues(const TodoListEntry& entry);
+    void fetchGitLabIssues(const TodoListEntry& entry);
+    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName);
 
     QNetworkAccessManager m_nam;
     bool m_syncing = false;

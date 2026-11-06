@@ -30,6 +30,10 @@ class AppController : public QObject {
     Q_PROPERTY(QString currentListId READ currentListId NOTIFY currentListChanged)
     Q_PROPERTY(QString currentListName READ currentListName NOTIFY currentListChanged)
     Q_PROPERTY(QString currentListProvider READ currentListProvider NOTIFY currentListChanged)
+    Q_PROPERTY(bool isMultiListView READ isMultiListView NOTIFY currentListChanged)
+    Q_PROPERTY(bool isCurrentListRemote READ isCurrentListRemote NOTIFY currentListChanged)
+    Q_PROPERTY(QString currentFilterTitle READ currentFilterTitle NOTIFY currentListChanged)
+    Q_PROPERTY(QStringList activeListIds READ activeListIds NOTIFY currentListChanged)
     Q_PROPERTY(QString databasePath READ databasePath NOTIFY storagePathChanged)
     Q_PROPERTY(QString configFilePath READ configFilePath CONSTANT)
     Q_PROPERTY(int activeTodoRow READ activeTodoRow WRITE setActiveTodoRow NOTIFY activeTodoRowChanged)
@@ -56,6 +60,10 @@ public:
     [[nodiscard]] QString currentListId() const { return m_currentListId; }
     [[nodiscard]] QString currentListName() const { return m_currentListName; }
     [[nodiscard]] QString currentListProvider() const { return m_currentListProvider; }
+    [[nodiscard]] bool isMultiListView() const { return m_isMultiListView; }
+    [[nodiscard]] bool isCurrentListRemote() const;
+    [[nodiscard]] QString currentFilterTitle() const;
+    [[nodiscard]] QStringList activeListIds() const { return m_activeFilterListIds; }
     [[nodiscard]] QString databasePath() const;
     [[nodiscard]] QString configFilePath() const;
 
@@ -66,6 +74,9 @@ public:
     [[nodiscard]] int totalTodoCount() const;
 
     Q_INVOKABLE void selectListById(const QString& listId);
+    Q_INVOKABLE void showAllLists();
+    Q_INVOKABLE void showProviderLists(const QString& provider);
+    Q_INVOKABLE void setMultiListFilter(const QStringList& listIds);
     Q_INVOKABLE void syncCurrentList();
     Q_INVOKABLE void syncAllRemoteLists();
     Q_INVOKABLE void addNewTask(const QString& simpleText);
@@ -128,8 +139,11 @@ private:
     QString m_currentListName;
     QString m_currentListProvider;
     QString m_currentListActivityLogPath;
+    QStringList m_activeFilterListIds;
+    QString m_currentFilterTitle;
     int m_activeTodoRow = -1;
     bool m_showingOverview = false;
+    bool m_isMultiListView = false;
 };
 
 } // namespace gofi

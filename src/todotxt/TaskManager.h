@@ -20,9 +20,15 @@ public:
                        bool addDefaultTodosIfNew = false,
                        bool addCreationDates = true);
 
+    void setActiveLists(const QStringList& listIds,
+                        const QString& primaryListId = {},
+                        bool addCreationDates = true);
+
     void setAddCreationDates(bool value) noexcept { m_addCreationDates = value; }
     [[nodiscard]] bool addCreationDates() const noexcept { return m_addCreationDates; }
     [[nodiscard]] QString activeListId() const { return m_listId; }
+    [[nodiscard]] QStringList activeListIds() const { return m_listIds; }
+    [[nodiscard]] bool isMultiList() const { return m_listIds.size() != 1 || m_listIds.contains(QStringLiteral("__ALL__")); }
 
     void addNewTask(const QString& simpleText, bool onTop = false, bool addCreationDate = true);
     void clearDoneList();
@@ -47,6 +53,7 @@ private:
     TaskStoreModel m_todoStore;
     TaskStoreModel m_doneStore;
     QString m_listId;
+    QStringList m_listIds;
     bool m_addCreationDates = true;
     bool m_movingBetweenStores = false;
 };

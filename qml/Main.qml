@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 320
     minimumHeight: 420
     visible: !app.settings.startInTray
-    title: app.showingOverview ? qsTr("Go for It Qt — Lists") : (app.currentListName + " — Go for It Qt")
+    title: app.showingOverview ? qsTr("Go for It Qt — Lists") : (app.currentFilterTitle + " — Go for It Qt")
 
     property int currentActivityTab: 0 // 0: To-Do, 1: Timer, 2: Done
     property bool showFilterBar: false
@@ -232,14 +232,14 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
 
             ToolButton {
-                visible: !app.showingOverview && (app.currentListProvider === "Jira" || app.currentListProvider === "YouTrack")
+                visible: !app.showingOverview && app.isCurrentListRemote
                 enabled: !app.issueTracker.syncing
                 text: app.issueTracker.syncing ? "⏳" : "↻"
                 font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
                 ToolTip.visible: hovered
                 ToolTip.text: app.issueTracker.lastStatusMessage !== ""
-                    ? (qsTr("Sync with ") + app.currentListProvider + " (" + app.issueTracker.lastStatusMessage + ")")
-                    : (qsTr("Sync issues with ") + app.currentListProvider)
+                    ? (qsTr("Sync issues (%1)").arg(app.issueTracker.lastStatusMessage))
+                    : qsTr("Sync remote issues")
                 onClicked: app.syncCurrentList()
             }
 
@@ -253,6 +253,46 @@ ApplicationWindow {
                 Menu {
                     id: mainMenu
                     y: parent.height
+
+                    Menu {
+                        title: "📂 " + qsTr("Switch View / Filter")
+                        MenuItem {
+                            text: "🌐 " + qsTr("All Lists (Unified)")
+                            onTriggered: app.showAllLists()
+                        }
+                        MenuItem {
+                            text: "💻 " + qsTr("Local Lists Only")
+                            onTriggered: app.showProviderLists("SQLite")
+                        }
+                        MenuItem {
+                            text: "☁️ " + qsTr("Remote Trackers Only")
+                            onTriggered: {
+                                let trackerIds = []
+                                for (let i = 0; i < app.listManager.count; ++i) {
+                                    const entry = app.listManager.entryAt(i)
+                                    if (entry.provider !== "SQLite" && entry.provider !== "Todo.txt") {
+                                        trackerIds.push(entry.id)
+                                    }
+                                }
+                                if (trackerIds.length > 0) {
+                                    app.setMultiListFilter(trackerIds)
+                                }
+                            }
+                        }
+                        MenuSeparator {}
+                        Repeater {
+                            model: app.listManager
+                            MenuItem {
+                                required property string listId
+                                required property string name
+                                required property string provider
+                                text: name + " (" + provider + ")"
+                                onTriggered: app.selectListById(listId)
+                            }
+                        }
+                    }
+
+                    MenuSeparator {}
 
                     MenuItem {
                         contentItem: RowLayout {

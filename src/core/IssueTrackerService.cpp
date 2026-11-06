@@ -145,10 +145,21 @@ QString IssueTrackerService::normalizeBaseUrl(const QString& rawUrl) {
 void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEntry& entry, bool forceBearerAuth) {
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setRawHeader("Accept", "application/json");
+    req.setRawHeader("User-Agent", "Go-For-It-Qt");
 
     const QString user = entry.jiraUser.trimmed();
     const QString token = entry.apiToken.trimmed();
-    if (!forceBearerAuth && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
+    if (entry.provider == QStringLiteral("GitHub")) {
+        req.setRawHeader("Accept", "application/vnd.github+json");
+        if (!token.isEmpty()) {
+            req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
+        }
+    } else if (entry.provider == QStringLiteral("GitLab")) {
+        if (!token.isEmpty()) {
+            req.setRawHeader("PRIVATE-TOKEN", token.toUtf8());
+            req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
+        }
+    } else if (!forceBearerAuth && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
         const QByteArray credentials = (user + QLatin1Char(':') + token).toUtf8().toBase64();
         req.setRawHeader("Authorization", QByteArray("Basic ") + credentials);
     } else if (!token.isEmpty()) {
@@ -202,6 +213,7 @@ QString IssueTrackerService::mapRemoteStatusToLocal(const QString& remoteStatus,
     if (s.contains(QStringLiteral("pause")) || s.contains(QStringLiteral("hold"))
         || s.contains(QStringLiteral("block")) || s.contains(QStringLiteral("wait"))
         || s.contains(QStringLiteral("pending")) || s.contains(QStringLiteral("postpone"))
+        || s.contains(QStringLiteral("draft")) || s.contains(QStringLiteral("чернетк"))
         || s.contains(QStringLiteral("пауз")) || s.contains(QStringLiteral("очікув"))) {
         return QStringLiteral("paused");
     }
@@ -215,10 +227,11 @@ QString IssueTrackerService::mapRemoteStatusToLocal(const QString& remoteStatus,
         return QStringLiteral("in_progress");
     }
 
-    // 4. Check Done / Resolved / Closed / Verified
+    // 4. Check Done / Resolved / Closed / Verified / Merged
     if (s.contains(QStringLiteral("done")) || s.contains(QStringLiteral("resolved"))
         || s.contains(QStringLiteral("closed")) || s.contains(QStringLiteral("fixed"))
         || s.contains(QStringLiteral("complete")) || s.contains(QStringLiteral("verified"))
+        || s.contains(QStringLiteral("merged")) || s.contains(QStringLiteral("злит"))
         || s.contains(QStringLiteral("готово")) || s.contains(QStringLiteral("виконан"))
         || cat == QStringLiteral("done")) {
         return QStringLiteral("done");
@@ -402,6 +415,283 @@ QVector<RemoteIssueItem> IssueTrackerService::parseYouTrackIssuesJson(const QByt
     return result;
 }
 
+QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteArray& jsonBytes) {
+    QVector<RemoteIssueItem> result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    QJsonArray issues;
+    if (doc.isObject()) {
+        issues = doc.object().value(QStringLiteral("items")).toArray();
+    } else if (doc.isArray()) {
+        issues = doc.array();
+    } else {
+        return result;
+    }
+
+    result.reserve(issues.size());
+    for (const QJsonValue& val : issues) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const int number = obj.value(QStringLiteral("number")).toInt();
+        if (number <= 0) continue;
+
+        const bool isPr = obj.contains(QStringLiteral("pull_request"));
+        const bool isDraft = obj.value(QStringLiteral("draft")).toBool(false);
+        const QString state = obj.value(QStringLiteral("state")).toString().trimmed().toLower();
+        const QString title = obj.value(QStringLiteral("title")).toString().trimmed();
+        const QString body = obj.value(QStringLiteral("body")).toString().trimmed();
+
+        QString key;
+        QString prefix;
+        if (isPr) {
+            key = QStringLiteral("PR#%1").arg(number);
+            prefix = isDraft ? QStringLiteral("[DRAFT PR] ") : QStringLiteral("[PR] ");
+        } else {
+            key = QStringLiteral("GH#%1").arg(number);
+        }
+
+        QString repoTag;
+        const QString repoUrl = obj.value(QStringLiteral("repository_url")).toString();
+        if (!repoUrl.isEmpty()) {
+            const int idx = repoUrl.lastIndexOf(QLatin1Char('/'));
+            if (idx >= 0 && idx + 1 < repoUrl.size()) {
+                repoTag = sanitizeTagToken(repoUrl.mid(idx + 1));
+            }
+        }
+        if (repoTag.isEmpty()) {
+            const QString htmlUrl = obj.value(QStringLiteral("html_url")).toString();
+            static const QRegularExpression ghRepoRe(QStringLiteral("github\\.com/[^/]+/([^/]+)"));
+            const auto match = ghRepoRe.match(htmlUrl);
+            if (match.hasMatch()) {
+                repoTag = sanitizeTagToken(match.captured(1));
+            }
+        }
+
+        quint8 prio = TxtTask::NoPriority;
+        QStringList labelTags;
+        const QJsonArray labelsArr = obj.value(QStringLiteral("labels")).toArray();
+        for (const QJsonValue& lVal : labelsArr) {
+            QString labelName;
+            if (lVal.isObject()) {
+                labelName = lVal.toObject().value(QStringLiteral("name")).toString().trimmed();
+            } else if (lVal.isString()) {
+                labelName = lVal.toString().trimmed();
+            }
+            if (labelName.isEmpty()) continue;
+
+            if (prio == TxtTask::NoPriority) {
+                prio = mapPriorityName(labelName);
+            }
+            labelTags.append(QStringLiteral("+") + sanitizeTagToken(labelName));
+        }
+
+        QString remoteStatus = state;
+        if (isDraft) {
+            remoteStatus = QStringLiteral("draft");
+        } else if (isPr && !obj.value(QStringLiteral("pull_request")).toObject().value(QStringLiteral("merged_at")).isNull()) {
+            remoteStatus = QStringLiteral("merged");
+        }
+
+        QString desc = prefix + key + QLatin1Char(' ') + (title.isEmpty() ? key : title);
+        if (!repoTag.isEmpty()) {
+            desc += QStringLiteral(" +") + repoTag;
+        }
+        for (const QString& lt : labelTags) {
+            desc += QLatin1Char(' ') + lt;
+        }
+        if (!remoteStatus.isEmpty()) {
+            desc += QStringLiteral(" @") + sanitizeTagToken(remoteStatus);
+        }
+
+        RemoteIssueItem item;
+        item.key = key;
+        item.description = desc;
+        item.details = body;
+        item.remoteStatus = remoteStatus;
+        item.priority = prio;
+        item.durationSeconds = 0;
+        result.append(std::move(item));
+    }
+    return result;
+}
+
+QVector<RemoteIssueItem> IssueTrackerService::parseGitLabIssuesJson(const QByteArray& jsonBytes) {
+    QVector<RemoteIssueItem> result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isArray()) return result;
+
+    const QJsonArray issues = doc.array();
+    result.reserve(issues.size());
+
+    for (const QJsonValue& val : issues) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const int iid = obj.value(QStringLiteral("iid")).toInt();
+        if (iid <= 0) continue;
+
+        const QString key = QStringLiteral("GL#%1").arg(iid);
+        const QString title = obj.value(QStringLiteral("title")).toString().trimmed();
+        const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
+        const QString state = obj.value(QStringLiteral("state")).toString().trimmed().toLower();
+
+        QString projTag;
+        const QString webUrl = obj.value(QStringLiteral("web_url")).toString();
+        const int dashIdx = webUrl.indexOf(QStringLiteral("/-/"));
+        if (dashIdx > 0) {
+            const QString projPath = webUrl.left(dashIdx);
+            const int lastSlash = projPath.lastIndexOf(QLatin1Char('/'));
+            if (lastSlash >= 0 && lastSlash + 1 < projPath.size()) {
+                projTag = sanitizeTagToken(projPath.mid(lastSlash + 1));
+            }
+        }
+
+        quint8 prio = TxtTask::NoPriority;
+        QStringList labelTags;
+        const QJsonArray labels = obj.value(QStringLiteral("labels")).toArray();
+        for (const QJsonValue& lVal : labels) {
+            const QString lName = lVal.isString() ? lVal.toString().trimmed() : lVal.toObject().value(QStringLiteral("name")).toString().trimmed();
+            if (lName.isEmpty()) continue;
+            if (prio == TxtTask::NoPriority) {
+                prio = mapPriorityName(lName);
+            }
+            labelTags.append(QStringLiteral("+") + sanitizeTagToken(lName));
+        }
+
+        const quint32 estSec = obj.value(QStringLiteral("time_stats")).toObject().value(QStringLiteral("time_estimate")).toVariant().toUInt();
+
+        QString desc = key + QLatin1Char(' ') + (title.isEmpty() ? key : title);
+        if (!projTag.isEmpty()) {
+            desc += QStringLiteral(" +") + projTag;
+        }
+        for (const QString& lt : labelTags) {
+            desc += QLatin1Char(' ') + lt;
+        }
+        if (!state.isEmpty()) {
+            desc += QStringLiteral(" @") + sanitizeTagToken(state);
+        }
+
+        RemoteIssueItem item;
+        item.key = key;
+        item.description = desc;
+        item.details = description;
+        item.remoteStatus = state;
+        item.priority = prio;
+        item.durationSeconds = estSec;
+        result.append(std::move(item));
+    }
+    return result;
+}
+
+QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const QByteArray& jsonBytes) {
+    QVector<RemoteIssueItem> result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isArray()) return result;
+
+    const QJsonArray mrs = doc.array();
+    result.reserve(mrs.size());
+
+    for (const QJsonValue& val : mrs) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const int iid = obj.value(QStringLiteral("iid")).toInt();
+        if (iid <= 0) continue;
+
+        const QString key = QStringLiteral("MR!%1").arg(iid);
+        const QString rawTitle = obj.value(QStringLiteral("title")).toString().trimmed();
+        const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
+        const QString state = obj.value(QStringLiteral("state")).toString().trimmed().toLower();
+
+        const bool isDraft = obj.value(QStringLiteral("draft")).toBool(false)
+            || obj.value(QStringLiteral("work_in_progress")).toBool(false)
+            || rawTitle.startsWith(QStringLiteral("Draft:"), Qt::CaseInsensitive)
+            || rawTitle.startsWith(QStringLiteral("WIP:"), Qt::CaseInsensitive);
+
+        const QString prefix = isDraft ? QStringLiteral("[DRAFT MR] ") : QStringLiteral("[MR] ");
+
+        QString projTag;
+        const QString webUrl = obj.value(QStringLiteral("web_url")).toString();
+        const int dashIdx = webUrl.indexOf(QStringLiteral("/-/"));
+        if (dashIdx > 0) {
+            const QString projPath = webUrl.left(dashIdx);
+            const int lastSlash = projPath.lastIndexOf(QLatin1Char('/'));
+            if (lastSlash >= 0 && lastSlash + 1 < projPath.size()) {
+                projTag = sanitizeTagToken(projPath.mid(lastSlash + 1));
+            }
+        }
+
+        quint8 prio = TxtTask::NoPriority;
+        QStringList labelTags;
+        const QJsonArray labels = obj.value(QStringLiteral("labels")).toArray();
+        for (const QJsonValue& lVal : labels) {
+            const QString lName = lVal.isString() ? lVal.toString().trimmed() : lVal.toObject().value(QStringLiteral("name")).toString().trimmed();
+            if (lName.isEmpty()) continue;
+            if (prio == TxtTask::NoPriority) {
+                prio = mapPriorityName(lName);
+            }
+            labelTags.append(QStringLiteral("+") + sanitizeTagToken(lName));
+        }
+
+        const quint32 estSec = obj.value(QStringLiteral("time_stats")).toObject().value(QStringLiteral("time_estimate")).toVariant().toUInt();
+
+        const QString remoteStatus = (isDraft && state == QStringLiteral("opened")) ? QStringLiteral("draft") : state;
+
+        QString desc = prefix + key + QLatin1Char(' ') + (rawTitle.isEmpty() ? key : rawTitle);
+        if (!projTag.isEmpty()) {
+            desc += QStringLiteral(" +") + projTag;
+        }
+        for (const QString& lt : labelTags) {
+            desc += QLatin1Char(' ') + lt;
+        }
+        if (!remoteStatus.isEmpty()) {
+            desc += QStringLiteral(" @") + sanitizeTagToken(remoteStatus);
+        }
+
+        RemoteIssueItem item;
+        item.key = key;
+        item.description = desc;
+        item.details = description;
+        item.remoteStatus = remoteStatus;
+        item.priority = prio;
+        item.durationSeconds = estSec;
+        result.append(std::move(item));
+    }
+    return result;
+}
+
+QVariantList IssueTrackerService::parseGitHubStatuses(const QVariantMap& existingMapping) {
+    const QStringList statuses = {
+        QStringLiteral("open"),
+        QStringLiteral("closed"),
+        QStringLiteral("draft"),
+        QStringLiteral("merged")
+    };
+    QVariantList result;
+    for (const QString& st : statuses) {
+        result.append(QVariantMap{
+            {QStringLiteral("remoteName"), st},
+            {QStringLiteral("localStatus"), mapRemoteStatusToLocal(st, {}, existingMapping)}
+        });
+    }
+    return result;
+}
+
+QVariantList IssueTrackerService::parseGitLabStatuses(const QVariantMap& existingMapping) {
+    const QStringList statuses = {
+        QStringLiteral("opened"),
+        QStringLiteral("closed"),
+        QStringLiteral("merged"),
+        QStringLiteral("draft"),
+        QStringLiteral("locked")
+    };
+    QVariantList result;
+    for (const QString& st : statuses) {
+        result.append(QVariantMap{
+            {QStringLiteral("remoteName"), st},
+            {QStringLiteral("localStatus"), mapRemoteStatusToLocal(st, {}, existingMapping)}
+        });
+    }
+    return result;
+}
+
 QVariantList IssueTrackerService::parseJiraStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping) {
     QVariantList result;
     const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
@@ -470,6 +760,15 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
                                               const QString& apiToken,
                                               const QVariantMap& existingMapping)
 {
+    if (provider == QStringLiteral("GitHub")) {
+        emit remoteStatusesLoaded(parseGitHubStatuses(existingMapping));
+        return;
+    }
+    if (provider == QStringLiteral("GitLab")) {
+        emit remoteStatusesLoaded(parseGitLabStatuses(existingMapping));
+        return;
+    }
+
     const QString baseUrl = normalizeBaseUrl(serverUrl);
     if (baseUrl.isEmpty()) {
         emit remoteStatusesError(tr("Please enter the Server URL first."));
@@ -561,6 +860,10 @@ void IssueTrackerService::syncListIssues(const TodoListEntry& listEntry) {
         fetchJiraIssues(listEntry, 0, false);
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         fetchYouTrackIssues(listEntry);
+    } else if (listEntry.provider == QStringLiteral("GitHub")) {
+        fetchGitHubIssues(listEntry);
+    } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        fetchGitLabIssues(listEntry);
     }
 }
 
@@ -649,32 +952,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
         }
 
         const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
-        DatabaseManager& db = DatabaseManager::instance();
-        QStringList newIssues;
-        QStringList statusChanges;
-        for (const RemoteIssueItem& item : items) {
-            const QString localStatus = mapRemoteStatusToLocal(
-                item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
-            );
-            bool isNew = false;
-            QString oldStatus;
-            db.upsertRemoteIssueTask(
-                entry.id, item.key, item.description, localStatus, item.priority,
-                item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
-            );
-            if (isNew) {
-                newIssues.append(item.description);
-            } else if (!oldStatus.isEmpty() && oldStatus != localStatus) {
-                statusChanges.append(QStringLiteral("%1: %2 → %3").arg(item.key, oldStatus, localStatus));
-            }
-        }
-
-        setSyncing(false);
-        setStatusMessage(tr("Synced %1 issues from Jira.").arg(items.size()));
-        emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
-        if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
-            emit trackerChangesDetected(entry.name, newIssues, statusChanges);
-        }
+        processSyncedItems(entry, items, QStringLiteral("Jira"));
     });
 }
 
@@ -719,33 +997,171 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
         }
 
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(reply->readAll());
-        DatabaseManager& db = DatabaseManager::instance();
-        QStringList newIssues;
-        QStringList statusChanges;
-        for (const RemoteIssueItem& item : items) {
-            const QString localStatus = mapRemoteStatusToLocal(
-                item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
-            );
-            bool isNew = false;
-            QString oldStatus;
-            db.upsertRemoteIssueTask(
-                entry.id, item.key, item.description, localStatus, item.priority,
-                item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
-            );
-            if (isNew) {
-                newIssues.append(item.description);
-            } else if (!oldStatus.isEmpty() && oldStatus != localStatus) {
-                statusChanges.append(QStringLiteral("%1: %2 → %3").arg(item.key, oldStatus, localStatus));
-            }
+        processSyncedItems(entry, items, QStringLiteral("YouTrack"));
+    });
+}
+
+void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
+                                             const QVector<RemoteIssueItem>& items,
+                                             const QString& providerName)
+{
+    DatabaseManager& db = DatabaseManager::instance();
+    QStringList newIssues;
+    QStringList statusChanges;
+    for (const RemoteIssueItem& item : items) {
+        const QString localStatus = mapRemoteStatusToLocal(
+            item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
+        );
+        bool isNew = false;
+        QString oldStatus;
+        db.upsertRemoteIssueTask(
+            entry.id, item.key, item.description, localStatus, item.priority,
+            item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
+        );
+        if (isNew) {
+            newIssues.append(item.description);
+        } else if (!oldStatus.isEmpty() && oldStatus != localStatus) {
+            statusChanges.append(QStringLiteral("%1: %2 → %3").arg(item.key, oldStatus, localStatus));
+        }
+    }
+
+    setSyncing(false);
+    setStatusMessage(tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName));
+    emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
+    if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
+        emit trackerChangesDetected(entry.name, newIssues, statusChanges);
+    }
+}
+
+void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
+    QString baseUrl = normalizeBaseUrl(entry.jiraUrl);
+    if (baseUrl.isEmpty()) {
+        baseUrl = QStringLiteral("https://api.github.com");
+    }
+
+    setSyncing(true);
+    setStatusMessage(tr("Syncing issues and pull requests from GitHub..."));
+
+    QString queryStr = entry.jiraJql.trimmed();
+    if (queryStr.isEmpty()) {
+        queryStr = entry.apiToken.trimmed().isEmpty() ? QStringLiteral("is:open") : QStringLiteral("is:open involves:@me");
+    } else if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:"))) {
+        if (queryStr.contains(QLatin1Char('/'))) {
+            queryStr = QStringLiteral("repo:") + queryStr + QStringLiteral(" is:open");
+        }
+    }
+
+    QUrl url(baseUrl + QStringLiteral("/search/issues"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("q"), queryStr);
+    query.addQueryItem(QStringLiteral("sort"), QStringLiteral("updated"));
+    query.addQueryItem(QStringLiteral("order"), QStringLiteral("desc"));
+    query.addQueryItem(QStringLiteral("per_page"), QStringLiteral("100"));
+    url.setQuery(query);
+
+    QNetworkRequest req(url);
+    applyAuthHeader(req, entry);
+
+    QNetworkReply* reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
+        reply->deleteLater();
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError) {
+            setSyncing(false);
+            const QString errMsg = tr("GitHub sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
         }
 
-        setSyncing(false);
-        setStatusMessage(tr("Synced %1 issues from YouTrack.").arg(items.size()));
-        emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
-        if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
-            emit trackerChangesDetected(entry.name, newIssues, statusChanges);
-        }
+        const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(reply->readAll());
+        processSyncedItems(entry, items, QStringLiteral("GitHub"));
     });
+}
+
+void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
+    QString baseUrl = normalizeBaseUrl(entry.jiraUrl);
+    if (baseUrl.isEmpty()) {
+        baseUrl = QStringLiteral("https://gitlab.com");
+    }
+
+    setSyncing(true);
+    setStatusMessage(tr("Syncing issues and merge requests from GitLab..."));
+
+    const QString projectSpec = entry.jiraJql.trimmed();
+    QString issuesPath;
+    QString mrPath;
+    if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
+        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(projectSpec));
+        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&per_page=100").arg(encodedProj);
+        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&per_page=100").arg(encodedProj);
+    } else {
+        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=all&per_page=100");
+        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=all&per_page=100");
+        if (!projectSpec.isEmpty()) {
+            issuesPath += QLatin1Char('&') + projectSpec;
+            mrPath += QLatin1Char('&') + projectSpec;
+        }
+    }
+
+    struct CombinedSyncState {
+        QVector<RemoteIssueItem> items;
+        int completedRequests = 0;
+        bool hasError = false;
+        QString errorMsg;
+    };
+    auto combinedState = std::make_shared<CombinedSyncState>();
+
+    auto checkDone = [this, entry, combinedState]() {
+        if (combinedState->completedRequests < 2) return;
+        if (combinedState->hasError && combinedState->items.isEmpty()) {
+            setSyncing(false);
+            setStatusMessage(combinedState->errorMsg);
+            emit syncFailed(entry.id, combinedState->errorMsg);
+            return;
+        }
+        processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"));
+    };
+
+    // 1. Fetch Issues
+    {
+        QUrl url(baseUrl + issuesPath);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, entry);
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, combinedState, checkDone]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                combinedState->hasError = true;
+                combinedState->errorMsg = tr("GitLab issues error: %1").arg(reply->errorString());
+            } else {
+                combinedState->items.append(parseGitLabIssuesJson(reply->readAll()));
+            }
+            combinedState->completedRequests++;
+            checkDone();
+        });
+    }
+
+    // 2. Fetch Merge Requests
+    {
+        QUrl url(baseUrl + mrPath);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, entry);
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, combinedState, checkDone]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                combinedState->hasError = true;
+                if (combinedState->errorMsg.isEmpty()) {
+                    combinedState->errorMsg = tr("GitLab merge requests error: %1").arg(reply->errorString());
+                }
+            } else {
+                combinedState->items.append(parseGitLabMergeRequestsJson(reply->readAll()));
+            }
+            combinedState->completedRequests++;
+            checkDone();
+        });
+    }
 }
 
 void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
@@ -805,6 +1221,83 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             if (reply->error() == QNetworkReply::NoError) {
                 DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
                 setStatusMessage(tr("Logged %1m to YouTrack issue %2").arg(minutes).arg(issueKey));
+                emit worklogPosted(issueKey, minutes * 60U);
+            }
+        });
+    } else if (listEntry.provider == QStringLiteral("GitHub")) {
+        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+        QString numStr;
+        for (const QChar& c : issueKey) {
+            if (c.isDigit()) numStr.append(c);
+        }
+        if (numStr.isEmpty()) return;
+
+        QString repo;
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) {
+            repo = m.captured(1);
+        } else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) {
+            repo = jql;
+        }
+        if (repo.isEmpty()) {
+            static const QRegularExpression urlRepoRe(QStringLiteral("github\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto um = urlRepoRe.match(baseUrl);
+            if (um.hasMatch()) repo = um.captured(1);
+        }
+        if (repo.isEmpty()) return;
+
+        const QString apiUrl = baseUrl.contains(QStringLiteral("api.github.com"))
+            ? baseUrl
+            : QStringLiteral("https://api.github.com");
+        QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr + QStringLiteral("/comments"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("body"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
+        };
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+            reply->deleteLater();
+            if (reply->error() == QNetworkReply::NoError) {
+                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
+                setStatusMessage(tr("Logged %1m to GitHub issue %2").arg(minutes).arg(issueKey));
+                emit worklogPosted(issueKey, minutes * 60U);
+            }
+        });
+    } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+        QString iid;
+        for (const QChar& c : issueKey) {
+            if (c.isDigit()) iid.append(c);
+        }
+        if (iid.isEmpty()) return;
+
+        const bool isMr = issueKey.contains(QLatin1Char('!')) || issueKey.contains(QStringLiteral("MR"));
+        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
+
+        QString proj = listEntry.jiraJql.trimmed();
+        if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("gitlab\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = glUrlRe.match(baseUrl);
+            if (m.hasMatch()) proj = m.captured(1);
+        }
+        if (proj.isEmpty()) return;
+
+        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
+        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3/add_spent_time?duration=%4m").arg(encodedProj, resource, iid).arg(minutes));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QNetworkReply* reply = m_nam.post(req, QByteArray());
+        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+            reply->deleteLater();
+            if (reply->error() == QNetworkReply::NoError) {
+                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
+                setStatusMessage(tr("Logged %1m to GitLab %2").arg(minutes).arg(issueKey));
                 emit worklogPosted(issueKey, minutes * 60U);
             }
         });
@@ -1047,6 +1540,71 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             }
             setStatusMessage(tr("Updated description on YouTrack issue %1.").arg(issueKey));
         });
+    } else if (listEntry.provider == QStringLiteral("GitHub")) {
+        QString numStr;
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        if (numStr.isEmpty()) return;
+
+        QString repo;
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) repo = m.captured(1);
+        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+        if (repo.isEmpty()) {
+            static const QRegularExpression urlRepoRe(QStringLiteral("github\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto um = urlRepoRe.match(baseUrl);
+            if (um.hasMatch()) repo = um.captured(1);
+        }
+        if (repo.isEmpty()) return;
+
+        const QString apiUrl = baseUrl.contains(QStringLiteral("api.github.com")) ? baseUrl : QStringLiteral("https://api.github.com");
+        QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("body"), markdownDetails}};
+        QNetworkReply* reply = m_nam.sendCustomRequest(req, "PATCH", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to update description on GitHub (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Updated description on GitHub issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        QString iid;
+        for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        if (iid.isEmpty()) return;
+
+        const bool isMr = issueKey.contains(QLatin1Char('!')) || issueKey.contains(QStringLiteral("MR"));
+        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
+
+        QString proj = listEntry.jiraJql.trimmed();
+        if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("gitlab\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = glUrlRe.match(baseUrl);
+            if (m.hasMatch()) proj = m.captured(1);
+        }
+        if (proj.isEmpty()) return;
+
+        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
+        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3").arg(encodedProj, resource, iid));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("description"), markdownDetails}};
+        QNetworkReply* reply = m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to update description on GitLab (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Updated description on GitLab %1.").arg(issueKey));
+        });
     }
 }
 
@@ -1112,6 +1670,71 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                 return;
             }
             setStatusMessage(tr("Posted comment to YouTrack issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("GitHub")) {
+        QString numStr;
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        if (numStr.isEmpty()) return;
+
+        QString repo;
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) repo = m.captured(1);
+        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+        if (repo.isEmpty()) {
+            static const QRegularExpression urlRepoRe(QStringLiteral("github\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto um = urlRepoRe.match(baseUrl);
+            if (um.hasMatch()) repo = um.captured(1);
+        }
+        if (repo.isEmpty()) return;
+
+        const QString apiUrl = baseUrl.contains(QStringLiteral("api.github.com")) ? baseUrl : QStringLiteral("https://api.github.com");
+        QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr + QStringLiteral("/comments"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("body"), markdownComment}};
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to post comment to GitHub (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Posted comment to GitHub issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        QString iid;
+        for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        if (iid.isEmpty()) return;
+
+        const bool isMr = issueKey.contains(QLatin1Char('!')) || issueKey.contains(QStringLiteral("MR"));
+        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
+
+        QString proj = listEntry.jiraJql.trimmed();
+        if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("gitlab\\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = glUrlRe.match(baseUrl);
+            if (m.hasMatch()) proj = m.captured(1);
+        }
+        if (proj.isEmpty()) return;
+
+        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
+        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3/notes").arg(encodedProj, resource, iid));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("body"), markdownComment}};
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to post comment to GitLab (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Posted comment to GitLab %1.").arg(issueKey));
         });
     }
 }

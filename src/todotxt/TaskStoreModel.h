@@ -31,7 +31,10 @@ public:
         JiraKeyRole,
         DetailsRole,
         CommentsRole,
-        IsViewedRole
+        IsViewedRole,
+        ListIdRole,
+        ListNameRole,
+        ListProviderRole
     };
 
     explicit TaskStoreModel(bool doneByDefault = false, QObject* parent = nullptr);

@@ -6,14 +6,78 @@ import "../dialogs"
 Item {
     id: selectionRoot
 
+    property var checkedListIds: []
+
     function openNewListDialog() {
         listEditDialog.openForNew()
+    }
+
+    function toggleCheckedList(id) {
+        let arr = checkedListIds.slice()
+        const idx = arr.indexOf(id)
+        if (idx >= 0) {
+            arr.splice(idx, 1)
+        } else {
+            arr.push(id)
+        }
+        checkedListIds = arr
+    }
+
+    function isListChecked(id) {
+        return checkedListIds.indexOf(id) >= 0
     }
 
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
         spacing: 10
+
+        // Quick Filter Bar
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            Button {
+                text: "🌐 " + qsTr("All Lists")
+                highlighted: app.isMultiListView && app.activeListIds.length === 0
+                font.pixelSize: 11
+                onClicked: app.showAllLists()
+            }
+
+            Button {
+                text: "💻 " + qsTr("Local")
+                font.pixelSize: 11
+                onClicked: app.showProviderLists("SQLite")
+            }
+
+            Button {
+                text: "☁️ " + qsTr("All Trackers")
+                font.pixelSize: 11
+                onClicked: {
+                    let trackerIds = []
+                    for (let i = 0; i < app.listManager.count; ++i) {
+                        const entry = app.listManager.entryAt(i)
+                        if (entry.provider !== "SQLite" && entry.provider !== "Todo.txt") {
+                            trackerIds.push(entry.id)
+                        }
+                    }
+                    if (trackerIds.length > 0) {
+                        app.setMultiListFilter(trackerIds)
+                    }
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Button {
+                visible: selectionRoot.checkedListIds.length > 0
+                text: qsTr("Show selected (%1)").arg(selectionRoot.checkedListIds.length)
+                highlighted: true
+                font.bold: true
+                font.pixelSize: 11
+                onClicked: app.setMultiListFilter(selectionRoot.checkedListIds)
+            }
+        }
 
         ListView {
             id: listOverview
@@ -32,10 +96,18 @@ Item {
                 required property string directoryPath
 
                 width: listOverview.width
-                highlighted: listId === app.currentListId
+                highlighted: (listId === app.currentListId && !app.isMultiListView) || selectionRoot.isListChecked(listId)
 
                 contentItem: RowLayout {
                     spacing: 8
+
+                    CheckBox {
+                        id: listMultiCheck
+                        checked: selectionRoot.isListChecked(listRowDelegate.listId)
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Select to view together with other lists")
+                        onToggled: selectionRoot.toggleCheckedList(listRowDelegate.listId)
+                    }
 
                     ColumnLayout {
                         spacing: 0
@@ -62,14 +134,40 @@ Item {
                         Layout.fillWidth: true
                         spacing: 2
 
-                        Label {
-                            text: listRowDelegate.name
-                            font.bold: true
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
+                        RowLayout {
+                            spacing: 6
+                            Label {
+                                text: listRowDelegate.name
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+
+                            Rectangle {
+                                implicitHeight: 16
+                                implicitWidth: providerBadgeLabel.implicitWidth + 6
+                                radius: 3
+                                color: {
+                                    if (listRowDelegate.provider === "GitHub") return "#24292f"
+                                    if (listRowDelegate.provider === "GitLab") return "#e24329"
+                                    if (listRowDelegate.provider === "Jira") return "#0052cc"
+                                    if (listRowDelegate.provider === "YouTrack") return "#e02f5c"
+                                    return "#5c6b73"
+                                }
+                                opacity: 0.85
+
+                                Label {
+                                    id: providerBadgeLabel
+                                    anchors.centerIn: parent
+                                    text: listRowDelegate.provider
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                    color: "#ffffff"
+                                }
+                            }
                         }
+
                         Label {
-                            text: listRowDelegate.provider + " • " + listRowDelegate.directoryPath
+                            text: listRowDelegate.directoryPath
                             font.pixelSize: 11
                             opacity: 0.7
                             elide: Text.ElideMiddle
