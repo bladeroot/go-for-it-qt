@@ -1,4 +1,6 @@
 #include "TaskStoreModel.h"
+#include <QDateTime>
+#include <QVariantMap>
 #include <algorithm>
 
 namespace gofi {
@@ -224,6 +226,24 @@ void TaskStoreModel::setTaskStatus(int row, const QString& newStatus) {
 
 void TaskStoreModel::updateTaskDetails(int row, const QString& details) {
     setData(index(row, 0), details, DetailsRole);
+}
+
+void TaskStoreModel::appendTaskComment(int row, const QString& author, const QString& commentBody) {
+    if (row < 0 || row >= m_tasks.size() || commentBody.trimmed().isEmpty()) {
+        return;
+    }
+    TxtTask& t = m_tasks[row];
+    QVariantList comments = t.comments();
+    comments.append(QVariantMap{
+        {QStringLiteral("author"), author.trimmed().isEmpty() ? QStringLiteral("Me") : author.trimmed()},
+        {QStringLiteral("created"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"))},
+        {QStringLiteral("body"), commentBody.trimmed()}
+    });
+    t.setComments(comments);
+    const QModelIndex idx = index(row, 0);
+    emit dataChanged(idx, idx, {CommentsRole});
+    emit taskUpdated(row, t);
+    emit taskDataChanged();
 }
 
 TxtTask TaskStoreModel::taskAt(int row) const {

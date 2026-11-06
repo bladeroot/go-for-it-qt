@@ -402,6 +402,14 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         return;
     }
 
+    // Add comment to selected task in $EDITOR / nvim / vim: C
+    if (seq == "C") {
+        if (count > 0) {
+            addTaskCommentInVim();
+        }
+        return;
+    }
+
     // Select task for Pomodoro timer: Enter
     if (seq == "\r" || seq == "\n") {
         if (!isClosedTab() && count > 0) {
@@ -903,6 +911,64 @@ void TuiApp::editTaskDetailsInVim() {
     QFile::remove(tmpPath);
 }
 
+
+void TuiApp::addTaskCommentInVim() {
+    TaskFilterProxyModel* proxy = currentProxy();
+    if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
+        return;
+    }
+    const QString tmpPath = QStringLiteral("/tmp/gofi-task-comment-%1.md").arg(QCoreApplication::applicationPid());
+    {
+        QFile out(tmpPath);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            m_statusMessage = tr("Failed to create temporary comment file in /tmp.");
+            return;
+        }
+        out.close();
+    }
+
+    QString editor = qEnvironmentVariable("VISUAL").trimmed();
+    if (editor.isEmpty()) editor = qEnvironmentVariable("EDITOR").trimmed();
+    if (editor.isEmpty()) {
+        for (const QString& cand : {QStringLiteral("nvim"), QStringLiteral("vim"), QStringLiteral("vi"), QStringLiteral("nano")}) {
+            if (!QStandardPaths::findExecutable(cand).isEmpty()) {
+                editor = cand;
+                break;
+            }
+        }
+    }
+    if (editor.isEmpty()) {
+        m_statusMessage = tr("Use :comment <text> to post a comment.");
+        QFile::remove(tmpPath);
+        return;
+    }
+
+    if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
+    disableRawMode();
+
+    const int rc = QProcess::execute(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), editor + QStringLiteral(" \"") + tmpPath + QStringLiteral("\"")});
+
+    enableRawMode();
+    updateTerminalSize();
+    if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
+
+    QFile in(tmpPath);
+    if (rc == 0 && in.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString commentMd = QString::fromUtf8(in.readAll()).trimmed();
+        in.close();
+        if (!commentMd.isEmpty()) {
+            m_app->addTaskComment(isClosedTab(), m_selectedRow, commentMd);
+            if (m_mode == Mode::MarkdownView) {
+                openTaskMarkdownView();
+            }
+            m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
+        } else {
+            m_statusMessage = tr("Empty comment ignored.");
+        }
+    }
+    QFile::remove(tmpPath);
+}
+
 void TuiApp::openTaskMarkdownView() {
     TaskFilterProxyModel* proxy = currentProxy();
     if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
@@ -1093,6 +1159,13 @@ void TuiApp::handleMarkdownViewKey(const QByteArray& seq) {
         if (currentProxy()->rowCount() > 0) {
             editTaskDetailsInVim();
         }
+        return;
+    }
+    if (seq == "C" || seq == "c") {
+        if (currentProxy()->rowCount() > 0) {
+            addTaskCommentInVim();
+        }
+        return;
     }
 }
 
@@ -1156,6 +1229,19 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     if (cmdLine.startsWith(QStringLiteral("md ")) || cmdLine.startsWith(QStringLiteral("view "))) {
         const QString path = cmdLine.section(QLatin1Char(' '), 1).trimmed();
         openMarkdownFile(path);
+        return;
+    }
+    if (cmdLine == QStringLiteral("comment")) {
+        addTaskCommentInVim();
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("comment "))) {
+        const QString cText = cmdLine.mid(8).trimmed();
+        if (!cText.isEmpty() && currentProxy()->rowCount() > 0) {
+            m_app->addTaskComment(isClosedTab(), m_selectedRow, cText);
+            if (m_mode == Mode::MarkdownView) openTaskMarkdownView();
+            m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
+        }
         return;
     }
     if (cmdLine.startsWith(QStringLiteral("add "))) {
@@ -1298,7 +1384,7 @@ void TuiApp::render() {
             QStringLiteral("  s                                 Open Status Picker (1:To-Do, 2:In Progress, 3:Paused, 4:Done, 5:Canceled)"),
             QStringLiteral("  o / a                             Add new task (INSERT mode)"),
             QStringLiteral("  i / e / cw                        Edit selected task title inline"),
-            QStringLiteral("  E (Shift+e)                       Edit selected task full description"),
+            QStringLiteral("  E (Shift+e) / C (Shift+c)         Edit task description (E) or Add comment (C) in Vim & sync to Jira/YouTrack"),
             QStringLiteral("  dd                                Delete selected task"),
             QStringLiteral("  Enter                             Set selected task as active Pomodoro task"),
             QStringLiteral("  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)"),
@@ -1319,7 +1405,7 @@ void TuiApp::render() {
         }
     } else if (m_mode == Mode::MarkdownView) {
         out += BG_HEADER + FG_CYAN + ESC_BOLD
-            + padRight(QStringLiteral(" 📖 MARKDOWN VIEWER: %1  (j/k/d/u/g/G scroll, E edit, q/Esc close)").arg(m_markdownTitle), m_cols)
+            + padRight(QStringLiteral(" 📖 MARKDOWN VIEWER: %1  (j/k/d/u/g/G scroll, E edit desc, C add comment, q/Esc close)").arg(m_markdownTitle), m_cols)
             + ESC_RESET + QStringLiteral("\033[K\r\n");
         const QStringList mdLines = renderMarkdownToAnsi(m_markdownContent, m_cols);
         const int availRows = bodyRows - 1;

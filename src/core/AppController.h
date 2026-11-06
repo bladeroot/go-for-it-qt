@@ -65,6 +65,7 @@ public:
     Q_INVOKABLE void changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus);
     Q_INVOKABLE void updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText);
     Q_INVOKABLE void updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details);
+    Q_INVOKABLE void addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText);
     Q_INVOKABLE void removeTask(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxyRow);
     Q_INVOKABLE void moveActiveTaskByOffset(int delta);

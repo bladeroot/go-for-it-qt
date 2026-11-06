@@ -781,4 +781,309 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
     }
 }
 
+
+QJsonArray parseInlineMarkdownToAdfNodes(const QString& line) {
+    QJsonArray nodes;
+    if (line.isEmpty()) {
+        return nodes;
+    }
+    // Tokenize inline `code`, **bold**, *italic*, and [label](url)
+    static const QRegularExpression tokenRe(
+        QStringLiteral("(`[^`]+`|\\*\\*[^\\*]+\\*\\*|(?<!\\*)\\*[^\\*]+\\*(?!\\*)|\\[[^\\]]+\\]\\([^\\)]+\\))")
+    );
+    int lastIdx = 0;
+    auto it = tokenRe.globalMatch(line);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        if (m.capturedStart() > lastIdx) {
+            nodes.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("text")},
+                {QStringLiteral("text"), line.mid(lastIdx, m.capturedStart() - lastIdx)}
+            });
+        }
+        const QString tok = m.captured(0);
+        if (tok.startsWith(QLatin1Char('`')) && tok.endsWith(QLatin1Char('`'))) {
+            nodes.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("text")},
+                {QStringLiteral("text"), tok.mid(1, tok.size() - 2)},
+                {QStringLiteral("marks"), QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("code")}}}}
+            });
+        } else if (tok.startsWith(QStringLiteral("**")) && tok.endsWith(QStringLiteral("**"))) {
+            nodes.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("text")},
+                {QStringLiteral("text"), tok.mid(2, tok.size() - 4)},
+                {QStringLiteral("marks"), QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("strong")}}}}
+            });
+        } else if (tok.startsWith(QLatin1Char('*')) && tok.endsWith(QLatin1Char('*'))) {
+            nodes.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("text")},
+                {QStringLiteral("text"), tok.mid(1, tok.size() - 2)},
+                {QStringLiteral("marks"), QJsonArray{QJsonObject{{QStringLiteral("type"), QStringLiteral("em")}}}}
+            });
+        } else if (tok.startsWith(QLatin1Char('['))) {
+            const int closeBracket = tok.indexOf(QStringLiteral("]("));
+            if (closeBracket > 1 && tok.endsWith(QLatin1Char(')'))) {
+                const QString label = tok.mid(1, closeBracket - 1);
+                const QString href = tok.mid(closeBracket + 2, tok.size() - closeBracket - 3);
+                nodes.append(QJsonObject{
+                    {QStringLiteral("type"), QStringLiteral("text")},
+                    {QStringLiteral("text"), label},
+                    {QStringLiteral("marks"), QJsonArray{QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("link")},
+                        {QStringLiteral("attrs"), QJsonObject{{QStringLiteral("href"), href}}}
+                    }}}
+                });
+            }
+        }
+        lastIdx = m.capturedEnd();
+    }
+    if (lastIdx < line.size()) {
+        nodes.append(QJsonObject{
+            {QStringLiteral("type"), QStringLiteral("text")},
+            {QStringLiteral("text"), line.mid(lastIdx)}
+        });
+    }
+    return nodes;
+}
+
+QJsonObject IssueTrackerService::markdownToJiraAdf(const QString& markdown) {
+    QJsonArray docContent;
+    const QStringList lines = markdown.split(QLatin1Char('\n'));
+    bool inCodeBlock = false;
+    QString codeLang;
+    QStringList codeLines;
+    QJsonArray pendingListItems;
+
+    auto flushList = [&]() {
+        if (!pendingListItems.isEmpty()) {
+            docContent.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("bulletList")},
+                {QStringLiteral("content"), pendingListItems}
+            });
+            pendingListItems = QJsonArray();
+        }
+    };
+
+    for (const QString& rawLine : lines) {
+        const QString trimmed = rawLine.trimmed();
+        if (trimmed.startsWith(QStringLiteral("```"))) {
+            flushList();
+            if (!inCodeBlock) {
+                inCodeBlock = true;
+                codeLang = trimmed.mid(3).trimmed();
+                codeLines.clear();
+            } else {
+                inCodeBlock = false;
+                QJsonObject cb{
+                    {QStringLiteral("type"), QStringLiteral("codeBlock")},
+                    {QStringLiteral("content"), QJsonArray{QJsonObject{
+                        {QStringLiteral("type"), QStringLiteral("text")},
+                        {QStringLiteral("text"), codeLines.join(QStringLiteral("\n"))}
+                    }}}
+                };
+                if (!codeLang.isEmpty()) {
+                    cb[QStringLiteral("attrs")] = QJsonObject{{QStringLiteral("language"), codeLang}};
+                }
+                docContent.append(cb);
+            }
+            continue;
+        }
+        if (inCodeBlock) {
+            codeLines.append(rawLine);
+            continue;
+        }
+        if (trimmed.isEmpty()) {
+            flushList();
+            continue;
+        }
+        if (trimmed == QStringLiteral("---") || trimmed == QStringLiteral("***")) {
+            flushList();
+            docContent.append(QJsonObject{{QStringLiteral("type"), QStringLiteral("rule")}});
+            continue;
+        }
+        if (trimmed.startsWith(QLatin1Char('#'))) {
+            flushList();
+            int level = 0;
+            while (level < trimmed.size() && trimmed.at(level) == QLatin1Char('#')) ++level;
+            const QString hText = trimmed.mid(level).trimmed();
+            docContent.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("heading")},
+                {QStringLiteral("attrs"), QJsonObject{{QStringLiteral("level"), qBound(1, level, 6)}}},
+                {QStringLiteral("content"), parseInlineMarkdownToAdfNodes(hText)}
+            });
+            continue;
+        }
+        if (trimmed.startsWith(QStringLiteral("- ")) || trimmed.startsWith(QStringLiteral("* ")) || trimmed.startsWith(QStringLiteral("• "))) {
+            const QString itemText = trimmed.mid(2).trimmed();
+            pendingListItems.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("listItem")},
+                {QStringLiteral("content"), QJsonArray{QJsonObject{
+                    {QStringLiteral("type"), QStringLiteral("paragraph")},
+                    {QStringLiteral("content"), parseInlineMarkdownToAdfNodes(itemText)}
+                }}}
+            });
+            continue;
+        }
+        flushList();
+        if (trimmed.startsWith(QStringLiteral("> "))) {
+            docContent.append(QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("blockquote")},
+                {QStringLiteral("content"), QJsonArray{QJsonObject{
+                    {QStringLiteral("type"), QStringLiteral("paragraph")},
+                    {QStringLiteral("content"), parseInlineMarkdownToAdfNodes(trimmed.mid(2))}
+                }}}
+            });
+            continue;
+        }
+        docContent.append(QJsonObject{
+            {QStringLiteral("type"), QStringLiteral("paragraph")},
+            {QStringLiteral("content"), parseInlineMarkdownToAdfNodes(rawLine)}
+        });
+    }
+    flushList();
+
+    if (docContent.isEmpty()) {
+        docContent.append(QJsonObject{
+            {QStringLiteral("type"), QStringLiteral("paragraph")},
+            {QStringLiteral("content"), QJsonArray()}
+        });
+    }
+
+    return QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("doc")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("content"), docContent}
+    };
+}
+
+void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
+                                                 const QString& issueKey,
+                                                 const QString& markdownDetails,
+                                                 bool forceBearerAuth,
+                                                 bool useV2Fallback)
+{
+    if (issueKey.trimmed().isEmpty()) return;
+    const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+    if (baseUrl.isEmpty()) return;
+
+    if (listEntry.provider == QStringLiteral("Jira")) {
+        const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
+        const bool useV3 = isCloud && !useV2Fallback;
+        const QString apiVer = useV3 ? QStringLiteral("3") : QStringLiteral("2");
+        QUrl url(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed());
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry, forceBearerAuth);
+
+        QJsonObject fieldsObj;
+        if (useV3) {
+            fieldsObj[QStringLiteral("description")] = markdownToJiraAdf(markdownDetails);
+        } else {
+            fieldsObj[QStringLiteral("description")] = markdownDetails;
+        }
+        QJsonObject payload{{QStringLiteral("fields"), fieldsObj}};
+
+        QNetworkReply* reply = m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, markdownDetails, forceBearerAuth, useV3, useV2Fallback]() {
+            reply->deleteLater();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
+            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
+            if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
+                    updateIssueDescription(listEntry, issueKey, markdownDetails, true, useV2Fallback);
+                    return;
+                }
+                if (useV3 && !useV2Fallback && (httpStatus == 400 || httpStatus == 404)) {
+                    updateIssueDescription(listEntry, issueKey, markdownDetails, forceBearerAuth, true);
+                    return;
+                }
+                setStatusMessage(tr("Failed to update description on Jira (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Updated description on Jira issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
+        QUrl url(baseUrl + QStringLiteral("/api/issues/") + issueKey.trimmed() + QStringLiteral("?fields=id"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("description"), markdownDetails}};
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to update description on YouTrack (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Updated description on YouTrack issue %1.").arg(issueKey));
+        });
+    }
+}
+
+void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
+                                           const QString& issueKey,
+                                           const QString& markdownComment,
+                                           bool forceBearerAuth,
+                                           bool useV2Fallback)
+{
+    if (issueKey.trimmed().isEmpty() || markdownComment.trimmed().isEmpty()) return;
+    const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+    if (baseUrl.isEmpty()) return;
+
+    if (listEntry.provider == QStringLiteral("Jira")) {
+        const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
+        const bool useV3 = isCloud && !useV2Fallback;
+        const QString apiVer = useV3 ? QStringLiteral("3") : QStringLiteral("2");
+        QUrl url(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed() + QStringLiteral("/comment"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry, forceBearerAuth);
+
+        QJsonObject payload;
+        if (useV3) {
+            payload[QStringLiteral("body")] = markdownToJiraAdf(markdownComment);
+        } else {
+            payload[QStringLiteral("body")] = markdownComment;
+        }
+
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, markdownComment, forceBearerAuth, useV3, useV2Fallback]() {
+            reply->deleteLater();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
+            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
+            if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
+                    postIssueComment(listEntry, issueKey, markdownComment, true, useV2Fallback);
+                    return;
+                }
+                if (useV3 && !useV2Fallback && (httpStatus == 400 || httpStatus == 404)) {
+                    postIssueComment(listEntry, issueKey, markdownComment, forceBearerAuth, true);
+                    return;
+                }
+                setStatusMessage(tr("Failed to post comment to Jira (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Posted comment to Jira issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
+        QUrl url(baseUrl + QStringLiteral("/api/issues/") + issueKey.trimmed() + QStringLiteral("/comments?fields=id"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("text"), markdownComment},
+            {QStringLiteral("usesMarkdown"), true}
+        };
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to post comment to YouTrack (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Posted comment to YouTrack issue %1.").arg(issueKey));
+        });
+    }
+}
+
 } // namespace gofi

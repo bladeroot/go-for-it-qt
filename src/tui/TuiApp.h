@@ -54,6 +54,7 @@ private:
     void handleHelpKey(const QByteArray& seq);
     void openTaskMarkdownView();
     void editTaskDetailsInVim();
+    void addTaskCommentInVim();
     static QStringList renderMarkdownToAnsi(const QString& markdown, int maxWidth);
     static QString formatInlineMarkdown(const QString& text);
 

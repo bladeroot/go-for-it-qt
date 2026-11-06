@@ -168,6 +168,41 @@ void AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QSt
     if (sourceRow < 0) return;
 
     store->updateTaskDetails(sourceRow, details);
+
+    const TxtTask task = store->taskAt(sourceRow);
+    const int listIdx = m_listManager.indexOfId(m_currentListId);
+    if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
+        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        if (listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack")) {
+            m_issueTracker.updateIssueDescription(listEntry, task.jiraKey(), details);
+        }
+    }
+}
+
+void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText) {
+    if (commentText.trimmed().isEmpty()) return;
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    const int listIdx = m_listManager.indexOfId(m_currentListId);
+    QString author = QStringLiteral("Me");
+    if (listIdx >= 0) {
+        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        if (!listEntry.jiraUser.trimmed().isEmpty()) {
+            author = listEntry.jiraUser.trimmed();
+        }
+    }
+    store->appendTaskComment(sourceRow, author, commentText);
+
+    const TxtTask task = store->taskAt(sourceRow);
+    if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
+        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        if (listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack")) {
+            m_issueTracker.postIssueComment(listEntry, task.jiraKey(), commentText);
+        }
+    }
 }
 
 void AppController::removeTask(bool fromDoneList, int proxyRow) {

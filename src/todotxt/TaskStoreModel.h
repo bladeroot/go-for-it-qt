@@ -51,6 +51,7 @@ public:
     Q_INVOKABLE void updateTaskText(int row, const QString& simpleText);
     Q_INVOKABLE void setTaskStatus(int row, const QString& newStatus);
     Q_INVOKABLE void updateTaskDetails(int row, const QString& details);
+    Q_INVOKABLE void appendTaskComment(int row, const QString& author, const QString& commentBody);
 
     [[nodiscard]] const QVector<TxtTask>& tasks() const noexcept { return m_tasks; }
     [[nodiscard]] TxtTask taskAt(int row) const;

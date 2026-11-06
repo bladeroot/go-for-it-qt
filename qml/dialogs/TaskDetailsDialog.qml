@@ -132,9 +132,16 @@ Dialog {
                 }
             }
 
-            // Tab 2: Comments List (also rendered as Markdown!)
-            ListView {
-                id: commentsListView
+            // Tab 2: Comments List + Add Comment Composer
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 8
+
+                ListView {
+                    id: commentsListView
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                 clip: true
                 spacing: 8
                 model: detailsDialog.taskComments
@@ -172,11 +179,43 @@ Dialog {
                     }
                 }
 
-                Label {
-                    anchors.centerIn: parent
-                    visible: !detailsDialog.taskComments || detailsDialog.taskComments.length === 0
-                    text: qsTr("No comments synced for this task.")
-                    opacity: 0.6
+                    Label {
+                        anchors.centerIn: parent
+                        visible: !detailsDialog.taskComments || detailsDialog.taskComments.length === 0
+                        text: qsTr("No comments yet — write a comment below.")
+                        opacity: 0.6
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    TextArea {
+                        id: newCommentArea
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 64
+                        placeholderText: qsTr("Write a comment in Markdown (syncs to Jira / YouTrack)...")
+                        wrapMode: TextArea.Wrap
+                    }
+
+                    Button {
+                        text: qsTr("💬 Post Comment")
+                        enabled: newCommentArea.text.trim() !== ""
+                        onClicked: {
+                            const body = newCommentArea.text.trim()
+                            if (body === "" || detailsDialog.taskRow < 0) return
+                            app.addTaskComment(detailsDialog.fromDoneList, detailsDialog.taskRow, body)
+                            let updated = detailsDialog.taskComments ? detailsDialog.taskComments.slice() : []
+                            updated.push({
+                                author: qsTr("You"),
+                                created: Qt.formatDateTime(new Date(), "yyyy-MM-dd hh:mm"),
+                                body: body
+                            })
+                            detailsDialog.taskComments = updated
+                            newCommentArea.text = ""
+                        }
+                    }
                 }
             }
         }

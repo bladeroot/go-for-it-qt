@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
+#include <QJsonObject>
 #include <QObject>
 #include <QVariantList>
 #include <QVariantMap>
@@ -40,6 +41,17 @@ public:
                      const QString& issueKey,
                      const QDateTime& startTimeUtc,
                      quint32 runtimeSeconds);
+    void updateIssueDescription(const TodoListEntry& listEntry,
+                                const QString& issueKey,
+                                const QString& markdownDetails,
+                                bool forceBearerAuth = false,
+                                bool useV2Fallback = false);
+    void postIssueComment(const TodoListEntry& listEntry,
+                          const QString& issueKey,
+                          const QString& markdownComment,
+                          bool forceBearerAuth = false,
+                          bool useV2Fallback = false);
+    static QJsonObject markdownToJiraAdf(const QString& markdown);
 
     // Fetch available remote statuses for mapping UI
     Q_INVOKABLE void fetchRemoteStatuses(const QString& provider,
