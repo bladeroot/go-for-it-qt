@@ -40,11 +40,11 @@ const QString BG_MODE_NORM   = QStringLiteral("\033[48;5;31m\033[38;5;255m\033[1
 const QString BG_MODE_INS    = QStringLiteral("\033[48;5;28m\033[38;5;255m\033[1m");
 const QString BG_MODE_CMD    = QStringLiteral("\033[48;5;130m\033[38;5;255m\033[1m");
 QString statusLabel(const QString& status) {
-    if (status == QStringLiteral("in_progress")) return QStringLiteral("In Progress");
-    if (status == QStringLiteral("paused")) return QStringLiteral("Paused");
-    if (status == QStringLiteral("done")) return QStringLiteral("Done");
-    if (status == QStringLiteral("canceled")) return QStringLiteral("Canceled / Rejected");
-    return QStringLiteral("To-Do");
+    if (status == QStringLiteral("in_progress")) return TuiApp::tr("In Progress");
+    if (status == QStringLiteral("paused")) return TuiApp::tr("Paused");
+    if (status == QStringLiteral("done")) return TuiApp::tr("Done");
+    if (status == QStringLiteral("canceled")) return TuiApp::tr("Canceled / Rejected");
+    return TuiApp::tr("To-Do");
 }
 } // namespace
 
@@ -59,7 +59,10 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
         render();
     });
     connect(m_app, &AppController::activeTodoRowChanged, this, &TuiApp::render);
-    connect(m_app, &AppController::languageChanged, this, &TuiApp::render);
+    connect(m_app, &AppController::languageChanged, this, [this]() {
+        m_statusMessage = tr("Vim keys: j/k move, Space toggle done, s status, o add, i edit, t timer, r sync, L lists, / search, : cmd, ? help");
+        render();
+    });
     connect(m_app->timer(), &TaskTimer::timerUpdated, this, &TuiApp::render);
     connect(m_app->timer(), &TaskTimer::runningChanged, this, &TuiApp::render);
     connect(m_app->timer(), &TaskTimer::breakActiveChanged, this, &TuiApp::render);
@@ -991,10 +994,10 @@ void TuiApp::openTaskMarkdownView() {
     if (!details.trimmed().isEmpty()) {
         fullMd += details.trimmed() + QStringLiteral("\n\n");
     } else {
-        fullMd += QStringLiteral("*No description provided (press `E` to edit description).*\n\n");
+        fullMd += tr("*No description provided (press `E` to edit description).*") + QStringLiteral("\n\n");
     }
     if (!comments.isEmpty()) {
-        fullMd += QStringLiteral("---\n## 💬 Comments (%1)\n\n").arg(comments.size());
+        fullMd += QStringLiteral("---\n## 💬 ") + tr("Comments (%1)").arg(comments.size()) + QStringLiteral("\n\n");
         for (const QVariant& cv : comments) {
             const QVariantMap cm = cv.toMap();
             fullMd += QStringLiteral("### %1 (%2)\n%3\n\n").arg(
@@ -1303,8 +1306,8 @@ void TuiApp::render() {
     const QString listBadge = QStringLiteral(" 🍅 Go for It Qt [VIM TUI] │ 📋 %1 (%2) ")
         .arg(m_app->currentListName(), m_app->currentListProvider());
     const QString syncInfo = m_app->issueTracker()->isSyncing()
-        ? QStringLiteral("⟳ Syncing...")
-        : QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
+        ? tr("⟳ Syncing...")
+        : tr("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
     const int headerGap = qMax(1, m_cols - static_cast<int>(listBadge.size()) - static_cast<int>(syncInfo.size()) - 1);
     out += BG_HEADER + FG_CYAN + ESC_BOLD + listBadge + ESC_RESET + BG_HEADER
         + QString(headerGap, QLatin1Char(' ')) + FG_GRAY + syncInfo + QLatin1Char(' ') + ESC_RESET + QStringLiteral("\033[K\r\n");
@@ -1314,8 +1317,8 @@ void TuiApp::render() {
     // -------------------------------------------------------------------------
     TaskTimer* timer = m_app->timer();
     const QString stateBadge = timer->isRunning()
-        ? (timer->isBreakActive() ? (FG_GREEN + QStringLiteral("☕ BREAK RUNNING")) : (FG_ORANGE + QStringLiteral("▶ WORK RUNNING")))
-        : (timer->isBreakActive() ? (FG_GREEN + QStringLiteral("☕ BREAK PAUSED"))  : (FG_YELLOW + QStringLiteral("⏸ TIMER READY")));
+        ? (timer->isBreakActive() ? (FG_GREEN + tr("☕ BREAK RUNNING")) : (FG_ORANGE + tr("▶ WORK RUNNING")))
+        : (timer->isBreakActive() ? (FG_GREEN + tr("☕ BREAK PAUSED"))  : (FG_YELLOW + tr("⏸ TIMER READY")));
     const QString clockStr = formatSeconds(timer->remainingSeconds());
     const int barWidth = 16;
     const int filled = qBound(0, static_cast<int>(timer->progress() * barWidth), barWidth);
@@ -1336,12 +1339,12 @@ void TuiApp::render() {
     // Row 3: View / Status Filter Tabs (1..6)
     // -------------------------------------------------------------------------
     const QStringList tabNames = {
-        QStringLiteral(" 1:All Open "),
-        QStringLiteral(" 2:To-Do "),
-        QStringLiteral(" 3:In Progress "),
-        QStringLiteral(" 4:Paused "),
-        QStringLiteral(" 5:Done "),
-        QStringLiteral(" 6:Canceled ")
+        tr(" 1:All Open "),
+        tr(" 2:To-Do "),
+        tr(" 3:In Progress "),
+        tr(" 4:Paused "),
+        tr(" 5:Done "),
+        tr(" 6:Canceled ")
     };
     out += QStringLiteral(" ");
     for (int i = 0; i < tabNames.size(); ++i) {
@@ -1382,24 +1385,24 @@ void TuiApp::render() {
 
     if (m_mode == Mode::Help) {
         const QStringList helpLines = {
-            QStringLiteral("  VIM NAVIGATION & ACTIONS"),
-            QStringLiteral("  j / k / gg / G / Ctrl+d / Ctrl+u  Move cursor down / up / top / bottom / half-page"),
-            QStringLiteral("  J / K (Shift+j / Shift+k)         Move selected task down / up in order"),
-            QStringLiteral("  h / l or 1..6 or gt / gT          Switch status tab (All Open, To-Do, In Progress, Paused, Done, Canceled)"),
-            QStringLiteral("  Space or x                        Toggle task Done / To-Do"),
-            QStringLiteral("  s                                 Open Status Picker (1:To-Do, 2:In Progress, 3:Paused, 4:Done, 5:Canceled)"),
-            QStringLiteral("  o / a                             Add new task (INSERT mode)"),
-            QStringLiteral("  i / e / cw                        Edit selected task title inline"),
-            QStringLiteral("  E (Shift+e) / C (Shift+c)         Edit task description (E) or Add comment (C) in Vim & sync to Jira/YouTrack"),
-            QStringLiteral("  dd                                Delete selected task"),
-            QStringLiteral("  Enter                             Set selected task as active Pomodoro task"),
-            QStringLiteral("  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)"),
-            QStringLiteral("  r / Ctrl+r                        Sync current list with Jira / YouTrack"),
-            QStringLiteral("  L (a:Add, e:Edit, d:Delete)       Open List Manager (create/edit SQLite, Jira, YouTrack lists)"),
-            QStringLiteral("  O or :set / :settings             Open Global Settings (Timer, Notifications, Storage/DB Backup)"),
-            QStringLiteral("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
-            QStringLiteral("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
-            QStringLiteral("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
+            tr("  VIM NAVIGATION & ACTIONS"),
+            tr("  j / k / gg / G / Ctrl+d / Ctrl+u  Move cursor down / up / top / bottom / half-page"),
+            tr("  J / K (Shift+j / Shift+k)         Move selected task down / up in order"),
+            tr("  h / l or 1..6 or gt / gT          Switch status tab (All Open, To-Do, In Progress, Paused, Done, Canceled)"),
+            tr("  Space or x                        Toggle task Done / To-Do"),
+            tr("  s                                 Open Status Picker (1:To-Do, 2:In Progress, 3:Paused, 4:Done, 5:Canceled)"),
+            tr("  o / a                             Add new task (INSERT mode)"),
+            tr("  i / e / cw                        Edit selected task title inline"),
+            tr("  E (Shift+e) / C (Shift+c)         Edit task description (E) or Add comment (C) in Vim & sync to Jira/YouTrack"),
+            tr("  dd                                Delete selected task"),
+            tr("  Enter                             Set selected task as active Pomodoro task"),
+            tr("  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)"),
+            tr("  r / Ctrl+r                        Sync current list with Jira / YouTrack"),
+            tr("  L (a:Add, e:Edit, d:Delete)       Open List Manager (create/edit SQLite, Jira, YouTrack lists)"),
+            tr("  O or :set / :settings             Open Global Settings (Timer, Notifications, Storage/DB Backup)"),
+            tr("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
+            tr("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
+            tr("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
         };
         for (int r = 0; r < bodyRows; ++r) {
             if (r < helpLines.size()) {
@@ -1411,7 +1414,7 @@ void TuiApp::render() {
         }
     } else if (m_mode == Mode::MarkdownView) {
         out += BG_HEADER + FG_CYAN + ESC_BOLD
-            + padRight(QStringLiteral(" 📖 MARKDOWN VIEWER: %1  (j/k/d/u/g/G scroll, E edit desc, C add comment, q/Esc close)").arg(m_markdownTitle), m_cols)
+            + padRight(tr(" 📖 MARKDOWN VIEWER: %1  (j/k/d/u/g/G scroll, E edit desc, C add comment, q/Esc close)").arg(m_markdownTitle), m_cols)
             + ESC_RESET + QStringLiteral("\033[K\r\n");
         const QStringList mdLines = renderMarkdownToAnsi(m_markdownContent, m_cols);
         const int availRows = bodyRows - 1;
@@ -1426,19 +1429,19 @@ void TuiApp::render() {
             }
         }
     } else if (m_mode == Mode::Settings || m_mode == Mode::EditSettingValue) {
-        out += FG_CYAN + ESC_BOLD + QStringLiteral("  ⚙ SETTINGS (j/k move, Enter/Space/h/l change, q/Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        out += FG_CYAN + ESC_BOLD + tr("  ⚙ SETTINGS (j/k move, Enter/Space/h/l change, q/Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         SettingsManager* s = m_app->settings();
         const QStringList settingItems = {
-            QStringLiteral("Pomodoro Work Duration (min)    : %1 min").arg(s->taskDuration() / 60),
-            QStringLiteral("Pomodoro Break Duration (min)   : %1 min").arg(s->breakDuration() / 60),
-            QStringLiteral("Reminder Before End (sec)       : %1 sec").arg(s->reminderTime()),
-            QStringLiteral("Mute Sound Notifications        : %1").arg(s->muteSounds() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
-            QStringLiteral("GUI Dark Theme                  : %1").arg(s->useDarkTheme() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
-            QStringLiteral("Add New Tasks On Top            : %1").arg(s->newTasksOnTop() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
-            QStringLiteral("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
-            QStringLiteral("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
-            QStringLiteral("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
-            QStringLiteral("Language (Enter to cycle)       : [%1] (system / uk / en)").arg(s->language())
+            tr("Pomodoro Work Duration (min)    : %1 min").arg(s->taskDuration() / 60),
+            tr("Pomodoro Break Duration (min)   : %1 min").arg(s->breakDuration() / 60),
+            tr("Reminder Before End (sec)       : %1 sec").arg(s->reminderTime()),
+            tr("Mute Sound Notifications        : %1").arg(s->muteSounds() ? tr("[ON]") : tr("[OFF]")),
+            tr("GUI Dark Theme                  : %1").arg(s->useDarkTheme() ? tr("[ON]") : tr("[OFF]")),
+            tr("Add New Tasks On Top            : %1").arg(s->newTasksOnTop() ? tr("[ON]") : tr("[OFF]")),
+            tr("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? tr("[ON]") : tr("[OFF]")),
+            tr("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
+            tr("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
+            tr("Language (Enter to cycle)       : [%1] (system / uk / en)").arg(s->language())
         };
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
@@ -1452,19 +1455,19 @@ void TuiApp::render() {
             }
         }
     } else if (m_mode == Mode::ListEdit || m_mode == Mode::EditListField) {
-        out += FG_CYAN + ESC_BOLD + QStringLiteral("  ✎ EDIT LIST CONFIGURATION (j/k move, Enter/Space edit, q/Esc cancel):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        out += FG_CYAN + ESC_BOLD + tr("  ✎ EDIT LIST CONFIGURATION (j/k move, Enter/Space edit, q/Esc cancel):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         const QString prov = m_editingListCfg.value(QStringLiteral("provider")).toString();
         const QString tokenRaw = m_editingListCfg.value(QStringLiteral("apiToken")).toString();
-        const QString tokenMasked = tokenRaw.isEmpty() ? QStringLiteral("(empty)") : (tokenRaw.left(4) + QStringLiteral("••••••••"));
+        const QString tokenMasked = tokenRaw.isEmpty() ? tr("(empty)") : (tokenRaw.left(4) + QStringLiteral("••••••••"));
         const QStringList editItems = {
-            QStringLiteral("1. List Name                    : %1").arg(m_editingListCfg.value(QStringLiteral("name")).toString()),
-            QStringLiteral("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack)").arg(prov),
-            QStringLiteral("3. Server URL                   : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUrl")).toString()),
-            QStringLiteral("4. Jira Email / Username        : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUser")).toString()),
-            QStringLiteral("5. API Token / Permanent Token  : %1").arg(tokenMasked),
-            QStringLiteral("6. JQL / Search Query           : %1").arg(m_editingListCfg.value(QStringLiteral("jiraJql")).toString()),
-            QStringLiteral("7. Auto-log Pomodoro Worklog    : %1").arg(m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
-            QStringLiteral("8. >>> [ SAVE & ACTIVATE LIST ] <<<")
+            tr("1. List Name                    : %1").arg(m_editingListCfg.value(QStringLiteral("name")).toString()),
+            tr("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack)").arg(prov),
+            tr("3. Server URL                   : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUrl")).toString()),
+            tr("4. Jira Email / Username        : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUser")).toString()),
+            tr("5. API Token / Permanent Token  : %1").arg(tokenMasked),
+            tr("6. JQL / Search Query           : %1").arg(m_editingListCfg.value(QStringLiteral("jiraJql")).toString()),
+            tr("7. Auto-log Pomodoro Worklog    : %1").arg(m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool() ? tr("[ON]") : tr("[OFF]")),
+            tr("8. >>> [ SAVE & ACTIVATE LIST ] <<<")
         };
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
@@ -1478,7 +1481,7 @@ void TuiApp::render() {
             }
         }
     } else if (m_mode == Mode::ListPicker) {
-        out += FG_CYAN + ESC_BOLD + QStringLiteral("  📋 LISTS (j/k move, Enter select, a:Add new, e:Edit Jira/YouTrack, d:Delete, Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
+        out += FG_CYAN + ESC_BOLD + tr("  📋 LISTS (j/k move, Enter select, a:Add new, e:Edit Jira/YouTrack, d:Delete, Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         const int nLists = m_app->listManager()->rowCount();
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
@@ -1488,7 +1491,7 @@ void TuiApp::render() {
                 const bool isSel = (idx == m_listPickerRow);
                 const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
                 const QString line = QStringLiteral("%1[%2] %3 %4")
-                    .arg(prefix, e.provider, e.name, isCur ? QStringLiteral("(active)") : QString());
+                    .arg(prefix, e.provider, e.name, isCur ? tr("(active)") : QString());
                 out += (isSel ? (BG_SELECTED + FG_WHITE + ESC_BOLD) : FG_WHITE)
                     + padRight(line, m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
@@ -1500,7 +1503,7 @@ void TuiApp::render() {
             const int rowIdx = m_scrollOffset + r;
             if (rowIdx >= totalTasks) {
                 if (totalTasks == 0 && r == 0) {
-                    out += FG_GRAY + QStringLiteral("   (No tasks in this view — press 'o' to add a task or 'r' to sync Jira/YouTrack)")
+                    out += FG_GRAY + tr("   (No tasks in this view — press 'o' to add a task or 'r' to sync Jira/YouTrack)")
                         + ESC_RESET + QStringLiteral("\033[K\r\n");
                 } else {
                     out += FG_GRAY + QStringLiteral(" ~") + ESC_RESET + QStringLiteral("\033[K\r\n");
@@ -1573,8 +1576,9 @@ void TuiApp::render() {
         // Preview Pane (Full Description + Comments of Selected Task)
         // ---------------------------------------------------------------------
         if (m_showPreview) {
-            out += FG_GRAY + QStringLiteral("── Preview (p: toggle, E: edit description, Ctrl+e/Ctrl+y: scroll) ")
-                + QString(qMax(0, m_cols - 67), QChar(0x2500)) + ESC_RESET + QStringLiteral("\033[K\r\n");
+            const QString prevHdr = tr("── Preview (p: toggle, E: edit description, Ctrl+e/Ctrl+y: scroll) ");
+            out += FG_GRAY + prevHdr
+                + QString(qMax(0, m_cols - static_cast<int>(prevHdr.size())), QChar(0x2500)) + ESC_RESET + QStringLiteral("\033[K\r\n");
 
             QStringList previewLines;
             if (totalTasks > 0 && m_selectedRow < totalTasks) {
@@ -1588,11 +1592,11 @@ void TuiApp::render() {
                 if (!details.isEmpty()) {
                     previewLines.append(renderMarkdownToAnsi(details, m_cols));
                 } else {
-                    previewLines.append(FG_GRAY + QStringLiteral("  (No detailed description — press 'E' to add, 'v' for full MD viewer)") + ESC_RESET);
+                    previewLines.append(FG_GRAY + tr("  (No detailed description — press 'E' to add, 'v' for full MD viewer)") + ESC_RESET);
                 }
 
                 if (!comments.isEmpty()) {
-                    previewLines.append(FG_YELLOW + ESC_BOLD + QStringLiteral("  ── Comments (%1) ──").arg(comments.size()) + ESC_RESET);
+                    previewLines.append(FG_YELLOW + ESC_BOLD + tr("  ── Comments (%1) ──").arg(comments.size()) + ESC_RESET);
                     for (const QVariant& cv : comments) {
                         const QVariantMap cm = cv.toMap();
                         previewLines.append(FG_PURPLE + QStringLiteral("  • %1 (%2):").arg(cm.value(QStringLiteral("author")).toString(), cm.value(QStringLiteral("created")).toString()) + ESC_RESET);
@@ -1600,7 +1604,7 @@ void TuiApp::render() {
                     }
                 }
             } else {
-                previewLines.append(FG_GRAY + QStringLiteral("  (No task selected)") + ESC_RESET);
+                previewLines.append(FG_GRAY + tr("  (No task selected)") + ESC_RESET);
             }
 
             const int maxScroll = qMax(0, static_cast<int>(previewLines.size()) - previewRows);
@@ -1648,20 +1652,20 @@ void TuiApp::render() {
     // Row m_rows: Command / Input / Status Message Bar
     // -------------------------------------------------------------------------
     if (m_mode == Mode::InsertTask) {
-        out += FG_GREEN + ESC_BOLD + QStringLiteral("New task: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += FG_GREEN + ESC_BOLD + tr("New task: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::EditTask) {
-        out += FG_YELLOW + ESC_BOLD + QStringLiteral("Edit task: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += FG_YELLOW + ESC_BOLD + tr("Edit task: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::EditDetails) {
-        out += FG_YELLOW + ESC_BOLD + QStringLiteral("Edit description: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += FG_YELLOW + ESC_BOLD + tr("Edit description: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::Search) {
         out += FG_CYAN + ESC_BOLD + QStringLiteral("/") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::Command) {
         out += FG_ORANGE + ESC_BOLD + QStringLiteral(":") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::EditSettingValue || m_mode == Mode::EditListField) {
-        out += FG_YELLOW + ESC_BOLD + QStringLiteral("Enter value: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += FG_YELLOW + ESC_BOLD + tr("Enter value: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::StatusPicker) {
         out += FG_YELLOW + ESC_BOLD
-            + QStringLiteral("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")
+            + tr("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")
             + ESC_RESET + QStringLiteral("\033[K");
     } else {
         out += FG_GRAY + truncateVisible(m_statusMessage, m_cols - 1) + ESC_RESET + QStringLiteral("\033[K");
