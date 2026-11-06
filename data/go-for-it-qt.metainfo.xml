@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>go-for-it-qt.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Go for It Qt</name>
+  <summary>To-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync</summary>
+  <description>
+    <p>
+      Go for It Qt is a modern C++20 / Qt 6 productivity application combining task management with a Pomodoro timer.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Single-file SQLite storage with backup export/import and customizable path</li>
+      <li>Native Jira (Cloud / Data Center) and JetBrains YouTrack issue synchronization</li>
+      <li>5 local workflow statuses (To-Do, In Progress, Paused, Done, Canceled/Rejected) with remote status mapping</li>
+      <li>Full task description and comments viewer</li>
+      <li>Automatic Pomodoro worklog / workItem time logging to Jira and YouTrack</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">go-for-it-qt.desktop</launchable>
+  <url type="homepage">https://github.com/bladeroot/go-for-it-qt</url>
+  <url type="bugtracker">https://github.com/bladeroot/go-for-it-qt/issues</url>
+  <developer id="io.github.bladeroot">
+    <name>Yurii Myronchuk (@bladeroot)</name>
+  </developer>
+  <provides>
+    <binary>go-for-it-qt</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+</component>

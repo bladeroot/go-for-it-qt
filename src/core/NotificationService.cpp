@@ -3,6 +3,7 @@
 #include <QDBusInterface>
 #include <QDBusMessage>
 #include <QFileInfo>
+#include <QCoreApplication>
 #include <QStandardPaths>
 #include <QVariantMap>
 
@@ -62,12 +63,17 @@ QUrl NotificationService::resolveSoundUrl(const QString& presetOrPath) {
         return QUrl::fromLocalFile(directInfo.absoluteFilePath());
     }
 
-#ifdef GOFI_SOURCE_DATADIR
-    const QString repoSoundPath = QStringLiteral(GOFI_SOURCE_DATADIR) + QStringLiteral("/sounds/") + presetOrPath;
-    if (QFileInfo::exists(repoSoundPath)) {
-        return QUrl::fromLocalFile(repoSoundPath);
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList relCandidates = {
+        appDir + QStringLiteral("/data/sounds/") + presetOrPath,
+        appDir + QStringLiteral("/../share/go-for-it-qt/sounds/") + presetOrPath,
+        appDir + QStringLiteral("/../data/sounds/") + presetOrPath
+    };
+    for (const QString& cand : relCandidates) {
+        if (QFileInfo::exists(cand)) {
+            return QUrl::fromLocalFile(QFileInfo(cand).canonicalFilePath());
+        }
     }
-#endif
 
     QString sysSound = QStandardPaths::locate(
         QStandardPaths::GenericDataLocation,

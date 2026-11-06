@@ -48,3 +48,26 @@ sudo cmake --install build --prefix /usr/local
 - **Go for It Qt (`go-for-it-qt`)** — C++20 / Qt 6 port, SQLite storage engine, extended statuses, and Jira/YouTrack integration by **Yurii Myronchuk (@bladeroot)**.
 - Based on the original **Go-For-It!** (Vala / GTK3) created by **Manuel Kehl** (2014–2017) and **Jonathan Moerman** (2017–2021).
 - Licensed under the **GNU General Public License v3.0 (GPL-3.0)** — see [LICENSE](LICENSE).
+
+---
+
+## 📦 System Packaging
+
+### Arch Linux / CachyOS (`PKGBUILD`)
+A ready-to-use `PKGBUILD` is included in the repository root and in `packaging/arch/PKGBUILD`:
+```bash
+makepkg -si
+```
+
+### Debian / Ubuntu (`.deb`)
+You can build a `.deb` package directly with **CPack**:
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+cmake --build build -j$(nproc)
+cpack --config build/CPackConfig.cmake -G DEB -B build
+```
+Or using standard `dpkg-buildpackage` with `packaging/debian`:
+```bash
+ln -sf packaging/debian debian
+dpkg-buildpackage -us -uc -b
+```

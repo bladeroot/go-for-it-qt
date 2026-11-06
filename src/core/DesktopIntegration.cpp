@@ -50,14 +50,20 @@ void DesktopIntegration::setupTrayIcon() {
     m_trayIcon = new QSystemTrayIcon(this);
 
     QIcon icon = QIcon::fromTheme(QStringLiteral("go-for-it-qt"), QIcon::fromTheme(QStringLiteral("com.github.jmoerman.go-for-it")));
-#ifdef GOFI_SOURCE_DATADIR
     if (icon.isNull()) {
-        const QString svgPath = QStringLiteral(GOFI_SOURCE_DATADIR) + QStringLiteral("/icons/48x48/apps/go-for-it.svg");
-        if (QFileInfo::exists(svgPath)) {
-            icon = QIcon(svgPath);
+        const QString appDir = QCoreApplication::applicationDirPath();
+        const QStringList svgCandidates = {
+            appDir + QStringLiteral("/data/icons/48x48/apps/go-for-it.svg"),
+            appDir + QStringLiteral("/../share/icons/hicolor/scalable/apps/go-for-it-qt.svg"),
+            appDir + QStringLiteral("/../data/icons/48x48/apps/go-for-it.svg")
+        };
+        for (const QString& cand : svgCandidates) {
+            if (QFileInfo::exists(cand)) {
+                icon = QIcon(cand);
+                break;
+            }
         }
     }
-#endif
     if (icon.isNull() && QApplication::style()) {
         icon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);
     }

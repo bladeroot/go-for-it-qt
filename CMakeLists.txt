@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 project(go-for-it-qt
     VERSION 1.9.5
     DESCRIPTION "Go for It Qt — A stylish to-do list with built-in productivity timer (Qt 6)"
+    HOMEPAGE_URL "https://github.com/bladeroot/go-for-it-qt"
     LANGUAGES CXX
 )
 
@@ -10,6 +11,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
+
+include(GNUInstallDirs)
+include(CTest)
 
 find_package(Qt6 REQUIRED COMPONENTS
     Core
@@ -22,17 +26,16 @@ find_package(Qt6 REQUIRED COMPONENTS
     DBus
     Sql
     Network
-    Test
 )
+
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+endif()
 
 qt_standard_project_setup(REQUIRES 6.5)
 if(COMMAND qt_policy)
     qt_policy(SET QTP0004 OLD)
 endif()
-
-add_compile_definitions(
-    GOFI_SOURCE_DATADIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
-)
 
 set(GOFI_CORE_SOURCES
     src/core/Schedule.h
@@ -113,35 +116,103 @@ target_link_libraries(go-for-it-qt PRIVATE
     gofi_core
 )
 
-enable_testing()
+# Copy runtime data into build tree so uninstalled builds find sounds/icons relative to binary
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
-add_executable(tst_todotxt
-    tests/tst_todotxt.cpp
-)
-target_link_libraries(tst_todotxt PRIVATE
-    gofi_core
-    Qt6::Test
-)
-add_test(NAME tst_todotxt COMMAND tst_todotxt)
+if(BUILD_TESTING)
+    add_executable(tst_todotxt
+        tests/tst_todotxt.cpp
+    )
+    target_link_libraries(tst_todotxt PRIVATE
+        gofi_core
+        Qt6::Test
+    )
+    add_test(NAME tst_todotxt COMMAND tst_todotxt)
+endif()
 
-include(GNUInstallDirs)
+# ==============================================================================
+# System Installation Targets (Arch PKGBUILD, Debian/Ubuntu .deb, Fedora .rpm)
+# ==============================================================================
 
 install(TARGETS go-for-it-qt
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Runtime
 )
 
 install(FILES data/go-for-it-qt.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+    COMPONENT Runtime
+)
+
+install(FILES data/go-for-it-qt.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
+    COMPONENT Runtime
 )
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/sounds/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/go-for-it-qt/sounds
+    COMPONENT Runtime
     FILES_MATCHING PATTERN "*.ogg"
 )
 
+foreach(ICON_SIZE 16x16 24x24 32x32 48x48 64x64 128x128)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/${ICON_SIZE}/apps/go-for-it.svg")
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/${ICON_SIZE}/apps/go-for-it.svg"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${ICON_SIZE}/apps"
+            RENAME go-for-it-qt.svg
+            COMPONENT Runtime
+        )
+    endif()
+endforeach()
+
+foreach(SYM_SIZE 16x16 24x24)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/${SYM_SIZE}/apps/go-for-it-symbolic.svg")
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/${SYM_SIZE}/apps/go-for-it-symbolic.svg"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/${SYM_SIZE}/apps"
+            RENAME go-for-it-qt-symbolic.svg
+            COMPONENT Runtime
+        )
+    endif()
+endforeach()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/48x48/apps/go-for-it.svg")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/48x48/apps/go-for-it.svg"
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
         RENAME go-for-it-qt.svg
+        COMPONENT Runtime
     )
 endif()
+
+install(FILES LICENSE
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${PROJECT_NAME}"
+    COMPONENT Runtime
+)
+
+install(FILES README.md AUTHORS
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+    COMPONENT Runtime
+)
+
+# ==============================================================================
+# CPack Configuration (for `cpack -G DEB` / `cpack -G TGZ`)
+# ==============================================================================
+set(CPACK_PACKAGE_NAME "go-for-it-qt")
+set(CPACK_PACKAGE_VENDOR "Yurii Myronchuk (@bladeroot)")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_CONTACT "Yurii Myronchuk <yurii.myronchuk@gmail.com>")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_STRIP_FILES TRUE)
+
+# Debian / Ubuntu (.deb) specific settings
+set(CPACK_DEBIAN_PACKAGE_NAME "go-for-it-qt")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Yurii Myronchuk <yurii.myronchuk@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-dialogs, libqt6sql6-sqlite")
+
+include(CPack)
