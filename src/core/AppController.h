@@ -10,6 +10,7 @@
 #include "TaskFilterProxyModel.h"
 #include "TaskManager.h"
 #include "TaskTimer.h"
+#include "UkTranslator.h"
 #include <QObject>
 
 namespace gofi {
@@ -83,6 +84,7 @@ signals:
     void showingOverviewChanged();
     void currentListChanged();
     void storagePathChanged();
+    void languageChanged();
     void activeTodoRowChanged();
     void notificationRequested(const QString& title, const QString& body);
     void showWindowRequested();
@@ -95,8 +97,10 @@ private slots:
 
 private:
     void syncActiveTaskToTimer();
+    void applyLanguageTranslator();
 
     SettingsManager m_settings;
+    UkTranslator m_ukTranslator;
     ShortcutManager m_shortcuts;
     TaskTimer m_timer;
     NotificationService m_notifications;

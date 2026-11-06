@@ -46,6 +46,8 @@ set(GOFI_CORE_SOURCES
     src/core/IssueTrackerService.cpp
     src/core/SettingsManager.h
     src/core/SettingsManager.cpp
+    src/core/UkTranslator.h
+    src/core/UkTranslator.cpp
     src/core/ShortcutManager.h
     src/core/ShortcutManager.cpp
     src/core/ActivityLog.h

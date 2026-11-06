@@ -91,6 +91,7 @@ int main(int argc, char* argv[]) {
         Qt::QueuedConnection
     );
 
+    QObject::connect(&controller, &gofi::AppController::languageChanged, &engine, &QQmlApplicationEngine::retranslate);
     engine.loadFromModule("GoForIt", "Main");
     return app.exec();
 }

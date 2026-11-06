@@ -273,6 +273,29 @@ Dialog {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Label { text: qsTr("Language:"); Layout.fillWidth: true }
+                    ComboBox {
+                        id: langCombo
+                        model: [
+                            { id: "system", label: qsTr("System (Auto)") },
+                            { id: "uk", label: "Українська (Ukrainian)" },
+                            { id: "en", label: "English" }
+                        ]
+                        textRole: "label"
+                        valueRole: "id"
+                        Component.onCompleted: {
+                            if (app.settings.language === "uk") currentIndex = 1
+                            else if (app.settings.language === "en") currentIndex = 2
+                            else currentIndex = 0
+                        }
+                        onActivated: function(idx) {
+                            app.settings.language = model[idx].id
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
                     Label { text: qsTr("Color scheme:"); Layout.fillWidth: true }
                     ComboBox {
                         model: [qsTr("Default"), qsTr("Light"), qsTr("Dark")]

@@ -1,7 +1,10 @@
 [Desktop Entry]
 Name=Go for It Qt
+Name[uk]=Go for It Qt
 GenericName=To-Do List & Pomodoro Timer
+GenericName[uk]=Список задач та Pomodoro-таймер
 Comment=A stylish to-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync
+Comment[uk]=Стильний список задач із вбудованим Pomodoro-таймером, сховищем SQLite та синхронізацією з Jira/YouTrack
 Exec=go-for-it-qt
 Icon=go-for-it-qt
 Terminal=false

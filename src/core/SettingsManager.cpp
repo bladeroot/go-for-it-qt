@@ -1,6 +1,7 @@
 #include "SettingsManager.h"
 #include "DatabaseManager.h"
 #include <QGuiApplication>
+#include <QLocale>
 #include <QPalette>
 #include <QStyleHints>
 
@@ -123,6 +124,30 @@ void SettingsManager::setNewTasksOnTop(bool value) {
     if (newTasksOnTop() == value) return;
     DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Behavior/new_tasks_on_top"), value);
     emit newTasksOnTopChanged();
+}
+
+QString SettingsManager::language() const {
+    return m_settings.value(QStringLiteral("UI/language"), QStringLiteral("system")).toString();
+}
+
+void SettingsManager::setLanguage(const QString& lang) {
+    const QString norm = lang.trimmed().isEmpty() ? QStringLiteral("system") : lang.trimmed().toLower();
+    if (language() == norm) return;
+    DatabaseManager::instance().setSetting(QStringLiteral("language"), norm);
+    m_settings.setValue(QStringLiteral("UI/language"), norm);
+    emit languageChanged();
+}
+
+bool SettingsManager::isUkrainianActive() const {
+    const QString lang = language();
+    if (lang == QStringLiteral("uk") || lang.startsWith(QStringLiteral("uk_"))) {
+        return true;
+    }
+    if (lang == QStringLiteral("en") || lang.startsWith(QStringLiteral("en_"))) {
+        return false;
+    }
+    return QLocale::system().language() == QLocale::Ukrainian
+        || QLocale::system().name().startsWith(QStringLiteral("uk"), Qt::CaseInsensitive);
 }
 
 int SettingsManager::colorScheme() const {

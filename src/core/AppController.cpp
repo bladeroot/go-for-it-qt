@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QCoreApplication>
 #include <QSettings>
 
 namespace gofi {
@@ -10,6 +11,7 @@ namespace gofi {
 AppController::AppController(const QString& logFilePath, const QString& customDbPath, QObject* parent)
     : QObject(parent)
     , m_settings(this)
+    , m_ukTranslator(this)
     , m_shortcuts(this)
     , m_timer(&m_settings, this)
     , m_notifications(&m_settings, &m_timer, this)
@@ -21,6 +23,12 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_activityLog(logFilePath)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
+    applyLanguageTranslator();
+    connect(&m_settings, &SettingsManager::languageChanged, this, [this]() {
+        applyLanguageTranslator();
+        emit languageChanged();
+    });
+
     m_todoProxy.setSourceModel(m_taskManager.todoModel());
     m_doneProxy.setSourceModel(m_taskManager.doneModel());
 
@@ -384,6 +392,14 @@ void AppController::onTodoListCountChanged() {
         syncActiveTaskToTimer();
     } else {
         syncActiveTaskToTimer();
+    }
+}
+
+void AppController::applyLanguageTranslator() {
+    if (!QCoreApplication::instance()) return;
+    QCoreApplication::removeTranslator(&m_ukTranslator);
+    if (m_settings.isUkrainianActive()) {
+        QCoreApplication::installTranslator(&m_ukTranslator);
     }
 }
 

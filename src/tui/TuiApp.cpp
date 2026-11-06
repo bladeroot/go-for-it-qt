@@ -59,6 +59,7 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
         render();
     });
     connect(m_app, &AppController::activeTodoRowChanged, this, &TuiApp::render);
+    connect(m_app, &AppController::languageChanged, this, &TuiApp::render);
     connect(m_app->timer(), &TaskTimer::timerUpdated, this, &TuiApp::render);
     connect(m_app->timer(), &TaskTimer::runningChanged, this, &TuiApp::render);
     connect(m_app->timer(), &TaskTimer::breakActiveChanged, this, &TuiApp::render);
@@ -782,7 +783,7 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
         return;
     }
     if (seq == "j" || seq == "\033[B") {
-        m_settingsRow = qMin(8, m_settingsRow + 1);
+        m_settingsRow = qMin(9, m_settingsRow + 1);
         return;
     }
     if (seq == "k" || seq == "\033[A") {
@@ -831,6 +832,11 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
             m_inputBuffer = m_app->databasePath() + QStringLiteral(".backup.db");
             m_inputCursor = static_cast<int>(m_inputBuffer.size());
             m_mode = Mode::EditSettingValue;
+        } else if (m_settingsRow == 9) {
+            const QString cur = s->language();
+            if (cur == QStringLiteral("system")) s->setLanguage(QStringLiteral("uk"));
+            else if (cur == QStringLiteral("uk")) s->setLanguage(QStringLiteral("en"));
+            else s->setLanguage(QStringLiteral("system"));
         }
     }
 }
@@ -1431,7 +1437,8 @@ void TuiApp::render() {
             QStringLiteral("Add New Tasks On Top            : %1").arg(s->newTasksOnTop() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
             QStringLiteral("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? QStringLiteral("[ON]") : QStringLiteral("[OFF]")),
             QStringLiteral("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
-            QStringLiteral("Export SQLite Database Backup   : [Press Enter to export .db backup]")
+            QStringLiteral("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
+            QStringLiteral("Language (Enter to cycle)       : [%1] (system / uk / en)").arg(s->language())
         };
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;

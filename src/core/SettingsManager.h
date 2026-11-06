@@ -21,6 +21,7 @@ class SettingsManager : public QObject {
     Q_PROPERTY(bool resumeTasksAfterBreak READ resumeTasksAfterBreak WRITE setResumeTasksAfterBreak NOTIFY resumeTasksAfterBreakChanged)
     Q_PROPERTY(bool resetTimerOnTaskSwitch READ resetTimerOnTaskSwitch WRITE setResetTimerOnTaskSwitch NOTIFY resetTimerOnTaskSwitchChanged)
     Q_PROPERTY(bool newTasksOnTop READ newTasksOnTop WRITE setNewTasksOnTop NOTIFY newTasksOnTopChanged)
+    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
     Q_PROPERTY(int colorScheme READ colorScheme WRITE setColorScheme NOTIFY colorSchemeChanged)
     Q_PROPERTY(bool useDarkTheme READ useDarkTheme WRITE setUseDarkTheme NOTIFY useDarkThemeChanged)
     Q_PROPERTY(bool useSmallToolbarIcons READ useSmallToolbarIcons WRITE setUseSmallToolbarIcons NOTIFY appearanceChanged)
@@ -85,6 +86,10 @@ public:
     [[nodiscard]] bool newTasksOnTop() const;
     void setNewTasksOnTop(bool value);
 
+    [[nodiscard]] QString language() const;
+    void setLanguage(const QString& lang);
+    [[nodiscard]] bool isUkrainianActive() const;
+
     [[nodiscard]] int colorScheme() const;
     void setColorScheme(int scheme);
 
@@ -145,6 +150,7 @@ signals:
     void resumeTasksAfterBreakChanged();
     void resetTimerOnTaskSwitchChanged();
     void newTasksOnTopChanged();
+    void languageChanged();
     void colorSchemeChanged();
     void useDarkThemeChanged();
     void appearanceChanged();
