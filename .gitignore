@@ -1,0 +1,11 @@
+build/
+cmake-build-*/
+CMakeUserPresets.json
+.cache/
+.qt/
+*.user
+*.db
+*.db-shm
+*.db-wal
+*.swp
+*~

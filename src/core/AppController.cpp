@@ -1,0 +1,349 @@
+#include "AppController.h"
+#include "DatabaseManager.h"
+#include <QSettings>
+
+namespace gofi {
+
+AppController::AppController(const QString& logFilePath, const QString& customDbPath, QObject* parent)
+    : QObject(parent)
+    , m_settings(this)
+    , m_shortcuts(this)
+    , m_timer(&m_settings, this)
+    , m_notifications(&m_settings, &m_timer, this)
+    , m_listManager((DatabaseManager::instance().initialize(customDbPath), this))
+    , m_issueTracker(this)
+    , m_taskManager(this)
+    , m_todoProxy(this)
+    , m_doneProxy(this)
+    , m_activityLog(logFilePath)
+    , m_desktopIntegration(this, &m_settings, &m_timer, this)
+{
+    m_todoProxy.setSourceModel(m_taskManager.todoModel());
+    m_doneProxy.setSourceModel(m_taskManager.doneModel());
+
+    connect(&m_timer, &TaskTimer::timerStopped, this, &AppController::onTimerStopped);
+    connect(&m_timer, &TaskTimer::activeTaskTimeUpdated, this, &AppController::onActiveTaskTimeUpdated);
+    connect(&m_notifications, &NotificationService::desktopNotification, this, [this](const QString& title, const QString& body) {
+        m_desktopIntegration.showTrayMessage(title, body);
+        emit notificationRequested(title, body);
+    });
+    connect(&m_desktopIntegration, &DesktopIntegration::showWindowRequested, this, &AppController::showWindowRequested);
+    connect(&m_desktopIntegration, &DesktopIntegration::quitRequested, this, &AppController::quitRequested);
+
+    connect(&m_issueTracker, &IssueTrackerService::listIssuesSynced, this, [this](const QString& listId, int) {
+        if (m_currentListId == listId) {
+            m_taskManager.refresh();
+            if (m_activeTodoRow < 0 && m_taskManager.todoModel()->rowCount() > 0) {
+                setActiveTodoRow(0);
+            } else {
+                syncActiveTaskToTimer();
+            }
+        }
+    });
+
+    connect(m_taskManager.todoModel(), &TaskStoreModel::countChanged, this, &AppController::onTodoListCountChanged);
+    connect(&m_listManager, &ListManagerModel::listRemoved, this, [this](const QString& id) {
+        if (m_currentListId == id) {
+            setShowingOverview(true);
+        }
+    });
+    connect(&m_listManager, &ListManagerModel::listUpdated, this, [this](const QString& id) {
+        if (m_currentListId == id) {
+            selectListById(id);
+        }
+    });
+
+    const QString lastId = m_settings.lastLoadedListId();
+    if (!lastId.isEmpty() && m_listManager.indexOfId(lastId) >= 0) {
+        selectListById(lastId);
+    } else if (m_listManager.rowCount() > 0) {
+        selectListById(m_listManager.entryAt(0).id);
+    } else {
+        m_showingOverview = true;
+    }
+}
+
+void AppController::setShowingOverview(bool value) {
+    if (m_showingOverview == value) return;
+    m_showingOverview = value;
+    emit showingOverviewChanged();
+}
+
+void AppController::setActiveTodoRow(int sourceRow) {
+    const int count = m_taskManager.todoModel()->rowCount();
+    const int clamped = (sourceRow >= 0 && sourceRow < count) ? sourceRow : (count > 0 ? 0 : -1);
+    if (m_activeTodoRow == clamped) {
+        syncActiveTaskToTimer();
+        return;
+    }
+    m_activeTodoRow = clamped;
+    emit activeTodoRowChanged();
+    syncActiveTaskToTimer();
+}
+
+void AppController::selectListById(const QString& listId) {
+    const int row = m_listManager.indexOfId(listId);
+    if (row < 0) return;
+
+    const TodoListEntry entry = m_listManager.entryAt(row);
+    m_currentListId = entry.id;
+    m_currentListName = entry.name;
+    m_currentListProvider = entry.provider;
+    m_currentListActivityLogPath = entry.activityLogPath;
+    m_settings.setLastLoadedListId(entry.id);
+
+    m_timer.setListTimerOverrides(entry.customSchedule, entry.reminderTime);
+    const bool isLocalList = (entry.provider == QStringLiteral("SQLite") || entry.provider == QStringLiteral("Todo.txt"));
+    m_taskManager.setActiveList(
+        entry.id,
+        isLocalList,
+        entry.addCreationDates
+    );
+    setActiveTodoRow(m_taskManager.todoModel()->rowCount() > 0 ? 0 : -1);
+    setShowingOverview(false);
+    emit currentListChanged();
+
+    if (entry.provider == QStringLiteral("Jira") || entry.provider == QStringLiteral("YouTrack")) {
+        m_issueTracker.syncListIssues(entry);
+    }
+}
+
+void AppController::syncCurrentList() {
+    const int row = m_listManager.indexOfId(m_currentListId);
+    if (row < 0) return;
+    const TodoListEntry entry = m_listManager.entryAt(row);
+    if (entry.provider == QStringLiteral("Jira") || entry.provider == QStringLiteral("YouTrack")) {
+        m_issueTracker.syncListIssues(entry);
+    } else {
+        m_taskManager.refresh();
+    }
+}
+
+void AppController::addNewTask(const QString& simpleText) {
+    m_taskManager.addNewTask(simpleText, m_settings.newTasksOnTop(), m_taskManager.addCreationDates());
+    if (m_activeTodoRow < 0 && m_taskManager.todoModel()->rowCount() > 0) {
+        setActiveTodoRow(0);
+    }
+}
+
+void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    const QModelIndex idx = store->index(sourceRow, 0);
+    const bool currentDone = store->data(idx, TaskStoreModel::DoneRole).toBool();
+    store->setData(idx, !currentDone, TaskStoreModel::DoneRole);
+}
+
+void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    store->setTaskStatus(sourceRow, newStatus);
+}
+
+void AppController::updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    store->updateTaskText(sourceRow, simpleText);
+    if (!fromDoneList && sourceRow == m_activeTodoRow) {
+        syncActiveTaskToTimer();
+    }
+}
+
+void AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    store->updateTaskDetails(sourceRow, details);
+}
+
+void AppController::removeTask(bool fromDoneList, int proxyRow) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    store->removeAt(sourceRow);
+}
+
+void AppController::moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxyRow) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int fromSource = proxy.mapToSourceRow(fromProxyRow);
+    const int toSource = proxy.mapToSourceRow(toProxyRow);
+    if (fromSource < 0 || toSource < 0 || fromSource == toSource) return;
+
+    store->moveItem(fromSource, toSource);
+    if (!fromDoneList && m_activeTodoRow == fromSource) {
+        m_activeTodoRow = toSource;
+        emit activeTodoRowChanged();
+    }
+}
+
+void AppController::moveActiveTaskByOffset(int delta) {
+    const int count = m_taskManager.todoModel()->rowCount();
+    if (m_activeTodoRow < 0 || m_activeTodoRow >= count) return;
+    const int target = qBound(0, m_activeTodoRow + delta, count - 1);
+    if (target != m_activeTodoRow) {
+        m_taskManager.todoModel()->moveItem(m_activeTodoRow, target);
+        m_activeTodoRow = target;
+        emit activeTodoRowChanged();
+    }
+}
+
+void AppController::switchToNextTask() {
+    const int count = m_taskManager.todoModel()->rowCount();
+    if (count == 0) return;
+    setActiveTodoRow(qMin(count - 1, m_activeTodoRow + 1));
+}
+
+void AppController::switchToPreviousTask() {
+    const int count = m_taskManager.todoModel()->rowCount();
+    if (count == 0) return;
+    setActiveTodoRow(qMax(0, m_activeTodoRow - 1));
+}
+
+void AppController::markActiveTaskDone() {
+    if (m_activeTodoRow < 0 || m_activeTodoRow >= m_taskManager.todoModel()->rowCount()) {
+        return;
+    }
+    const bool wasRunning = m_timer.isRunning();
+    m_timer.stop();
+    const QModelIndex idx = m_taskManager.todoModel()->index(m_activeTodoRow, 0);
+    m_taskManager.todoModel()->setData(idx, true, TaskStoreModel::DoneRole);
+
+    if (wasRunning && m_timer.hasActiveTask() && (m_timer.isBreakActive() || !m_settings.resetTimerOnTaskSwitch())) {
+        m_timer.start();
+    }
+}
+
+void AppController::clearDoneTasks() {
+    m_taskManager.clearDoneList();
+}
+
+void AppController::sortAllTasks() {
+    m_taskManager.sortTasks();
+    syncActiveTaskToTimer();
+}
+
+QString AppController::databasePath() const {
+    return DatabaseManager::instance().databasePath();
+}
+
+QString AppController::configFilePath() const {
+    QSettings s(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
+    return s.fileName();
+}
+
+bool AppController::changeDatabasePath(const QString& newDbPath, bool copyExisting) {
+    if (!DatabaseManager::instance().relocateDatabase(newDbPath, copyExisting)) {
+        return false;
+    }
+    m_listManager.reloadFromDatabase();
+    if (m_listManager.rowCount() > 0) {
+        selectListById(m_listManager.entryAt(0).id);
+    }
+    emit storagePathChanged();
+    return true;
+}
+
+bool AppController::exportBackup(const QString& targetFilePath) {
+    return DatabaseManager::instance().exportDatabaseBackup(targetFilePath);
+}
+
+bool AppController::importBackup(const QString& sourceFilePath) {
+    if (!DatabaseManager::instance().importDatabaseBackup(sourceFilePath)) {
+        return false;
+    }
+    m_listManager.reloadFromDatabase();
+    if (m_listManager.rowCount() > 0) {
+        selectListById(m_listManager.entryAt(0).id);
+    }
+    emit storagePathChanged();
+    return true;
+}
+
+void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSeconds) {
+    if (m_timer.isBreakActive() || runtimeSeconds == 0) {
+        return;
+    }
+    const QDateTime stopUtc = QDateTime::currentDateTimeUtc();
+    qint64 activeTaskId = -1;
+    QString jiraKey;
+    if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        const TxtTask activeTask = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
+        activeTaskId = activeTask.id();
+        jiraKey = activeTask.jiraKey();
+    }
+    const qint64 logId = m_activityLog.logTask(
+        m_currentListId,
+        m_currentListName,
+        activeTaskId,
+        jiraKey,
+        m_timer.activeTaskDescription(),
+        startTimeUtc,
+        runtimeSeconds,
+        stopUtc
+    );
+    if (!m_currentListActivityLogPath.isEmpty()) {
+        ActivityLog::logTaskInFile(
+            m_currentListActivityLogPath,
+            m_currentListName,
+            m_timer.activeTaskDescription(),
+            startTimeUtc,
+            runtimeSeconds,
+            stopUtc
+        );
+    }
+
+    const int listIdx = m_listManager.indexOfId(m_currentListId);
+    if (listIdx >= 0 && !jiraKey.isEmpty()) {
+        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        if ((listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack"))
+            && listEntry.autoWorklog) {
+            m_issueTracker.postWorklog(listEntry, activeTaskId, logId, jiraKey, startTimeUtc, runtimeSeconds);
+        }
+    }
+}
+
+void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
+    if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        m_taskManager.todoModel()->setTaskTimerValue(m_activeTodoRow, totalSeconds);
+    }
+}
+
+void AppController::onTodoListCountChanged() {
+    const int count = m_taskManager.todoModel()->rowCount();
+    if (count == 0) {
+        m_activeTodoRow = -1;
+        emit activeTodoRowChanged();
+        m_timer.clearActiveTask();
+    } else if (m_activeTodoRow < 0 || m_activeTodoRow >= count) {
+        m_activeTodoRow = qMin(qMax(0, m_activeTodoRow), count - 1);
+        emit activeTodoRowChanged();
+        syncActiveTaskToTimer();
+    } else {
+        syncActiveTaskToTimer();
+    }
+}
+
+void AppController::syncActiveTaskToTimer() {
+    if (m_activeTodoRow < 0 || m_activeTodoRow >= m_taskManager.todoModel()->rowCount()) {
+        m_timer.clearActiveTask();
+        return;
+    }
+    const TxtTask task = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
+    m_timer.setActiveTask(task.description(), task.timerValue(), task.duration());
+}
+
+} // namespace gofi

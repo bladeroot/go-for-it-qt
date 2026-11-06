@@ -1,0 +1,303 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import "pages"
+import "dialogs"
+
+ApplicationWindow {
+    id: rootWindow
+    width: 440
+    height: 580
+    minimumWidth: 320
+    minimumHeight: 420
+    visible: true
+    title: app.showingOverview ? qsTr("Go for It Qt — Lists") : (app.currentListName + " — Go for It Qt")
+
+    property int currentActivityTab: 0 // 0: To-Do, 1: Timer, 2: Done
+    property bool showFilterBar: false
+    property bool forceQuit: false
+
+    palette.window: app.settings.useDarkTheme ? "#232629" : "#eff0f1"
+    palette.windowText: app.settings.useDarkTheme ? "#eff0f1" : "#232629"
+    palette.base: app.settings.useDarkTheme ? "#1b1e20" : "#ffffff"
+    palette.alternateBase: app.settings.useDarkTheme ? "#2a2e32" : "#f7f7f7"
+    palette.text: app.settings.useDarkTheme ? "#eff0f1" : "#232629"
+    palette.button: app.settings.useDarkTheme ? "#31363b" : "#fcfcfc"
+    palette.buttonText: app.settings.useDarkTheme ? "#eff0f1" : "#232629"
+    palette.highlight: "#3daee9"
+    palette.highlightedText: "#ffffff"
+
+    Component.onCompleted: {
+        if (typeof showAboutOnStart !== "undefined" && showAboutOnStart) {
+            aboutDialog.open()
+        }
+    }
+
+    onClosing: function(close) {
+        if (!rootWindow.forceQuit && app.timer.running) {
+            close.accepted = false
+            rootWindow.hide()
+        }
+    }
+
+    Connections {
+        target: app
+        function onShowWindowRequested() {
+            rootWindow.show()
+            rootWindow.raise()
+            rootWindow.requestActivate()
+        }
+        function onQuitRequested() {
+            rootWindow.forceQuit = true
+            app.timer.stop()
+            Qt.quit()
+        }
+    }
+
+    // Dynamic Configurable Shortcuts
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("filter")
+        onActivated: rootWindow.showFilterBar = !rootWindow.showFilterBar
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("sort")
+        onActivated: app.sortAllTasks()
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("add-new")
+        onActivated: {
+            if (app.showingOverview) {
+                selectionPage.openNewListDialog()
+            } else {
+                rootWindow.currentActivityTab = 0
+                taskListPage.focusNewTaskInput()
+            }
+        }
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("toggle-timer")
+        onActivated: app.timer.toggleRunning()
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("skip")
+        onActivated: app.timer.skipIteration()
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("mark-task-done")
+        onActivated: app.markActiveTaskDone()
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("next-task")
+        onActivated: app.switchToNextTask()
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("prev-task")
+        onActivated: app.switchToPreviousTask()
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("move-row-up")
+        onActivated: {
+            if (!app.showingOverview && rootWindow.currentActivityTab === 0) {
+                app.moveActiveTaskByOffset(-1)
+            }
+        }
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("move-row-down")
+        onActivated: {
+            if (!app.showingOverview && rootWindow.currentActivityTab === 0) {
+                app.moveActiveTaskByOffset(1)
+            }
+        }
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("cycle-page")
+        onActivated: {
+            if (app.showingOverview) {
+                app.showingOverview = false
+            } else if (rootWindow.currentActivityTab < 2) {
+                rootWindow.currentActivityTab += 1
+            }
+        }
+    }
+    Shortcut {
+        sequence: app.shortcuts.shortcutFor("cycle-page-reverse")
+        onActivated: {
+            if (!app.showingOverview) {
+                if (rootWindow.currentActivityTab > 0) {
+                    rootWindow.currentActivityTab -= 1
+                } else {
+                    app.showingOverview = true
+                }
+            }
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+Q"
+        onActivated: {
+            rootWindow.forceQuit = true
+            app.timer.stop()
+            Qt.quit()
+        }
+    }
+
+    header: ToolBar {
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            spacing: 8
+
+            ToolButton {
+                id: overviewSwitchBtn
+                text: app.showingOverview ? "→" : "←"
+                font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
+                ToolTip.visible: hovered
+                ToolTip.text: app.showingOverview
+                    ? qsTr("Go back to the to-do list")
+                    : qsTr("Go to overview")
+                enabled: app.currentListId !== ""
+                onClicked: app.showingOverview = !app.showingOverview
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Label {
+                visible: app.showingOverview
+                text: qsTr("Lists")
+                font.bold: true
+                font.pixelSize: 16
+            }
+
+            TabBar {
+                id: viewSwitcher
+                visible: !app.showingOverview
+                currentIndex: rootWindow.currentActivityTab
+                onCurrentIndexChanged: rootWindow.currentActivityTab = currentIndex
+
+                TabButton {
+                    text: app.settings.switcherUseIcons ? "📋" : qsTr("To-Do")
+                    ToolTip.visible: hovered && app.settings.switcherUseIcons
+                    ToolTip.text: qsTr("To-Do")
+                    width: implicitWidth + 16
+                }
+                TabButton {
+                    text: app.settings.switcherUseIcons ? "⏱" : qsTr("Timer")
+                    ToolTip.visible: hovered && app.settings.switcherUseIcons
+                    ToolTip.text: qsTr("Timer")
+                    width: implicitWidth + 16
+                }
+                TabButton {
+                    text: app.settings.switcherUseIcons ? "✓" : qsTr("Done")
+                    ToolTip.visible: hovered && app.settings.switcherUseIcons
+                    ToolTip.text: qsTr("Done")
+                    width: implicitWidth + 16
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            ToolButton {
+                visible: !app.showingOverview && (app.currentListProvider === "Jira" || app.currentListProvider === "YouTrack")
+                enabled: !app.issueTracker.syncing
+                text: app.issueTracker.syncing ? "⏳" : "↻"
+                font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
+                ToolTip.visible: hovered
+                ToolTip.text: app.issueTracker.lastStatusMessage !== ""
+                    ? (qsTr("Sync with ") + app.currentListProvider + " (" + app.issueTracker.lastStatusMessage + ")")
+                    : (qsTr("Sync issues with ") + app.currentListProvider)
+                onClicked: app.syncCurrentList()
+            }
+
+            ToolButton {
+                text: "☰"
+                font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Menu")
+                onClicked: mainMenu.open()
+
+                Menu {
+                    id: mainMenu
+                    y: parent.height
+
+                    MenuItem {
+                        contentItem: RowLayout {
+                            spacing: 4
+                            Button {
+                                Layout.fillWidth: true
+                                text: "🔍 " + (rootWindow.showFilterBar ? qsTr("Hide Filter") : qsTr("Filter"))
+                                enabled: !app.showingOverview && rootWindow.currentActivityTab !== 1
+                                onClicked: {
+                                    rootWindow.showFilterBar = !rootWindow.showFilterBar
+                                    mainMenu.close()
+                                }
+                            }
+                            Button {
+                                Layout.fillWidth: true
+                                text: app.settings.muteSounds ? "🔇 " + qsTr("Unmute") : "🔊 " + qsTr("Mute")
+                                onClicked: app.settings.muteSounds = !app.settings.muteSounds
+                            }
+                        }
+                    }
+
+                    MenuSeparator {
+                        visible: !app.showingOverview && rootWindow.currentActivityTab !== 1
+                    }
+                    MenuItem {
+                        visible: !app.showingOverview && rootWindow.currentActivityTab !== 1
+                        text: qsTr("Sort Tasks")
+                        onTriggered: app.sortAllTasks()
+                    }
+                    MenuItem {
+                        visible: !app.showingOverview && rootWindow.currentActivityTab !== 1
+                        text: qsTr("Clear Done List")
+                        onTriggered: app.clearDoneTasks()
+                    }
+                    MenuSeparator {}
+                    MenuItem {
+                        text: qsTr("Settings")
+                        onTriggered: settingsDialog.open()
+                    }
+                    MenuItem {
+                        text: qsTr("Contribute / Donate")
+                        onTriggered: contributeDialog.open()
+                    }
+                    MenuItem {
+                        text: qsTr("About")
+                        onTriggered: aboutDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    StackLayout {
+        anchors.fill: parent
+        currentIndex: app.showingOverview ? 0 : 1
+
+        SelectionPage {
+            id: selectionPage
+        }
+
+        TaskListPage {
+            id: taskListPage
+            currentTab: rootWindow.currentActivityTab
+            filterVisible: rootWindow.showFilterBar
+            onCurrentTabRequested: function(tabIndex) {
+                rootWindow.currentActivityTab = tabIndex
+            }
+        }
+    }
+
+    SettingsDialog {
+        id: settingsDialog
+    }
+
+    ContributeDialog {
+        id: contributeDialog
+    }
+
+    AboutDialog {
+        id: aboutDialog
+    }
+}

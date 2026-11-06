@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Go for It Qt
+GenericName=To-Do List & Pomodoro Timer
+Comment=A stylish to-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync
+Exec=go-for-it-qt
+Icon=go-for-it-qt
+Terminal=false
+Type=Application
+Categories=Office;ProjectManagement;Utility;Qt;
+StartupNotify=true
+StartupWMClass=go-for-it-qt
