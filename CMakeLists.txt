@@ -68,6 +68,8 @@ set(GOFI_CORE_SOURCES
     src/todotxt/TaskFilterProxyModel.cpp
     src/todotxt/TaskManager.h
     src/todotxt/TaskManager.cpp
+    src/tui/TuiApp.h
+    src/tui/TuiApp.cpp
 )
 
 add_library(gofi_core STATIC ${GOFI_CORE_SOURCES})
@@ -116,6 +118,13 @@ target_link_libraries(go-for-it-qt PRIVATE
     gofi_core
 )
 
+qt_add_executable(go-for-it-tui
+    src/main_tui.cpp
+)
+target_link_libraries(go-for-it-tui PRIVATE
+    gofi_core
+)
+
 # Copy runtime data into build tree so uninstalled builds find sounds/icons relative to binary
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -134,7 +143,7 @@ endif()
 # System Installation Targets (Arch PKGBUILD, Debian/Ubuntu .deb, Fedora .rpm)
 # ==============================================================================
 
-install(TARGETS go-for-it-qt
+install(TARGETS go-for-it-qt go-for-it-tui
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT Runtime
 )

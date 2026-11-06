@@ -1,0 +1,61 @@
+#include "core/AppController.h"
+#include "tui/TuiApp.h"
+#include <QCommandLineOption>
+#include <QCommandLineParser>
+#include <QCoreApplication>
+#include <QLoggingCategory>
+#include <QTextStream>
+
+int main(int argc, char* argv[]) {
+    if (qEnvironmentVariableIsEmpty("QT_FFMPEG_DECODING_HW_DEVICE_TYPES")) {
+        qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", ",");
+    }
+    QLoggingCategory::setFilterRules(QStringLiteral(
+        "qt.multimedia.ffmpeg.info=false\n"
+        "qt.multimedia.ffmpeg.debug=false\n"
+        "qt.qpa.services.warning=false"
+    ));
+
+    QCoreApplication app(argc, argv);
+    QCoreApplication::setApplicationName(QStringLiteral("go-for-it-qt"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.9.5"));
+    QCoreApplication::setOrganizationName(QStringLiteral("go-for-it-qt"));
+
+    QCommandLineParser parser;
+    parser.setApplicationDescription(QStringLiteral("Go for It Qt — Terminal UI (TUI) with Vim keybindings"));
+    parser.addHelpOption();
+    parser.addVersionOption();
+
+    QCommandLineOption listOption(QStringLiteral("list"), QStringLiteral("Show configured lists and exit"));
+    QCommandLineOption logFileOption(QStringLiteral("logfile"), QStringLiteral("CSV file to log activities to."), QStringLiteral("FILE"));
+    QCommandLineOption loadOption(QStringLiteral("load"), QStringLiteral("Load the list specified by ID."), QStringLiteral("LIST-ID"));
+    QCommandLineOption dbOption(QStringLiteral("db"), QStringLiteral("Custom SQLite database file path."), QStringLiteral("DB-FILE"));
+    parser.addOption(listOption);
+    parser.addOption(logFileOption);
+    parser.addOption(loadOption);
+    parser.addOption(dbOption);
+    parser.process(app);
+
+    gofi::AppController controller(parser.value(logFileOption), parser.value(dbOption));
+
+    if (parser.isSet(listOption)) {
+        QTextStream out(stdout);
+        out << "Lists (List type : List ID - List name):\n";
+        for (const gofi::TodoListEntry& e : controller.listManager()->entries()) {
+            out << '"' << e.provider << "\" : \"" << e.id << "\" - \"" << e.name << "\"\n";
+        }
+        return 0;
+    }
+
+    if (parser.isSet(loadOption)) {
+        controller.selectListById(parser.value(loadOption));
+    }
+
+    gofi::TuiApp tui(&controller);
+    if (!tui.start()) {
+        QTextStream err(stderr);
+        err << "Error: go-for-it-tui requires an interactive terminal (TTY).\n";
+        return 1;
+    }
+    return app.exec();
+}

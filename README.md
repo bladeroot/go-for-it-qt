@@ -20,6 +20,39 @@
 - **Pomodoro & Custom Timer Schedules**:
   - Configurable work/break schedules (classic Pomodoro or multi-stage custom schedules), per-list timer overrides, sound notifications (`Qt6::Multimedia`), Freedesktop DBus notifications, System Tray AppIndicator, and Unity LauncherEntry dock progress/badge.
 
+
+---
+
+## ⌨️ Console Terminal UI (`go-for-it-tui`) with Vim Keybindings
+
+Run the standalone terminal UI binary `go-for-it-tui` (works over SSH / without X11 or Wayland) or pass `--tui` (`-t`) to `go-for-it-qt`:
+```bash
+go-for-it-tui
+# or
+go-for-it-qt --tui
+```
+
+### Vim Keybindings
+| Key | Action |
+|---|---|
+| `j` / `k` / `gg` / `G` / `Ctrl+d` / `Ctrl+u` | Move cursor down / up / top / bottom / half-page |
+| `J` / `K` (`Shift+j` / `Shift+k`) | Move selected task down / up in order |
+| `h` / `l` or `1`..`6` or `gt` / `gT` | Switch status tab (`All Open`, `To-Do`, `In Progress`, `Paused`, `Done`, `Canceled`) |
+| `Space` or `x` | Toggle task `Done` / `To-Do` |
+| `s` | Open status picker (`1:To-Do`, `2:In Progress`, `3:Paused`, `4:Done`, `5:Canceled`) |
+| `o` / `a` | Add new task (`INSERT` mode) |
+| `i` / `e` / `cw` | Edit selected task title inline |
+| `E` (`Shift+e`) | Edit selected task full description |
+| `dd` | Delete selected task |
+| `Enter` | Select task as active Pomodoro task |
+| `t` / `S` / `B` / `R` | Start/Pause Pomodoro timer (`t`), Skip phase (`B`), Reset phase (`R`) |
+| `r` / `Ctrl+r` | Sync current list with Jira / YouTrack |
+| `L` or `[` / `]` | Open List Picker (`L`) or switch to previous/next list (`[` / `]`) |
+| `p` / `Ctrl+e` / `Ctrl+y` | Toggle preview pane (`p`), scroll description & comments (`Ctrl+e` / `Ctrl+y`) |
+| `/` | Live search/filter tasks (`Esc` or `:noh` to clear) |
+| `:sync`, `:sort`, `:clear`, `:list`, `:q` | Vim Ex commands |
+| `?` or `:help` | Toggle keyboard shortcuts help screen |
+
 ---
 
 ## 🛠️ Build & Run

@@ -43,7 +43,7 @@ void DesktopIntegration::showTrayMessage(const QString& title, const QString& bo
 }
 
 void DesktopIntegration::setupTrayIcon() {
-    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+    if (!qobject_cast<QApplication*>(QCoreApplication::instance()) || !QSystemTrayIcon::isSystemTrayAvailable()) {
         return;
     }
 

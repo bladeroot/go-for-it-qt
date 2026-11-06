@@ -1,4 +1,5 @@
 #include "core/AppController.h"
+#include "tui/TuiApp.h"
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -44,11 +45,13 @@ int main(int argc, char* argv[]) {
     QCommandLineOption logFileOption(QStringLiteral("logfile"), QStringLiteral("CSV file to log activities to."), QStringLiteral("FILE"));
     QCommandLineOption loadOption(QStringLiteral("load"), QStringLiteral("Load the list specified by ID."), QStringLiteral("LIST-ID"));
     QCommandLineOption dbOption(QStringLiteral("db"), QStringLiteral("Custom SQLite database file path."), QStringLiteral("DB-FILE"));
+    QCommandLineOption tuiOption({QStringLiteral("t"), QStringLiteral("tui")}, QStringLiteral("Run in console Terminal UI (TUI) mode with Vim keybindings."));
     parser.addOption(aboutOption);
     parser.addOption(listOption);
     parser.addOption(logFileOption);
     parser.addOption(loadOption);
     parser.addOption(dbOption);
+    parser.addOption(tuiOption);
     parser.process(app);
 
     gofi::AppController controller(parser.value(logFileOption), parser.value(dbOption));
@@ -64,6 +67,16 @@ int main(int argc, char* argv[]) {
 
     if (parser.isSet(loadOption)) {
         controller.selectListById(parser.value(loadOption));
+    }
+
+    if (parser.isSet(tuiOption)) {
+        gofi::TuiApp tui(&controller);
+        if (!tui.start()) {
+            QTextStream err(stderr);
+            err << "Error: --tui requires an interactive terminal (TTY).\n";
+            return 1;
+        }
+        return app.exec();
     }
 
     QQmlApplicationEngine engine;
