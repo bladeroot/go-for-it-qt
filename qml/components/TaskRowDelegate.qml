@@ -17,6 +17,7 @@ ItemDelegate {
     required property string jiraKey
     required property string details
     required property var comments
+    required property bool isViewed
 
     property int totalCount: 0
     property bool isDoneList: false
@@ -32,7 +33,12 @@ ItemDelegate {
     topPadding: 4
     bottomPadding: 4
 
-    onClicked: rowDelegate.rowClicked()
+    onClicked: {
+        rowDelegate.rowClicked()
+        if (!rowDelegate.isDoneList && !rowDelegate.isViewed) {
+            app.markTaskViewed(rowDelegate.isDoneList, rowDelegate.index)
+        }
+    }
     onDoubleClicked: {
         editField.text = rowDelegate.simpleText
         rowDelegate.editing = true
@@ -91,6 +97,22 @@ ItemDelegate {
             onToggled: Qt.callLater(function() {
                 app.toggleTaskDone(rowDelegate.isDoneList, rowDelegate.index)
             })
+        }
+
+        Rectangle {
+            width: 8
+            height: 8
+            radius: 4
+            color: "#e03131"
+            visible: !rowDelegate.editing && !rowDelegate.done && rowDelegate.taskStatus === "todo" && !rowDelegate.isViewed
+            ToolTip.visible: unreadDotMa.containsMouse
+            ToolTip.text: qsTr("Unviewed task")
+
+            MouseArea {
+                id: unreadDotMa
+                anchors.fill: parent
+                hoverEnabled: true
+            }
         }
 
         Label {

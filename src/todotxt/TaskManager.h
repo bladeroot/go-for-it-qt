@@ -12,7 +12,9 @@ public:
     explicit TaskManager(QObject* parent = nullptr);
 
     [[nodiscard]] TaskStoreModel* todoModel() noexcept { return &m_todoStore; }
+    [[nodiscard]] const TaskStoreModel* todoModel() const noexcept { return &m_todoStore; }
     [[nodiscard]] TaskStoreModel* doneModel() noexcept { return &m_doneStore; }
+    [[nodiscard]] const TaskStoreModel* doneModel() const noexcept { return &m_doneStore; }
 
     void setActiveList(const QString& listId,
                        bool addDefaultTodosIfNew = false,

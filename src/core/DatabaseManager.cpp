@@ -197,6 +197,7 @@ bool DatabaseManager::createSchema() {
     q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'todo';"));
     q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN details TEXT NOT NULL DEFAULT '';"));
     q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN comments_json TEXT NOT NULL DEFAULT '';"));
+    q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN is_viewed INTEGER NOT NULL DEFAULT 1;"));
     q.exec(QStringLiteral("UPDATE tasks SET status = 'done' WHERE done = 1 AND status = 'todo';"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tasks_list_done_order ON tasks(list_id, done, sort_order);"));
 
@@ -415,7 +416,7 @@ QVector<TxtTask> DatabaseManager::loadTasks(const QString& listId, bool done) co
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "SELECT id, description, done, status, priority, creation_date, completion_date, "
-        "duration_seconds, timer_seconds, jira_key, jira_synced_seconds, details, comments_json "
+        "duration_seconds, timer_seconds, jira_key, jira_synced_seconds, details, comments_json, is_viewed "
         "FROM tasks WHERE list_id = :list_id AND done = :done "
         "ORDER BY sort_order ASC, id ASC"
     ));
@@ -438,9 +439,10 @@ QVector<TxtTask> DatabaseManager::loadTasks(const QString& listId, bool done) co
         const quint32 jiraSynced = q.value(10).toUInt();
         const QString details = q.value(11).toString();
         const QVariantList comments = deserializeCommentsList(q.value(12).toString());
+        const bool isViewed = q.value(13).isNull() ? true : (q.value(13).toInt() != 0);
 
         result.append(TxtTask::fromDatabase(
-            id, desc, isDone, status, prio, cDate, compDate, duration, timerVal, jiraKey, jiraSynced, details, comments
+            id, desc, isDone, status, prio, cDate, compDate, duration, timerVal, jiraKey, jiraSynced, details, comments, isViewed
         ));
     }
     return result;
@@ -462,9 +464,9 @@ qint64 DatabaseManager::insertTask(const QString& listId, const TxtTask& task, i
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "INSERT INTO tasks (list_id, description, done, status, priority, creation_date, "
-        "completion_date, duration_seconds, timer_seconds, sort_order, jira_key, jira_synced_seconds, details, comments_json) "
+        "completion_date, duration_seconds, timer_seconds, sort_order, jira_key, jira_synced_seconds, details, comments_json, is_viewed) "
         "VALUES (:list_id, :description, :done, :status, :priority, :creation_date, "
-        ":completion_date, :duration_seconds, :timer_seconds, :sort_order, :jira_key, :jira_synced_seconds, :details, :comments_json)"
+        ":completion_date, :duration_seconds, :timer_seconds, :sort_order, :jira_key, :jira_synced_seconds, :details, :comments_json, :is_viewed)"
     ));
     q.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     q.bindValue(QStringLiteral(":description"), nonNullString(task.description()));
@@ -480,6 +482,7 @@ qint64 DatabaseManager::insertTask(const QString& listId, const TxtTask& task, i
     q.bindValue(QStringLiteral(":jira_synced_seconds"), task.jiraSyncedSeconds());
     q.bindValue(QStringLiteral(":details"), nonNullString(task.details()));
     q.bindValue(QStringLiteral(":comments_json"), nonNullString(serializeCommentsList(task.comments())));
+    q.bindValue(QStringLiteral(":is_viewed"), task.isViewed() ? 1 : 0);
 
     if (!q.exec()) {
         return -1;
@@ -495,7 +498,7 @@ bool DatabaseManager::updateTask(const TxtTask& task) {
         "creation_date = :creation_date, completion_date = :completion_date, "
         "duration_seconds = :duration_seconds, timer_seconds = :timer_seconds, "
         "jira_key = :jira_key, jira_synced_seconds = :jira_synced_seconds, "
-        "details = :details, comments_json = :comments_json "
+        "details = :details, comments_json = :comments_json, is_viewed = :is_viewed "
         "WHERE id = :id"
     ));
     q.bindValue(QStringLiteral(":description"), nonNullString(task.description()));
@@ -510,7 +513,17 @@ bool DatabaseManager::updateTask(const TxtTask& task) {
     q.bindValue(QStringLiteral(":jira_synced_seconds"), task.jiraSyncedSeconds());
     q.bindValue(QStringLiteral(":details"), nonNullString(task.details()));
     q.bindValue(QStringLiteral(":comments_json"), nonNullString(serializeCommentsList(task.comments())));
+    q.bindValue(QStringLiteral(":is_viewed"), task.isViewed() ? 1 : 0);
     q.bindValue(QStringLiteral(":id"), task.id());
+    return q.exec();
+}
+
+bool DatabaseManager::markTaskViewed(qint64 taskId, bool viewed) {
+    if (taskId < 0) return false;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE tasks SET is_viewed = :viewed WHERE id = :id"));
+    q.bindValue(QStringLiteral(":viewed"), viewed ? 1 : 0);
+    q.bindValue(QStringLiteral(":id"), taskId);
     return q.exec();
 }
 
@@ -651,7 +664,8 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         issueKey,
         0,
         details,
-        comments
+        comments,
+        false // new synced tasks start as unviewed
     );
     return insertTask(listId, newTask, nextOrder) >= 0;
 }

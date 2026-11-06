@@ -42,7 +42,8 @@ public:
                                 const QString& jiraKey = {},
                                 quint32 jiraSyncedSeconds = 0,
                                 const QString& details = {},
-                                const QVariantList& comments = {});
+                                const QVariantList& comments = {},
+                                bool isViewed = true);
 
     [[nodiscard]] qint64 id() const noexcept { return m_id; }
     void setId(qint64 id) noexcept { m_id = id; }
@@ -66,6 +67,9 @@ public:
 
     [[nodiscard]] bool isDone() const noexcept { return m_done; }
     void setDone(bool done);
+
+    [[nodiscard]] bool isViewed() const noexcept { return m_isViewed; }
+    void setViewed(bool viewed) noexcept { m_isViewed = viewed; }
 
     [[nodiscard]] QString status() const { return m_status; }
     void setStatus(const QString& status);
@@ -125,6 +129,7 @@ private:
     quint32 m_jiraSyncedSeconds = 0;
     quint8 m_priority = NoPriority;
     bool m_done = false;
+    bool m_isViewed = true;
 };
 
 } // namespace gofi

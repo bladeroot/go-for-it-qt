@@ -199,9 +199,20 @@ ApplicationWindow {
                 onCurrentIndexChanged: rootWindow.currentActivityTab = currentIndex
 
                 TabButton {
-                    text: app.settings.switcherUseIcons ? "📋" : qsTr("To-Do")
-                    ToolTip.visible: hovered && app.settings.switcherUseIcons
-                    ToolTip.text: qsTr("To-Do")
+                    text: {
+                        var base = app.settings.switcherUseIcons ? "📋" : qsTr("To-Do")
+                        if (app.totalTodoCount > 0) {
+                            if (app.unviewedTodoCount > 0) {
+                                return base + " (" + app.unviewedTodoCount + "/" + app.totalTodoCount + ")"
+                            }
+                            return base + " (" + app.totalTodoCount + ")"
+                        }
+                        return base
+                    }
+                    ToolTip.visible: hovered
+                    ToolTip.text: app.unviewedTodoCount > 0
+                        ? (qsTr("To-Do") + " (" + app.unviewedTodoCount + " " + qsTr("unread") + " / " + app.totalTodoCount + " " + qsTr("total") + ")")
+                        : (app.totalTodoCount > 0 ? (qsTr("To-Do") + " (" + app.totalTodoCount + ")") : qsTr("To-Do"))
                     width: implicitWidth + 16
                 }
                 TabButton {

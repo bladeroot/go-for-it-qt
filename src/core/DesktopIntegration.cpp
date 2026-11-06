@@ -4,7 +4,9 @@
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QIcon>
+#include <QPainter>
 #include <QStyle>
 
 namespace gofi {
@@ -22,6 +24,9 @@ DesktopIntegration::DesktopIntegration(AppController* controller,
 
     if (m_settings) {
         connect(m_settings, &SettingsManager::pluginsChanged, this, &DesktopIntegration::updatePluginStates);
+    }
+    if (m_controller) {
+        connect(m_controller, &AppController::todoCountsChanged, this, &DesktopIntegration::updateTrayState);
     }
     if (m_timer) {
         connect(m_timer, &TaskTimer::timerUpdated, this, &DesktopIntegration::updateTrayState);
@@ -67,6 +72,7 @@ void DesktopIntegration::setupTrayIcon() {
     if (icon.isNull() && QApplication::style()) {
         icon = QApplication::style()->standardIcon(QStyle::SP_ComputerIcon);
     }
+    m_baseIcon = icon;
     m_trayIcon->setIcon(icon);
 
     m_trayMenu = new QMenu();
@@ -119,6 +125,12 @@ void DesktopIntegration::updateTrayState() {
         return;
     }
 
+    const int unviewed = m_controller ? m_controller->unviewedTodoCount() : 0;
+    const int total = m_controller ? m_controller->totalTodoCount() : 0;
+    m_trayIcon->setIcon(renderBadgeIcon(unviewed, total));
+
+    const QString todoCounter = tr("To-Do: %1 unread / %2 total").arg(unviewed).arg(total);
+
     const bool hasTask = m_timer->hasActiveTask();
     m_markDoneAction->setEnabled(hasTask && !m_timer->isBreakActive());
     m_nextTaskAction->setEnabled(hasTask);
@@ -128,7 +140,7 @@ void DesktopIntegration::updateTrayState() {
 
     if (!hasTask) {
         m_taskDescAction->setText(tr("No task has been selected"));
-        m_trayIcon->setToolTip(QStringLiteral("Go for It Qt"));
+        m_trayIcon->setToolTip(QStringLiteral("Go for It Qt\n%1").arg(todoCounter));
         return;
     }
 
@@ -154,10 +166,52 @@ void DesktopIntegration::updateTrayState() {
         } else {
             label = QStringLiteral("%1s").arg(s);
         }
-        m_trayIcon->setToolTip(QStringLiteral("Go for It Qt — %1 (%2)").arg(label, m_taskDescAction->text()));
+        m_trayIcon->setToolTip(QStringLiteral("Go for It Qt — %1 (%2)\n%3").arg(label, m_taskDescAction->text(), todoCounter));
     } else {
-        m_trayIcon->setToolTip(QStringLiteral("Go for It Qt — %1").arg(m_taskDescAction->text()));
+        m_trayIcon->setToolTip(QStringLiteral("Go for It Qt — %1\n%2").arg(m_taskDescAction->text(), todoCounter));
     }
+}
+
+QIcon DesktopIntegration::renderBadgeIcon(int unviewed, int total) const {
+    if (m_baseIcon.isNull()) {
+        return m_baseIcon;
+    }
+    if (total <= 0) {
+        return m_baseIcon;
+    }
+
+    QPixmap pixmap = m_baseIcon.pixmap(64, 64);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+
+    const QString badgeText = QStringLiteral("%1/%2").arg(unviewed).arg(total);
+
+    QFont font = painter.font();
+    font.setBold(true);
+    font.setPixelSize(badgeText.length() > 4 ? 12 : 14);
+    painter.setFont(font);
+
+    const QFontMetrics fm(font);
+    const int textWidth = fm.horizontalAdvance(badgeText);
+    const int textHeight = fm.height();
+    const int badgeWidth = qMax(textWidth + 10, 26);
+    const int badgeHeight = qMax(textHeight + 2, 20);
+
+    const int x = qMax(0, 64 - badgeWidth - 2);
+    const int y = qMax(0, 64 - badgeHeight - 2);
+    const QRect badgeRect(x, y, badgeWidth, badgeHeight);
+
+    const QColor bgColor = (unviewed > 0) ? QColor(224, 49, 49) : QColor(52, 58, 64, 230);
+    painter.setBrush(bgColor);
+    painter.setPen(QPen(Qt::white, 1.5));
+    painter.drawRoundedRect(badgeRect, badgeHeight / 2.0, badgeHeight / 2.0);
+
+    painter.setPen(Qt::white);
+    painter.drawText(badgeRect, Qt::AlignCenter, badgeText);
+    painter.end();
+
+    return QIcon(pixmap);
 }
 
 void DesktopIntegration::updateLauncherBadge() {

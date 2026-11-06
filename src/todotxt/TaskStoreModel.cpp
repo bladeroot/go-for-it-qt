@@ -57,6 +57,8 @@ QVariant TaskStoreModel::data(const QModelIndex& index, int role) const {
         return t.details();
     case CommentsRole:
         return t.comments();
+    case IsViewedRole:
+        return t.isViewed();
     default:
         return {};
     }
@@ -87,6 +89,18 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
             emit taskUpdated(index.row(), t);
             emit taskDataChanged();
         }
+        emit unviewedTodoCountChanged();
+        emit totalTodoCountChanged();
+        return true;
+    }
+    case IsViewedRole: {
+        const bool v = value.toBool();
+        if (t.isViewed() == v) return false;
+        t.setViewed(v);
+        emit dataChanged(index, index, {IsViewedRole});
+        emit taskUpdated(index.row(), t);
+        emit taskDataChanged();
+        emit unviewedTodoCountChanged();
         return true;
     }
     case SimpleTextRole:
@@ -141,7 +155,8 @@ QHash<int, QByteArray> TaskStoreModel::roleNames() const {
         {CompletionDateRole, "completionDate"},
         {JiraKeyRole, "jiraKey"},
         {DetailsRole, "details"},
-        {CommentsRole, "comments"}
+        {CommentsRole, "comments"},
+        {IsViewedRole, "isViewed"}
     };
 }
 
@@ -152,6 +167,8 @@ void TaskStoreModel::appendTask(const TxtTask& task) {
     endInsertRows();
     emit countChanged();
     emit taskDataChanged();
+    emit unviewedTodoCountChanged();
+    emit totalTodoCountChanged();
 }
 
 void TaskStoreModel::prependTask(const TxtTask& task) {
@@ -160,6 +177,8 @@ void TaskStoreModel::prependTask(const TxtTask& task) {
     endInsertRows();
     emit countChanged();
     emit taskDataChanged();
+    emit unviewedTodoCountChanged();
+    emit totalTodoCountChanged();
 }
 
 void TaskStoreModel::setTasks(QVector<TxtTask> tasks) {
@@ -167,6 +186,8 @@ void TaskStoreModel::setTasks(QVector<TxtTask> tasks) {
     m_tasks = std::move(tasks);
     endResetModel();
     emit countChanged();
+    emit unviewedTodoCountChanged();
+    emit totalTodoCountChanged();
 }
 
 void TaskStoreModel::clear() {
@@ -176,6 +197,8 @@ void TaskStoreModel::clear() {
     endResetModel();
     emit countChanged();
     emit taskDataChanged();
+    emit unviewedTodoCountChanged();
+    emit totalTodoCountChanged();
 }
 
 void TaskStoreModel::sortTasks() {
@@ -200,6 +223,8 @@ void TaskStoreModel::removeAt(int row) {
         emit taskRemoved(removedId);
     }
     emit taskDataChanged();
+    emit unviewedTodoCountChanged();
+    emit totalTodoCountChanged();
 }
 
 void TaskStoreModel::moveItem(int fromRow, int toRow) {
@@ -255,6 +280,38 @@ TxtTask TaskStoreModel::taskAt(int row) const {
 
 void TaskStoreModel::setTaskTimerValue(int row, quint32 seconds) {
     setData(index(row, 0), seconds, TimerValueRole);
+}
+
+int TaskStoreModel::unviewedTodoCount() const {
+    int count = 0;
+    for (const auto& t : m_tasks) {
+        if (!t.isDone() && (t.status() == QStringLiteral("todo") || t.status().isEmpty()) && !t.isViewed()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int TaskStoreModel::totalTodoCount() const {
+    int count = 0;
+    for (const auto& t : m_tasks) {
+        if (!t.isDone() && (t.status() == QStringLiteral("todo") || t.status().isEmpty())) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void TaskStoreModel::markTaskViewed(int row) {
+    if (row < 0 || row >= m_tasks.size()) return;
+    if (m_tasks.at(row).isViewed()) return;
+
+    m_tasks[row].setViewed(true);
+    const QModelIndex idx = index(row, 0);
+    emit dataChanged(idx, idx, {IsViewedRole});
+    emit taskUpdated(row, m_tasks[row]);
+    emit taskDataChanged();
+    emit unviewedTodoCountChanged();
 }
 
 } // namespace gofi

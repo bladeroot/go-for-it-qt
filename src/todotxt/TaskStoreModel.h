@@ -10,6 +10,8 @@ class TaskStoreModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
     Q_PROPERTY(bool doneByDefault READ doneByDefault CONSTANT)
+    Q_PROPERTY(int unviewedTodoCount READ unviewedTodoCount NOTIFY unviewedTodoCountChanged)
+    Q_PROPERTY(int totalTodoCount READ totalTodoCount NOTIFY totalTodoCountChanged)
 
 public:
     enum Roles {
@@ -28,7 +30,8 @@ public:
         CompletionDateRole,
         JiraKeyRole,
         DetailsRole,
-        CommentsRole
+        CommentsRole,
+        IsViewedRole
     };
 
     explicit TaskStoreModel(bool doneByDefault = false, QObject* parent = nullptr);
@@ -56,9 +59,14 @@ public:
     [[nodiscard]] const QVector<TxtTask>& tasks() const noexcept { return m_tasks; }
     [[nodiscard]] TxtTask taskAt(int row) const;
     void setTaskTimerValue(int row, quint32 seconds);
+    [[nodiscard]] int unviewedTodoCount() const;
+    [[nodiscard]] int totalTodoCount() const;
+    Q_INVOKABLE void markTaskViewed(int row);
 
 signals:
     void countChanged();
+    void unviewedTodoCountChanged();
+    void totalTodoCountChanged();
     void taskDataChanged();
     void taskUpdated(int row, gofi::TxtTask task);
     void taskRemoved(qint64 taskId);

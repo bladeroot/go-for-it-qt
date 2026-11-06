@@ -79,6 +79,11 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     updateAutoSyncTimer();
 
     connect(m_taskManager.todoModel(), &TaskStoreModel::countChanged, this, &AppController::onTodoListCountChanged);
+    connect(m_taskManager.todoModel(), &TaskStoreModel::unviewedTodoCountChanged, this, &AppController::todoCountsChanged);
+    connect(m_taskManager.todoModel(), &TaskStoreModel::totalTodoCountChanged, this, [this]() {
+        emit todoCountsChanged();
+        emit totalTodoCountChanged();
+    });
     connect(&m_listManager, &ListManagerModel::listRemoved, this, [this](const QString& id) {
         if (m_currentListId == id) {
             setShowingOverview(true);
@@ -263,6 +268,22 @@ void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QStrin
         if (listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack")) {
             m_issueTracker.postIssueComment(listEntry, task.jiraKey(), commentText);
         }
+    }
+}
+
+int AppController::unviewedTodoCount() const {
+    return m_taskManager.todoModel()->unviewedTodoCount();
+}
+
+int AppController::totalTodoCount() const {
+    return m_taskManager.todoModel()->totalTodoCount();
+}
+
+void AppController::markTaskViewed(bool fromDoneList, int proxyRow) {
+    if (fromDoneList) return;
+    const int sourceRow = m_todoProxy.mapToSourceRow(proxyRow);
+    if (sourceRow >= 0) {
+        m_taskManager.todoModel()->markTaskViewed(sourceRow);
     }
 }
 

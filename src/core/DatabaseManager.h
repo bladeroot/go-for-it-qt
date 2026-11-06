@@ -56,6 +56,7 @@ public:
     [[nodiscard]] int countAllTasksInList(const QString& listId) const;
     qint64 insertTask(const QString& listId, const TxtTask& task, int sortOrder);
     bool updateTask(const TxtTask& task);
+    bool markTaskViewed(qint64 taskId, bool viewed = true);
     bool updateTaskDoneAndOrder(const TxtTask& task, int sortOrder);
     bool updateTaskTimer(qint64 taskId, quint32 timerSeconds, quint32 jiraSyncedSeconds = 0);
     bool deleteTask(qint64 taskId);

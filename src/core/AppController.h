@@ -33,6 +33,8 @@ class AppController : public QObject {
     Q_PROPERTY(QString databasePath READ databasePath NOTIFY storagePathChanged)
     Q_PROPERTY(QString configFilePath READ configFilePath CONSTANT)
     Q_PROPERTY(int activeTodoRow READ activeTodoRow WRITE setActiveTodoRow NOTIFY activeTodoRowChanged)
+    Q_PROPERTY(int unviewedTodoCount READ unviewedTodoCount NOTIFY todoCountsChanged)
+    Q_PROPERTY(int totalTodoCount READ totalTodoCount NOTIFY totalTodoCountChanged)
 
 public:
     explicit AppController(const QString& logFilePath = {},
@@ -60,6 +62,9 @@ public:
     [[nodiscard]] int activeTodoRow() const noexcept { return m_activeTodoRow; }
     void setActiveTodoRow(int sourceRow);
 
+    [[nodiscard]] int unviewedTodoCount() const;
+    [[nodiscard]] int totalTodoCount() const;
+
     Q_INVOKABLE void selectListById(const QString& listId);
     Q_INVOKABLE void syncCurrentList();
     Q_INVOKABLE void syncAllRemoteLists();
@@ -69,6 +74,7 @@ public:
     Q_INVOKABLE void updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText);
     Q_INVOKABLE void updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details);
     Q_INVOKABLE void addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText);
+    Q_INVOKABLE void markTaskViewed(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void removeTask(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxyRow);
     Q_INVOKABLE void moveActiveTaskByOffset(int delta);
@@ -88,6 +94,8 @@ signals:
     void storagePathChanged();
     void languageChanged();
     void activeTodoRowChanged();
+    void todoCountsChanged();
+    void totalTodoCountChanged();
     void notificationRequested(const QString& title, const QString& body);
     void showWindowRequested();
     void quitRequested();

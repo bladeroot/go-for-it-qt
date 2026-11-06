@@ -33,6 +33,7 @@ private slots:
 
 private:
     void setupTrayIcon();
+    [[nodiscard]] QIcon renderBadgeIcon(int unviewed, int total) const;
     void emitUnityLauncherUpdate(const QVariantMap& properties);
 
     AppController* m_controller = nullptr;
@@ -40,6 +41,7 @@ private:
     TaskTimer* m_timer = nullptr;
 
     QSystemTrayIcon* m_trayIcon = nullptr;
+    QIcon m_baseIcon;
     QMenu* m_trayMenu = nullptr;
     QAction* m_taskDescAction = nullptr;
     QAction* m_markDoneAction = nullptr;

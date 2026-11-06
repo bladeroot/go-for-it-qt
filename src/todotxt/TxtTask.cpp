@@ -84,7 +84,8 @@ TxtTask TxtTask::fromDatabase(qint64 id,
                               const QString& jiraKey,
                               quint32 jiraSyncedSeconds,
                               const QString& details,
-                              const QVariantList& comments)
+                              const QVariantList& comments,
+                              bool isViewed)
 {
     TxtTask task;
     task.m_id = id;
@@ -101,6 +102,7 @@ TxtTask TxtTask::fromDatabase(qint64 id,
     task.m_jiraSyncedSeconds = jiraSyncedSeconds;
     task.m_details = details;
     task.m_comments = comments;
+    task.m_isViewed = isViewed;
     return task;
 }
 

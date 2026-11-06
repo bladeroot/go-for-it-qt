@@ -183,6 +183,32 @@ private slots:
         QVariantMap customMap{{QStringLiteral("Custom Review"), QStringLiteral("paused")}};
         QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Custom Review"), {}, customMap), QStringLiteral("paused"));
     }
+
+    void testUnviewedAndTotalCounters() {
+        TaskStoreModel store(false);
+        TxtTask t1 = TxtTask::fromSimpleTxt(QStringLiteral("Task 1"), false, false);
+        t1.setViewed(false);
+        t1.setStatus(QStringLiteral("todo"));
+
+        TxtTask t2 = TxtTask::fromSimpleTxt(QStringLiteral("Task 2"), false, false);
+        t2.setViewed(true);
+        t2.setStatus(QStringLiteral("todo"));
+
+        TxtTask t3 = TxtTask::fromSimpleTxt(QStringLiteral("Task 3"), false, false);
+        t3.setViewed(false);
+        t3.setStatus(QStringLiteral("in_progress")); // not "todo" status
+
+        store.appendTask(t1);
+        store.appendTask(t2);
+        store.appendTask(t3);
+
+        QCOMPARE(store.totalTodoCount(), 2);    // t1 and t2
+        QCOMPARE(store.unviewedTodoCount(), 1); // only t1
+
+        store.markTaskViewed(0);
+        QCOMPARE(store.unviewedTodoCount(), 0);
+        QCOMPARE(store.totalTodoCount(), 2);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

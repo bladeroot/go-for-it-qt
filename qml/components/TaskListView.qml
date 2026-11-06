@@ -128,6 +128,7 @@ Item {
                     if (!listRoot.isDoneList) {
                         app.activeTodoRow = listRoot.proxyModel.mapToSourceRow(index)
                     }
+                    app.markTaskViewed(listRoot.isDoneList, index)
                 }
                 onMoveRequested: function(fromRow, toRow) {
                     app.moveTaskRow(listRoot.isDoneList, fromRow, toRow)
@@ -139,6 +140,7 @@ Item {
                     }
                 }
                 onDetailsRequested: {
+                    app.markTaskViewed(listRoot.isDoneList, index)
                     taskDetailsDialog.openForTask(
                         listRoot.isDoneList,
                         index,

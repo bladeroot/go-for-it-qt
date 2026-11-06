@@ -417,6 +417,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
     // Select task for Pomodoro timer: Enter
     if (seq == "\r" || seq == "\n") {
         if (!isClosedTab() && count > 0) {
+            m_app->markTaskViewed(false, m_selectedRow);
             const int srcRow = m_app->todoProxyModel()->mapToSourceRow(m_selectedRow);
             if (srcRow >= 0) {
                 m_app->setActiveTodoRow(srcRow);
@@ -1006,6 +1007,7 @@ void TuiApp::openTaskMarkdownView() {
     if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
         return;
     }
+    m_app->markTaskViewed(isClosedTab(), m_selectedRow);
     const QModelIndex idx = proxy->index(m_selectedRow, 0);
     const QString desc = proxy->data(idx, TaskStoreModel::DescriptionRole).toString();
     const QString details = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
@@ -1429,9 +1431,22 @@ void TuiApp::render() {
     // -------------------------------------------------------------------------
     // Row 3: View / Status Filter Tabs (1..6)
     // -------------------------------------------------------------------------
+    const int unviewed = m_app->unviewedTodoCount();
+    const int total = m_app->totalTodoCount();
+    QString todoTabLabel;
+    if (total > 0) {
+        if (unviewed > 0) {
+            todoTabLabel = tr(" 2:To-Do (%1/%2) ").arg(unviewed).arg(total);
+        } else {
+            todoTabLabel = tr(" 2:To-Do (%1) ").arg(total);
+        }
+    } else {
+        todoTabLabel = tr(" 2:To-Do ");
+    }
+
     const QStringList tabNames = {
         tr(" 1:All Open "),
-        tr(" 2:To-Do "),
+        todoTabLabel,
         tr(" 3:In Progress "),
         tr(" 4:Paused "),
         tr(" 5:Done "),
@@ -1619,6 +1634,10 @@ void TuiApp::render() {
             const QVariantList comments = proxy->data(idx, TaskStoreModel::CommentsRole).toList();
             const uint durSec = proxy->data(idx, TaskStoreModel::DurationRole).toUInt();
             const uint timerSec = proxy->data(idx, TaskStoreModel::TimerValueRole).toUInt();
+            const bool isViewed = proxy->data(idx, TaskStoreModel::IsViewedRole).toBool();
+            const QString unreadDot = (!isViewed && (status == QStringLiteral("todo") || status.isEmpty()) && !isClosedTab())
+                ? (FG_RED + ESC_BOLD + QStringLiteral("●") + ESC_RESET)
+                : QStringLiteral(" ");
 
             QString statusBadge = QStringLiteral("[ ]");
             QString statusColor = FG_WHITE;
@@ -1656,17 +1675,17 @@ void TuiApp::render() {
             singleLineDesc.replace(QLatin1Char('\t'), QLatin1Char(' '));
 
             const QString cursorMark = isSelected ? QStringLiteral(" > ") : (isActivePomodoro ? QStringLiteral(" • ") : QStringLiteral("   "));
-            const int availDescCols = qMax(10, m_cols - 12 - displayWidth(metaSuffix));
+            const int availDescCols = qMax(10, m_cols - 14 - displayWidth(metaSuffix));
             const QString cleanDesc = padRight(singleLineDesc, availDescCols);
 
             if (isSelected) {
-                out += BG_SELECTED + FG_CYAN + ESC_BOLD + cursorMark + statusColor + statusBadge + QLatin1Char(' ')
+                out += BG_SELECTED + FG_CYAN + ESC_BOLD + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
                     + prioColor + prioStr + QLatin1Char(' ')
                     + FG_WHITE + cleanDesc
                     + FG_PURPLE + metaSuffix
                     + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
-                out += (isActivePomodoro ? FG_CYAN : FG_GRAY) + cursorMark + statusColor + statusBadge + QLatin1Char(' ')
+                out += (isActivePomodoro ? FG_CYAN : FG_GRAY) + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
                     + prioColor + prioStr + QLatin1Char(' ')
                     + (isClosedTab() ? (FG_GRAY + ESC_STRIKE) : FG_WHITE) + cleanDesc + ESC_RESET
                     + FG_GRAY + metaSuffix + ESC_RESET + QStringLiteral("\033[K\r\n");

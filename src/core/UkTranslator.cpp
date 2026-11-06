@@ -373,7 +373,13 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("Sound On New/Changed Tasks      : %1"), QStringLiteral("Звук при нових/зміні статусу    : %1")},
         {QStringLiteral("Popup On New/Changed Tasks      : %1"), QStringLiteral("Спливаючі сповіщення про зміни  : %1")},
         {QStringLiteral("GUI Start Minimized             : %1"), QStringLiteral("Відкривати GUI згорнутим        : %1")},
-        {QStringLiteral("GUI Start In System Tray        : %1"), QStringLiteral("Відкривати GUI у системний трей : %1")}
+        {QStringLiteral("GUI Start In System Tray        : %1"), QStringLiteral("Відкривати GUI у системний трей : %1")},
+        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("До виконання: %1 не переглянуто / %2 всього")},
+        {QStringLiteral("Unviewed task"), QStringLiteral("Непереглянута задача")},
+        {QStringLiteral("unread"), QStringLiteral("не переглянуто")},
+        {QStringLiteral("total"), QStringLiteral("всього")},
+        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:До виконання (%1/%2) ")},
+        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:До виконання (%1) ")}
     };
 
     // German (de)
@@ -456,7 +462,13 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ PAUSE ANGEHALTEN")},
         {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ TIMER BEREIT")},
         {QStringLiteral("[ON]"), QStringLiteral("[EIN]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[AUS]")}
+        {QStringLiteral("[OFF]"), QStringLiteral("[AUS]")},
+        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("Zu erledigen: %1 ungelesen / %2 gesamt")},
+        {QStringLiteral("Unviewed task"), QStringLiteral("Ungelesene Aufgabe")},
+        {QStringLiteral("unread"), QStringLiteral("ungelesen")},
+        {QStringLiteral("total"), QStringLiteral("gesamt")},
+        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Offen (%1/%2) ")},
+        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Offen (%1) ")}
     };
 
     // French (fr)
@@ -539,7 +551,13 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ PAUSE SUSPENDUE")},
         {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ MINUTEUR PRÊT")},
         {QStringLiteral("[ON]"), QStringLiteral("[OUI]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[NON]")}
+        {QStringLiteral("[OFF]"), QStringLiteral("[NON]")},
+        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("À faire : %1 non lu / %2 au total")},
+        {QStringLiteral("Unviewed task"), QStringLiteral("Tâche non lue")},
+        {QStringLiteral("unread"), QStringLiteral("non lu")},
+        {QStringLiteral("total"), QStringLiteral("au total")},
+        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:À faire (%1/%2) ")},
+        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:À faire (%1) ")}
     };
 
     // Spanish (es)
@@ -622,7 +640,13 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ DESCANSO EN PAUSA")},
         {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ TEMPORIZADOR LISTO")},
         {QStringLiteral("[ON]"), QStringLiteral("[SÍ]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[NO]")}
+        {QStringLiteral("[OFF]"), QStringLiteral("[NO]")},
+        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("Por hacer: %1 no leída(s) / %2 en total")},
+        {QStringLiteral("Unviewed task"), QStringLiteral("Tarea no leída")},
+        {QStringLiteral("unread"), QStringLiteral("no leída(s)")},
+        {QStringLiteral("total"), QStringLiteral("en total")},
+        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Por hacer (%1/%2) ")},
+        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Por hacer (%1) ")}
     };
 
     // Italian (it)
@@ -705,7 +729,13 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ PAUSA SOSPESA")},
         {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ TIMER PRONTO")},
         {QStringLiteral("[ON]"), QStringLiteral("[ON]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[OFF]")}
+        {QStringLiteral("[OFF]"), QStringLiteral("[OFF]")},
+        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("Da fare: %1 non lette / %2 in totale")},
+        {QStringLiteral("Unviewed task"), QStringLiteral("Attività non letta")},
+        {QStringLiteral("unread"), QStringLiteral("non lette")},
+        {QStringLiteral("total"), QStringLiteral("in totale")},
+        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Da fare (%1/%2) ")},
+        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Da fare (%1) ")}
     };
 }
 
