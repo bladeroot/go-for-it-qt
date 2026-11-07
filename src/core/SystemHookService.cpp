@@ -54,6 +54,14 @@ SystemHookService::SystemHookService(AppController* controller,
 SystemHookService::~SystemHookService() {
     applyDnd(false);
     applySleepInhibit(false);
+    for (QProcess* proc : findChildren<QProcess*>()) {
+        if (proc->state() != QProcess::NotRunning) {
+            proc->waitForFinished(500);
+            if (proc->state() != QProcess::NotRunning) {
+                proc->kill();
+            }
+        }
+    }
 }
 
 QString SystemHookService::hooksDirectory() const {

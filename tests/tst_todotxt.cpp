@@ -16,9 +16,31 @@ using namespace gofi;
 class TestTodoTxt : public QObject {
     Q_OBJECT
 
+private:
+    QTemporaryDir m_testSandbox;
+
 private slots:
     void initTestCase() {
         NotificationService::setAudioPlaybackEnabled(false);
+        QVERIFY(m_testSandbox.isValid());
+        const QString configDir = m_testSandbox.filePath(QStringLiteral("config"));
+        const QString dataDir = m_testSandbox.filePath(QStringLiteral("data"));
+        QDir().mkpath(configDir);
+        QDir().mkpath(dataDir);
+
+        qputenv("HOME", m_testSandbox.path().toUtf8());
+        qputenv("XDG_CONFIG_HOME", configDir.toUtf8());
+        qputenv("XDG_DATA_HOME", dataDir.toUtf8());
+        QStandardPaths::setTestModeEnabled(true);
+
+        QSettings probe(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("go-for-it"));
+        QVERIFY(probe.fileName().startsWith(m_testSandbox.path()));
+    }
+
+    void cleanupTestCase() {
+        if (m_testSandbox.isValid()) {
+            m_testSandbox.remove();
+        }
     }
 
     void testParseTodoTxtFullLine() {
@@ -894,7 +916,7 @@ private slots:
         QFile::remove(testDb);
         DatabaseManager::instance().initialize(testDb);
 
-        AppController controller;
+        AppController controller(QString(), testDb);
         ListManagerModel* mgr = controller.listManager();
         QVERIFY(mgr != nullptr);
         QVERIFY(mgr->rowCount() > 0);
