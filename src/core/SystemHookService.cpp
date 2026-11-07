@@ -2,6 +2,7 @@
 #include "AppController.h"
 #include "SettingsManager.h"
 #include "TaskTimer.h"
+#include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
@@ -16,9 +17,26 @@
 #include <QStandardPaths>
 #include <QUrl>
 
+#if defined(Q_OS_UNIX)
+#include <cerrno>
+#include <signal.h>
+#endif
+
 namespace gofi {
 
 static bool s_systemIntegrationEnabled = true;
+
+static bool isProcessRunning(qint64 pid) {
+    if (pid <= 0) return false;
+#if defined(Q_OS_UNIX)
+    if (kill(static_cast<pid_t>(pid), 0) == 0) {
+        return true;
+    }
+    return errno != ESRCH;
+#else
+    return false;
+#endif
+}
 
 void SystemHookService::setSystemIntegrationEnabled(bool enabled) {
     s_systemIntegrationEnabled = enabled;
@@ -40,7 +58,22 @@ SystemHookService::SystemHookService(AppController* controller,
     // Crash recovery: check if a previous run crashed while GNOME banners were disabled
     if (!QStandardPaths::isTestModeEnabled()) {
         QSettings crashState(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
-        if (crashState.value(QStringLiteral("State/gnome_banners_inhibited"), false).toBool()) {
+        const qint64 pid = crashState.value(QStringLiteral("State/gnome_banners_inhibited_pid"), 0).toLongLong();
+        const bool legacyFlag = crashState.value(QStringLiteral("State/gnome_banners_inhibited"), false).toBool();
+
+        if (pid > 0) {
+            // Check if the owner process is still alive. If it's another active instance, leave DND intact.
+            if (pid != QCoreApplication::applicationPid() && !isProcessRunning(pid)) {
+                QProcess::execute(QStringLiteral("gsettings"),
+                                 {QStringLiteral("set"),
+                                  QStringLiteral("org.gnome.desktop.notifications"),
+                                  QStringLiteral("show-banners"),
+                                  QStringLiteral("true")});
+                crashState.remove(QStringLiteral("State/gnome_banners_inhibited_pid"));
+                crashState.remove(QStringLiteral("State/gnome_banners_inhibited"));
+            }
+        } else if (legacyFlag) {
+            // Upgrade legacy flag: no PID was recorded, restore banners once and clear
             QProcess::execute(QStringLiteral("gsettings"),
                              {QStringLiteral("set"),
                               QStringLiteral("org.gnome.desktop.notifications"),
@@ -214,8 +247,9 @@ void SystemHookService::applyDnd(bool enable) {
                                       QStringLiteral("show-banners"),
                                       QStringLiteral("false")});
                     m_gnomeBannersDisabled = true;
-                    QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"))
-                        .setValue(QStringLiteral("State/gnome_banners_inhibited"), true);
+                    QSettings crashSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
+                    crashSettings.setValue(QStringLiteral("State/gnome_banners_inhibited_pid"), QCoreApplication::applicationPid());
+                    crashSettings.setValue(QStringLiteral("State/gnome_banners_inhibited"), true);
                 }
             }
         }
@@ -242,8 +276,9 @@ void SystemHookService::applyDnd(bool enable) {
                               QStringLiteral("show-banners"),
                               QStringLiteral("true")});
             m_gnomeBannersDisabled = false;
-            QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"))
-                .remove(QStringLiteral("State/gnome_banners_inhibited"));
+            QSettings crashSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
+            crashSettings.remove(QStringLiteral("State/gnome_banners_inhibited_pid"));
+            crashSettings.remove(QStringLiteral("State/gnome_banners_inhibited"));
         }
 
         m_dndActive = false;

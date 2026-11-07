@@ -46,6 +46,7 @@ private slots:
 
     void cleanup() {
         DatabaseManager::instance().close();
+        SystemHookService::setSystemIntegrationEnabled(false);
     }
 
     void testParseTodoTxtFullLine() {
@@ -961,6 +962,9 @@ private slots:
         QVERIFY(hooks != nullptr);
 
         SystemHookService::setSystemIntegrationEnabled(true);
+        const auto resetIntegration = qScopeGuard([]() {
+            SystemHookService::setSystemIntegrationEnabled(false);
+        });
 
         const QString hookOutputDir = m_testSandbox.filePath(QStringLiteral("hook_run"));
         QDir().mkpath(hookOutputDir);

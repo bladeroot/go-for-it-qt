@@ -2,7 +2,7 @@
 
 #include <QVector>
 #include <QVariantList>
-#include <QtTypes>
+#include <QtGlobal>
 
 namespace gofi {
 
