@@ -14,6 +14,7 @@ Dialog {
 
     property string editingId: ""
     property var currentStatusMapping: ({})
+    property var currentPriorityMapping: ({})
     signal conflictDetected(var config, string conflictMessage)
 
     readonly property string selectedProvider: {
