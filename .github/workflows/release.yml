@@ -15,33 +15,31 @@ permissions:
   contents: write
 
 jobs:
-  build-and-test:
-    name: Build, Test & Package (Qt 6.6)
-    runs-on: ubuntu-24.04
+  build-and-package:
+    name: Build, Test & Package (.deb in Ubuntu 24.10)
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.10
     steps:
+      - name: Install Git & system dependencies
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git cmake ninja-build g++ dpkg-dev \
+            qt6-base-dev qt6-declarative-dev qt6-multimedia-dev \
+            libqt6sql6-sqlite qml6-module-qtquick \
+            qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-dialogs qml6-module-qtquick-window
+
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install build tools and libraries
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ dpkg-dev \
-            libgl1-mesa-dev libxkbcommon-dev libx11-xcb1 \
-            libpulse-dev libasound2-dev libsqlite3-dev
-
-      - name: Install Qt 6.6
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '6.6.3'
-          modules: 'qtmultimedia'
-          cache: true
 
       - name: Configure CMake
         run: |
           cmake -B build -GNinja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON \
             -DBUILD_TESTING=ON
 
       - name: Build & Run Tests

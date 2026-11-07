@@ -242,18 +242,19 @@ void SystemHookService::applyDnd(bool enable) {
             if (queryProc.waitForFinished(500)) {
                 const QString val = QString::fromUtf8(queryProc.readAllStandardOutput()).trimmed();
                 if (val == QStringLiteral("true")) {
-                    QProcess::execute(QStringLiteral("gsettings"),
-                                     {QStringLiteral("set"),
-                                      QStringLiteral("org.gnome.desktop.notifications"),
-                                      QStringLiteral("show-banners"),
-                                      QStringLiteral("false")});
-                    m_gnomeBannersDisabled = true;
                     m_dndLockFile = std::make_unique<QLockFile>(dndLockFilePath());
                     m_dndLockFile->setStaleLockTime(0);
-                    m_dndLockFile->tryLock();
+                    if (m_dndLockFile->tryLock(500)) {
+                        QProcess::execute(QStringLiteral("gsettings"),
+                                         {QStringLiteral("set"),
+                                          QStringLiteral("org.gnome.desktop.notifications"),
+                                          QStringLiteral("show-banners"),
+                                          QStringLiteral("false")});
+                        m_gnomeBannersDisabled = true;
 
-                    QSettings crashSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
-                    crashSettings.setValue(QStringLiteral("State/gnome_banners_inhibited"), true);
+                        QSettings crashSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
+                        crashSettings.setValue(QStringLiteral("State/gnome_banners_inhibited"), true);
+                    }
                 }
             }
         }

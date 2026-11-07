@@ -130,7 +130,7 @@ Run `go-for-it-tui` or `go-for-it-qt --tui`:
 - **Qt 6** (`>= 6.5`):
   `qt6-base`, `qt6-declarative`, `qt6-multimedia`, `libqt6sql6-sqlite`
 
-#### Ubuntu / Debian (22.04 / 24.04):
+#### Ubuntu 24.10+ / Debian 13+ (Trixie/Sid):
 ```bash
 sudo apt update
 sudo apt install -y cmake ninja-build g++ qt6-base-dev qt6-declarative-dev \
@@ -138,6 +138,9 @@ sudo apt install -y cmake ninja-build g++ qt6-base-dev qt6-declarative-dev \
     qml6-module-qtquick-controls qml6-module-qtquick-layouts \
     qml6-module-qtquick-dialogs qml6-module-qtquick-window
 ```
+
+> [!NOTE]
+> Older Ubuntu releases (22.04 LTS / 24.04 LTS) ship with Qt 6.2 / 6.4 in default repositories. To build from source on 22.04 / 24.04, install Qt `>= 6.5` using [aqtinstall](https://github.com/miurahr/aqtinstall) or the official Qt online installer.
 
 #### Arch Linux / Manjaro:
 ```bash
