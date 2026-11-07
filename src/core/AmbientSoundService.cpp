@@ -1,4 +1,5 @@
 #include "AmbientSoundService.h"
+#include "NotificationService.h"
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
@@ -22,6 +23,9 @@ AmbientSoundService::AmbientSoundService(TaskTimer* timer, QObject* parent)
 AmbientSoundService::~AmbientSoundService() = default;
 
 void AmbientSoundService::ensurePlayerInitialized() {
+    if (!NotificationService::isAudioPlaybackEnabled()) {
+        return;
+    }
     if (!m_player) {
         m_audioOutput = std::make_unique<QAudioOutput>();
         m_player = std::make_unique<QMediaPlayer>();
@@ -71,8 +75,10 @@ void AmbientSoundService::setAmbientMode(const QString& mode) {
     }
 
     ensurePlayerInitialized();
-    m_player->stop();
-    m_player->setSource(QUrl::fromLocalFile(wavPath));
+    if (m_player) {
+        m_player->stop();
+        m_player->setSource(QUrl::fromLocalFile(wavPath));
+    }
 
     updatePlaybackState();
 }
@@ -89,6 +95,9 @@ void AmbientSoundService::updatePlaybackState() {
 
     const bool shouldPlay = m_timer && m_timer->isRunning() && !m_timer->isBreakActive();
     ensurePlayerInitialized();
+    if (!m_player) {
+        return;
+    }
 
     if (shouldPlay) {
         if (m_player->playbackState() != QMediaPlayer::PlayingState) {

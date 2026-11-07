@@ -17,6 +17,10 @@ class TestTodoTxt : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase() {
+        NotificationService::setAudioPlaybackEnabled(false);
+    }
+
     void testParseTodoTxtFullLine() {
         const QString line = QStringLiteral("x (B) 2026-11-05 2026-11-01 Write unit tests +GoForItQt @coding timer:1h-15m-30s duration:2h");
         TxtTask task = TxtTask::fromTodoTxt(line, false);

@@ -16,6 +16,9 @@ class NotificationService : public QObject {
 public:
     explicit NotificationService(SettingsManager* settings, TaskTimer* timer, QObject* parent = nullptr);
 
+    static void setAudioPlaybackEnabled(bool enabled);
+    [[nodiscard]] static bool isAudioPlaybackEnabled();
+
     Q_INVOKABLE void playSoundFile(const QString& presetOrPath, double volume = 1.0);
     Q_INVOKABLE void notifyTaskEvent(const QString& title, const QString& body);
     Q_INVOKABLE QVariantList availableSoundPresets() const;

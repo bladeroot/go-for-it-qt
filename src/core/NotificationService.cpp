@@ -22,8 +22,27 @@ NotificationService::NotificationService(SettingsManager* settings, TaskTimer* t
     }
 }
 
+static bool s_audioPlaybackEnabled = true;
+
+void NotificationService::setAudioPlaybackEnabled(bool enabled) {
+    s_audioPlaybackEnabled = enabled;
+}
+
+bool NotificationService::isAudioPlaybackEnabled() {
+    if (!s_audioPlaybackEnabled) {
+        return false;
+    }
+    if (qEnvironmentVariableIsSet("QT_QPA_PLATFORM") && qgetenv("QT_QPA_PLATFORM") == "offscreen") {
+        return false;
+    }
+    if (qEnvironmentVariableIsSet("GOFI_NO_SOUND")) {
+        return false;
+    }
+    return true;
+}
+
 void NotificationService::playSoundFile(const QString& presetOrPath, double volume) {
-    if (presetOrPath.isEmpty()) {
+    if (!isAudioPlaybackEnabled() || presetOrPath.isEmpty()) {
         return;
     }
     const QUrl url = resolveSoundUrl(presetOrPath);
