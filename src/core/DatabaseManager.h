@@ -30,6 +30,20 @@ struct TodoListEntry {
     QVariantMap statusMapping; // remoteStatusName -> "todo" | "in_progress" | "paused" | "done" | "canceled"
 };
 
+struct ActivityRecord {
+    qint64 id = -1;
+    QString listId;
+    QString listName;
+    qint64 taskId = -1;
+    QString jiraKey;
+    QString taskDescription;
+    QDateTime startTimeUtc;
+    quint32 runtimeSeconds = 0;
+    QDateTime stopTimeUtc;
+    bool worklogSynced = false;
+    bool isPomodoroCompleted = false;
+};
+
 class DatabaseManager {
 public:
     static DatabaseManager& instance();
@@ -84,8 +98,12 @@ public:
                              const QDateTime& startTimeUtc,
                              quint32 runtimeSeconds,
                              const QDateTime& stopTimeUtc,
-                             bool worklogSynced = false);
+                             bool worklogSynced = false,
+                             bool isPomodoroCompleted = false);
     bool markActivityWorklogSynced(qint64 logId);
+    [[nodiscard]] QVector<ActivityRecord> loadActivityLogs(const QDateTime& startUtc = {},
+                                                           const QDateTime& endUtc = {},
+                                                           const QString& listId = {}) const;
 
 private:
     DatabaseManager() = default;

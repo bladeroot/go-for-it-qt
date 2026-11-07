@@ -227,6 +227,12 @@ ApplicationWindow {
                     ToolTip.text: qsTr("Done")
                     width: implicitWidth + 16
                 }
+                TabButton {
+                    text: app.settings.switcherUseIcons ? "📊" : qsTr("Reports")
+                    ToolTip.visible: hovered && app.settings.switcherUseIcons
+                    ToolTip.text: qsTr("Productivity Dashboard & Reports")
+                    width: implicitWidth + 16
+                }
             }
 
             Item { Layout.fillWidth: true }
@@ -328,6 +334,13 @@ ApplicationWindow {
                         onTriggered: app.clearDoneTasks()
                     }
                     MenuSeparator {}
+                    MenuItem {
+                        text: qsTr("📊 Productivity Dashboard & Reports")
+                        onTriggered: {
+                            app.showingOverview = false
+                            rootWindow.currentActivityTab = 3
+                        }
+                    }
                     MenuItem {
                         text: qsTr("Settings")
                         onTriggered: settingsDialog.open()

@@ -19,10 +19,11 @@ qint64 ActivityLog::logTask(const QString& listId,
                             const QString& taskDescription,
                             const QDateTime& startTimeUtc,
                             quint32 runtimeSeconds,
-                            const QDateTime& stopTimeUtc) const
+                            const QDateTime& stopTimeUtc,
+                            bool isPomodoroCompleted) const
 {
     const qint64 logId = DatabaseManager::instance().insertActivityLog(
-        listId, listName, taskId, jiraKey, taskDescription, startTimeUtc, runtimeSeconds, stopTimeUtc, false
+        listId, listName, taskId, jiraKey, taskDescription, startTimeUtc, runtimeSeconds, stopTimeUtc, false, isPomodoroCompleted
     );
     if (!m_defaultLogPath.isEmpty()) {
         logTaskInFile(m_defaultLogPath, listName, taskDescription, startTimeUtc, runtimeSeconds, stopTimeUtc);

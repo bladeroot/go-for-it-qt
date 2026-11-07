@@ -24,6 +24,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_todoProxy(this)
     , m_doneProxy(this)
     , m_activityLog(logFilePath)
+    , m_analytics(this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
     applyLanguageTranslator();
@@ -36,6 +37,11 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     m_doneProxy.setSourceModel(m_taskManager.doneModel());
 
     connect(&m_timer, &TaskTimer::timerStopped, this, &AppController::onTimerStopped);
+    connect(&m_timer, &TaskTimer::timerFinished, this, [this](bool wasBreak) {
+        if (!wasBreak) {
+            m_lastSessionCompletedPomodoro = true;
+        }
+    });
     connect(&m_timer, &TaskTimer::activeTaskTimeUpdated, this, &AppController::onActiveTaskTimeUpdated);
     connect(&m_notifications, &NotificationService::desktopNotification, this, [this](const QString& title, const QString& body) {
         m_desktopIntegration.showTrayMessage(title, body);
@@ -535,6 +541,9 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
             targetListName = activeTask.listName().isEmpty() ? m_currentListName : activeTask.listName();
         }
     }
+    const bool completedPomodoro = m_lastSessionCompletedPomodoro;
+    m_lastSessionCompletedPomodoro = false;
+
     const qint64 logId = m_activityLog.logTask(
         targetListId,
         targetListName,
@@ -543,7 +552,8 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         m_timer.activeTaskDescription(),
         startTimeUtc,
         runtimeSeconds,
-        stopUtc
+        stopUtc,
+        completedPomodoro
     );
     if (!m_currentListActivityLogPath.isEmpty()) {
         ActivityLog::logTaskInFile(

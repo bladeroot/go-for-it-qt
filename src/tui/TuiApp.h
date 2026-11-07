@@ -26,7 +26,8 @@ public:
         EditSettingValue,
         EditListField,
         MarkdownView,
-        Help
+        Help,
+        Dashboard
     };
 
     explicit TuiApp(AppController* controller, QObject* parent = nullptr);
@@ -53,8 +54,10 @@ private:
     void handleSettingsKey(const QByteArray& seq);
     void handleMarkdownViewKey(const QByteArray& seq);
     void handleHelpKey(const QByteArray& seq);
+    void handleDashboardKey(const QByteArray& seq);
     void openListPicker();
     void openTaskMarkdownView();
+    void openDashboardView();
     void editTaskDetailsInVim();
     void addTaskCommentInVim();
     void openSelectedTaskInBrowser();
@@ -99,6 +102,8 @@ private:
     QString m_markdownTitle;
     QString m_markdownContent;
     int m_markdownScroll = 0;
+    int m_dashboardPeriod = 0; // 0:Day, 1:Week, 2:Month, 3:All
+    int m_dashboardScroll = 0;
 };
 
 } // namespace gofi

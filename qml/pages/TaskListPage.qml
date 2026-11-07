@@ -43,5 +43,9 @@ Item {
             showFilter: taskListPageRoot.filterVisible
             showAddEntry: false
         }
+
+        DashboardView {
+            id: dashboardView
+        }
     }
 }

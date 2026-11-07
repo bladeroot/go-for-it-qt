@@ -1,3 +1,4 @@
+#include "core/AnalyticsService.h"
 #include "core/AppController.h"
 #include "core/IssueTrackerService.h"
 #include "core/NotificationService.h"
@@ -511,6 +512,87 @@ private slots:
         localEntry.provider = QStringLiteral("SQLite");
         const QUrl localUrl = IssueTrackerService::buildIssueBrowserUrl(localEntry, QString(), QStringLiteral("Fix bug https://docs.qt.io/qt-6/qurl.html +research"));
         QCOMPARE(localUrl.toString(), QStringLiteral("https://docs.qt.io/qt-6/qurl.html"));
+    }
+
+    void testAnalyticsAndBilling() {
+        // Tag extraction tests
+        const QString sample = QStringLiteral("Implement billing report +Analytics +GoForIt @office @urgent priority:high");
+        const QStringList projs = AnalyticsService::extractProjects(sample);
+        QCOMPARE(projs.size(), 2);
+        QVERIFY(projs.contains(QStringLiteral("Analytics")));
+        QVERIFY(projs.contains(QStringLiteral("GoForIt")));
+
+        const QStringList ctxs = AnalyticsService::extractContexts(sample);
+        QCOMPARE(ctxs.size(), 2);
+        QVERIFY(ctxs.contains(QStringLiteral("office")));
+        QVERIFY(ctxs.contains(QStringLiteral("urgent")));
+
+        // Duration formatting
+        QCOMPARE(AnalyticsService::formatDuration(0), QStringLiteral("0m"));
+        QCOMPARE(AnalyticsService::formatDuration(1500), QStringLiteral("25m"));
+        QCOMPARE(AnalyticsService::formatDuration(3660), QStringLiteral("1h 01m"));
+        QCOMPARE(AnalyticsService::formatDuration(7200), QStringLiteral("2h 00m"));
+
+        // Temporary Database for Activity Logs
+        const QString testDbPath = QStringLiteral("/tmp/gofi_analytics_test.db");
+        QFile::remove(testDbPath);
+        DatabaseManager& db = DatabaseManager::instance();
+        db.initialize(testDbPath);
+
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        // Insert 2 sessions: 1 completed pomodoro (1500s) + 1 short session (600s)
+        const qint64 id1 = db.insertActivityLog(
+            QStringLiteral("list-1"), QStringLiteral("Work"), 101, QStringLiteral("PR#1"),
+            QStringLiteral("Feature A +ProjectX @coding"), now.addSecs(-7200), 1500, now.addSecs(-5700), false, true
+        );
+        QVERIFY(id1 > 0);
+
+        const qint64 id2 = db.insertActivityLog(
+            QStringLiteral("list-1"), QStringLiteral("Work"), 102, QStringLiteral("GH#2"),
+            QStringLiteral("Bugfix B +ProjectY @testing"), now.addSecs(-3600), 600, now.addSecs(-3000), false, false
+        );
+        QVERIFY(id2 > 0);
+
+        // Load records
+        const QVector<ActivityRecord> logs = db.loadActivityLogs();
+        QVERIFY(logs.size() >= 2);
+
+        AnalyticsService analytics;
+        const QVariantMap stats = analytics.getProductivityStats(QStringLiteral("all"));
+        QCOMPARE(stats.value(QStringLiteral("totalSessions")).toInt(), 2);
+        QCOMPARE(stats.value(QStringLiteral("totalSeconds")).toULongLong(), 2100ULL);
+        QCOMPARE(stats.value(QStringLiteral("completedPomodoros")).toInt(), 1);
+
+        const QVariantList pBreakdown = stats.value(QStringLiteral("projectBreakdown")).toList();
+        QCOMPARE(pBreakdown.size(), 2);
+
+        // Heatmap
+        const QVariantList heatmap = analytics.getActivityHeatmap(14);
+        QCOMPARE(heatmap.size(), 14);
+
+        // CSV Export
+        const QString csvPath = QStringLiteral("/tmp/test_billing.csv");
+        QFile::remove(csvPath);
+        QVERIFY(analytics.exportBillingCsv(csvPath, QStringLiteral("all")));
+        QVERIFY(QFile::exists(csvPath));
+        {
+            QFile f(csvPath);
+            QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+            const QString content = QString::fromUtf8(f.readAll());
+            QVERIFY(content.contains(QStringLiteral("Feature A")));
+            QVERIFY(content.contains(QStringLiteral("ProjectX")));
+            QVERIFY(content.contains(QStringLiteral("TOTAL SUMMARY")));
+        }
+        QFile::remove(csvPath);
+
+        // PDF Export
+        const QString pdfPath = QStringLiteral("/tmp/test_billing.pdf");
+        QFile::remove(pdfPath);
+        QVERIFY(analytics.exportBillingPdf(pdfPath, QStringLiteral("all")));
+        QVERIFY(QFile::exists(pdfPath));
+        QVERIFY(QFileInfo(pdfPath).size() > 500);
+        QFile::remove(pdfPath);
+        QFile::remove(testDbPath);
     }
 };
 

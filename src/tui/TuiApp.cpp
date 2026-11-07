@@ -237,6 +237,9 @@ void TuiApp::handleKeySequence(const QByteArray& seq) {
     case Mode::Help:
         handleHelpKey(seq);
         break;
+    case Mode::Dashboard:
+        handleDashboardKey(seq);
+        break;
     }
 }
 
@@ -505,6 +508,12 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
     // Open Full-Screen Markdown Viewer for task description & comments: v or M
     if (seq == "v" || seq == "M") {
         openTaskMarkdownView();
+        return;
+    }
+
+    // Open Productivity Dashboard & Reports: U
+    if (seq == "U") {
+        openDashboardView();
         return;
     }
 
@@ -1329,6 +1338,48 @@ void TuiApp::handleHelpKey(const QByteArray& seq) {
     }
 }
 
+void TuiApp::openDashboardView() {
+    m_dashboardScroll = 0;
+    m_mode = Mode::Dashboard;
+}
+
+void TuiApp::handleDashboardKey(const QByteArray& seq) {
+    if (seq == "\033" || seq == "q") {
+        m_mode = Mode::Normal;
+        return;
+    }
+    if (seq == "1") { m_dashboardPeriod = 0; m_dashboardScroll = 0; return; }
+    if (seq == "2") { m_dashboardPeriod = 1; m_dashboardScroll = 0; return; }
+    if (seq == "3") { m_dashboardPeriod = 2; m_dashboardScroll = 0; return; }
+    if (seq == "4") { m_dashboardPeriod = 3; m_dashboardScroll = 0; return; }
+
+    if (seq == "j" || seq == "\033[B") { ++m_dashboardScroll; return; }
+    if (seq == "k" || seq == "\033[A") { m_dashboardScroll = qMax(0, m_dashboardScroll - 1); return; }
+    if (seq == "d" || seq == "\x04" || seq == " ") { m_dashboardScroll += 8; return; }
+    if (seq == "u" || seq == "\x15") { m_dashboardScroll = qMax(0, m_dashboardScroll - 8); return; }
+    if (seq == "g") { m_dashboardScroll = 0; return; }
+    if (seq == "G") { m_dashboardScroll = 100000; return; }
+
+    const QString periodName = (m_dashboardPeriod == 0) ? QStringLiteral("day")
+                             : (m_dashboardPeriod == 1) ? QStringLiteral("week")
+                             : (m_dashboardPeriod == 2) ? QStringLiteral("month") : QStringLiteral("all");
+
+    if (seq == "c") {
+        const QString outPath = QStringLiteral("/tmp/billing-%1.csv").arg(periodName);
+        if (m_app->analytics()->exportBillingCsv(outPath, periodName, m_app->currentListId())) {
+            m_statusMessage = tr("Billing CSV exported to %1").arg(outPath);
+        }
+        return;
+    }
+    if (seq == "p") {
+        const QString outPath = QStringLiteral("/tmp/billing-%1.pdf").arg(periodName);
+        if (m_app->analytics()->exportBillingPdf(outPath, periodName, m_app->currentListId())) {
+            m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
+        }
+        return;
+    }
+}
+
 void TuiApp::executeExCommand(const QString& cmdLine) {
     if (cmdLine.isEmpty()) return;
     if (cmdLine == QStringLiteral("q") || cmdLine == QStringLiteral("quit") || cmdLine == QStringLiteral("qa")) {
@@ -1373,6 +1424,30 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     }
     if (cmdLine == QStringLiteral("help") || cmdLine == QStringLiteral("h")) {
         m_mode = Mode::Help;
+        return;
+    }
+    if (cmdLine == QStringLiteral("stats") || cmdLine == QStringLiteral("dashboard") || cmdLine == QStringLiteral("report")) {
+        openDashboardView();
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("export-csv"))) {
+        const QString rest = cmdLine.mid(10).trimmed();
+        const QString outPath = !rest.isEmpty() ? rest : QStringLiteral("/tmp/billing-report.csv");
+        if (m_app->analytics()->exportBillingCsv(outPath, QStringLiteral("month"), m_app->currentListId())) {
+            m_statusMessage = tr("Billing CSV exported to %1").arg(outPath);
+        } else {
+            m_statusMessage = tr("Failed to export CSV report.");
+        }
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("export-pdf"))) {
+        const QString rest = cmdLine.mid(10).trimmed();
+        const QString outPath = !rest.isEmpty() ? rest : QStringLiteral("/tmp/billing-report.pdf");
+        if (m_app->analytics()->exportBillingPdf(outPath, QStringLiteral("month"), m_app->currentListId())) {
+            m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
+        } else {
+            m_statusMessage = tr("Failed to export PDF report.");
+        }
         return;
     }
     if (cmdLine == QStringLiteral("md") || cmdLine == QStringLiteral("view")) {
@@ -1627,6 +1702,7 @@ void TuiApp::render() {
             tr("  O or :set / :settings             Open Global Settings (Timer, Notifications, Storage/DB Backup)"),
             tr("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
             tr("  w / gx                            Open task / issue in web browser (GitHub, GitLab, Jira, YouTrack...)"),
+            tr("  U or :stats / :dashboard          Open Productivity Dashboard (Pomodoro stats, Heatmap, +Project/@Context)"),
             tr("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
             tr("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
         };
@@ -1743,6 +1819,107 @@ void TuiApp::render() {
                     + padRight(line, m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
                 out += QStringLiteral("\033[K\r\n");
+            }
+        }
+    } else if (m_mode == Mode::Dashboard) {
+        const QString periodKey = (m_dashboardPeriod == 0) ? QStringLiteral("day")
+                                : (m_dashboardPeriod == 1) ? QStringLiteral("week")
+                                : (m_dashboardPeriod == 2) ? QStringLiteral("month") : QStringLiteral("all");
+        const QString periodTitle = (m_dashboardPeriod == 0) ? tr("TODAY")
+                                  : (m_dashboardPeriod == 1) ? tr("THIS WEEK")
+                                  : (m_dashboardPeriod == 2) ? tr("THIS MONTH") : tr("ALL TIME");
+
+        out += BG_HEADER + FG_CYAN + ESC_BOLD
+            + padRight(tr(" 📊 PRODUCTIVITY DASHBOARD: %1  ([1]Day [2]Week [3]Month [4]All │ [c]CSV [p]PDF │ q/Esc:Close)").arg(periodTitle), m_cols)
+            + ESC_RESET + QStringLiteral("\033[K\r\n");
+
+        const QVariantMap stats = m_app->analytics()->getProductivityStats(periodKey, m_app->currentListId());
+        const QVariantList heatmap = m_app->analytics()->getActivityHeatmap(28, m_app->currentListId());
+
+        QStringList lines;
+        lines.append(FG_YELLOW + ESC_BOLD + tr("  ── SUMMARY METRICS ──") + ESC_RESET);
+        lines.append(QStringLiteral("  ⏱ Total Focus: %1 (%2h)   🍅 Pomodoros: %3   📋 Active Tasks: %4   ⚡ Sessions: %5")
+            .arg(stats.value(QStringLiteral("totalFormattedTime")).toString(),
+                 QString::number(stats.value(QStringLiteral("totalHours")).toDouble(), 'f', 2),
+                 QString::number(stats.value(QStringLiteral("completedPomodoros")).toInt()),
+                 QString::number(stats.value(QStringLiteral("activeTaskCount")).toInt()),
+                 QString::number(stats.value(QStringLiteral("totalSessions")).toInt())));
+
+        lines.append(QString());
+        lines.append(FG_GREEN + ESC_BOLD + tr("  ── 28-DAY ACTIVITY HEATMAP ──") + ESC_RESET);
+        QString heatRow = QStringLiteral("  ");
+        for (const QVariant& hv : heatmap) {
+            const QVariantMap hm = hv.toMap();
+            const int lvl = hm.value(QStringLiteral("intensity")).toInt();
+            if (lvl == 0) heatRow += FG_GRAY + QStringLiteral("[ ]") + ESC_RESET;
+            else if (lvl == 1) heatRow += QStringLiteral("\033[38;5;108m[░]") + ESC_RESET;
+            else if (lvl == 2) heatRow += QStringLiteral("\033[38;5;114m[▒]") + ESC_RESET;
+            else if (lvl == 3) heatRow += QStringLiteral("\033[38;5;120m[▓]") + ESC_RESET;
+            else heatRow += QStringLiteral("\033[38;5;46m[█]") + ESC_RESET;
+        }
+        lines.append(heatRow);
+
+        lines.append(QString());
+        lines.append(FG_ORANGE + ESC_BOLD + tr("  ── PROJECTS (+Project) ──") + ESC_RESET);
+        const QVariantList projs = stats.value(QStringLiteral("projectBreakdown")).toList();
+        if (projs.isEmpty()) {
+            lines.append(FG_GRAY + tr("  (No project tags recorded in this period)") + ESC_RESET);
+        } else {
+            for (const QVariant& pv : projs) {
+                const QVariantMap pm = pv.toMap();
+                const double pct = pm.value(QStringLiteral("percentage")).toDouble();
+                const int barLen = qBound(0, static_cast<int>(pct / 5.0), 20);
+                const QString bar = QString(barLen, QChar(0x2588)) + QString(20 - barLen, QChar(0x2591));
+                lines.append(QStringLiteral("  +%-16s [%1] %2%  (%3)")
+                    .arg(pm.value(QStringLiteral("name")).toString())
+                    .arg(bar, QString::number(pct, 'f', 1), pm.value(QStringLiteral("formattedTime")).toString()));
+            }
+        }
+
+        lines.append(QString());
+        lines.append(FG_PURPLE + ESC_BOLD + tr("  ── CONTEXTS (@Context) ──") + ESC_RESET);
+        const QVariantList ctxs = stats.value(QStringLiteral("contextBreakdown")).toList();
+        if (ctxs.isEmpty()) {
+            lines.append(FG_GRAY + tr("  (No context tags recorded in this period)") + ESC_RESET);
+        } else {
+            for (const QVariant& cv : ctxs) {
+                const QVariantMap cm = cv.toMap();
+                const double pct = cm.value(QStringLiteral("percentage")).toDouble();
+                const int barLen = qBound(0, static_cast<int>(pct / 5.0), 20);
+                const QString bar = QString(barLen, QChar(0x2588)) + QString(20 - barLen, QChar(0x2591));
+                lines.append(QStringLiteral("  @%-16s [%1] %2%  (%3)")
+                    .arg(cm.value(QStringLiteral("name")).toString())
+                    .arg(bar, QString::number(pct, 'f', 1), cm.value(QStringLiteral("formattedTime")).toString()));
+            }
+        }
+
+        lines.append(QString());
+        lines.append(FG_CYAN + ESC_BOLD + tr("  ── TOP TASKS (Time & Billing) ──") + ESC_RESET);
+        const QVariantList tasks = stats.value(QStringLiteral("taskBreakdown")).toList();
+        if (tasks.isEmpty()) {
+            lines.append(FG_GRAY + tr("  (No tasks tracked during this period)") + ESC_RESET);
+        } else {
+            for (const QVariant& tv : tasks) {
+                const QVariantMap tm = tv.toMap();
+                const QString key = tm.value(QStringLiteral("jiraKey")).toString();
+                const QString badge = !key.isEmpty() ? QStringLiteral("[%1] ").arg(key) : QString();
+                lines.append(QStringLiteral("  • %1%2 (%3, %4 sessions)")
+                    .arg(badge,
+                         tm.value(QStringLiteral("description")).toString(),
+                         tm.value(QStringLiteral("formattedTime")).toString(),
+                         QString::number(tm.value(QStringLiteral("sessions")).toInt())));
+            }
+        }
+
+        const int availRows = bodyRows - 1;
+        const int maxScroll = qMax(0, static_cast<int>(lines.size()) - availRows);
+        m_dashboardScroll = qBound(0, m_dashboardScroll, maxScroll);
+        for (int r = 0; r < availRows; ++r) {
+            const int idx = m_dashboardScroll + r;
+            if (idx < lines.size()) {
+                out += truncateVisible(lines.at(idx), m_cols) + QStringLiteral("\033[K\r\n");
+            } else {
+                out += FG_GRAY + QStringLiteral(" ~") + ESC_RESET + QStringLiteral("\033[K\r\n");
             }
         }
     } else {
@@ -1936,6 +2113,8 @@ void TuiApp::render() {
         modeTag = BG_MODE_CMD + QStringLiteral(" MARKDOWN ") + ESC_RESET;
     } else if (m_mode == Mode::Help) {
         modeTag = BG_MODE_CMD + QStringLiteral(" HELP ") + ESC_RESET;
+    } else if (m_mode == Mode::Dashboard) {
+        modeTag = BG_MODE_CMD + QStringLiteral(" DASHBOARD ") + ESC_RESET;
     }
 
     const QString posTag = QStringLiteral(" %1/%2 ")

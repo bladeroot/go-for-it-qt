@@ -19,7 +19,8 @@ public:
                    const QString& taskDescription,
                    const QDateTime& startTimeUtc,
                    quint32 runtimeSeconds,
-                   const QDateTime& stopTimeUtc) const;
+                   const QDateTime& stopTimeUtc,
+                   bool isPomodoroCompleted = false) const;
 
     static bool logTaskInFile(const QString& filePath,
                               const QString& listName,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ActivityLog.h"
+#include "AnalyticsService.h"
 #include "DesktopIntegration.h"
 #include "IssueTrackerService.h"
 #include "ListManagerModel.h"
@@ -26,6 +27,7 @@ class AppController : public QObject {
     Q_PROPERTY(gofi::IssueTrackerService* issueTracker READ issueTracker CONSTANT)
     Q_PROPERTY(gofi::TaskFilterProxyModel* todoProxyModel READ todoProxyModel CONSTANT)
     Q_PROPERTY(gofi::TaskFilterProxyModel* doneProxyModel READ doneProxyModel CONSTANT)
+    Q_PROPERTY(gofi::AnalyticsService* analytics READ analytics CONSTANT)
     Q_PROPERTY(bool showingOverview READ showingOverview WRITE setShowingOverview NOTIFY showingOverviewChanged)
     Q_PROPERTY(QString currentListId READ currentListId NOTIFY currentListChanged)
     Q_PROPERTY(QString currentListName READ currentListName NOTIFY currentListChanged)
@@ -53,6 +55,7 @@ public:
     [[nodiscard]] IssueTrackerService* issueTracker() noexcept { return &m_issueTracker; }
     [[nodiscard]] TaskFilterProxyModel* todoProxyModel() noexcept { return &m_todoProxy; }
     [[nodiscard]] TaskFilterProxyModel* doneProxyModel() noexcept { return &m_doneProxy; }
+    [[nodiscard]] AnalyticsService* analytics() noexcept { return &m_analytics; }
 
     [[nodiscard]] bool showingOverview() const noexcept { return m_showingOverview; }
     void setShowingOverview(bool value);
@@ -136,6 +139,7 @@ private:
     TaskFilterProxyModel m_todoProxy;
     TaskFilterProxyModel m_doneProxy;
     ActivityLog m_activityLog;
+    AnalyticsService m_analytics;
     DesktopIntegration m_desktopIntegration;
     QTimer m_autoSyncTimer;
 
@@ -148,6 +152,7 @@ private:
     int m_activeTodoRow = -1;
     bool m_showingOverview = false;
     bool m_isMultiListView = false;
+    bool m_lastSessionCompletedPomodoro = false;
 };
 
 } // namespace gofi
