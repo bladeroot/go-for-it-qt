@@ -1,106 +1,168 @@
-# Go for It Qt (`go-for-it-qt`)
+# Go for It Qt (`go-for-it-qt` & `go-for-it-tui`)
 
-**Go for It Qt** is a modern **C++20 / Qt 6 (Qt Quick / QML)** rewrite and evolution of the classic [Go-For-It!](https://github.com/JMoerman/Go-For-It) productivity app — combining task management with a built-in Pomodoro timer, local **SQLite** storage, and native **Jira** & **JetBrains YouTrack** integration.
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B20)
+[![Qt 6](https://img.shields.io/badge/Qt-6.5%2B-green.svg)](https://www.qt.io/)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![CI / Release](https://github.com/bladeroot/go-for-it-qt/actions/workflows/release.yml/badge.svg)](https://github.com/bladeroot/go-for-it-qt/actions/workflows/release.yml)
+
+**Go for It Qt** is a high-performance **C++20 / Qt 6** productivity suite combining smart task management, a built-in Pomodoro timer, local **SQLite** storage, dual interfaces (rich **Qt Quick GUI** and standalone **Vim-style Terminal TUI**), and deep synchronization with 7 issue tracking and task management platforms.
 
 ---
 
 ## ✨ Key Features
 
-- **Modern C++20 & Qt 6 (Qt Quick Controls 2)** architecture with dark/light theme support.
-- **Single-File SQLite Storage (`goforit.db`)**:
-  - Stores all task lists, tasks, descriptions, comments, Pomodoro activity logs, and app settings in a single portable SQLite database.
-  - Configurable database location (`Settings -> Storage` or `--db <path>`) with one-click **Move Database**, **Export Backup**, and **Import Backup**.
-- **Jira (Cloud / Data Center) & JetBrains YouTrack Integration**:
-  - Sync issues via custom **JQL** (Jira) or **YouTrack search queries**.
-  - Downloads full issue descriptions (including Jira v3 ADF rich text) and comments.
-  - **Automatic Pomodoro Worklog / WorkItem logging**: completed work intervals are automatically logged back to the active Jira/YouTrack issue.
-- **Extended 5-State Task Workflow & Remote Status Mapping**:
-  - Local statuses: **To-Do**, **In Progress**, **Paused**, **Done**, and **Canceled / Rejected**.
-  - Fetch remote statuses directly from Jira/YouTrack (`Load Statuses`) and map each remote status to a local status view.
-- **Pomodoro & Custom Timer Schedules**:
-  - Configurable work/break schedules (classic Pomodoro or multi-stage custom schedules), per-list timer overrides, sound notifications (`Qt6::Multimedia`), Freedesktop DBus notifications, System Tray AppIndicator, and Unity LauncherEntry dock progress/badge.
+### 🖥️ Dual Interfaces (GUI & TUI)
+- **Modern Qt Quick GUI (`go-for-it-qt`)**: Sleek desktop application with system-native themes (Fusion/Dark/Light), keyboard navigation, task cards, and quick actions.
+- **Standalone Terminal UI (`go-for-it-tui`)**: Pure ANSI terminal interface with full Vim keybindings. Runs seamlessly over SSH, tmux, or headless environments without X11/Wayland dependencies.
 
+### 🌐 7 Native Issue Tracker & Task Integrations
+Sync tasks, fetch rich descriptions and comments, and automatically log Pomodoro work sessions back to remote services:
+- **GitHub**: Issues, Pull Requests, labels, discussion threads.
+- **GitLab**: Issues, Merge Requests, group/project queries, `/spend` time tracking.
+- **Atlassian Jira (Cloud & Data Center)**: JQL query support, v3 ADF rich text parsing, automatic worklog logging.
+- **JetBrains YouTrack**: Custom queries, markdown descriptions, WorkItem time tracking.
+- **Redmine**: Project/query filters, comments, spent time entries.
+- **Todoist**: Sync v9 REST API, section/label filtering, instant task updates.
+- **Nextcloud Tasks**: CalDAV (`VTODO`) and Nextcloud OCS API for self-hosted cloud privacy.
+- **Multi-Account & Multi-List Views**: Aggregate tasks from multiple accounts and providers in single unified views.
+
+### 🎛️ Per-Integration Status & Priority Mapping
+- **5-State Local Workflow**: `To-Do`, `In Progress`, `Paused`, `Done`, and `Canceled / Rejected`.
+- **Custom Mapping Rules**: Each provider has its own customizable status and priority mapping tables stored in SQLite.
+- **ANSI Color Coding in TUI**:
+  - `(A)`: **Bold Red** (Critical / High)
+  - `(B)`: **Bold Yellow** (Urgent / Medium-High)
+  - `(C)`: **Cyan** (Normal)
+  - `(D)`: **Green** (Low)
+  - `(E)`: **Magenta** (Trivial / Someday)
+
+### 📊 Productivity Dashboard & Billing Reports
+- **Interactive Analytics**: Daily, weekly, and monthly Pomodoro completion charts.
+- **Context & Project Breakdown**: Track time investment across `+Project` tags and `@Context` tags.
+- **Activity Heatmap**: GitHub-style green contribution grid showing daily focus consistency.
+- **Export for Billing**: Generate clean **PDF** or **CSV** reports detailing hours spent per task/project for clients, employers, or personal records.
+
+### 🪟 "Always-on-Top" Mini-Player (Picture-in-Picture)
+- Minimalist floating semi-transparent widget pinned on top of all windows (`Ctrl+M`).
+- Displays the current task, circular countdown timer, and Pause/Done buttons. Perfect for full-screen IDE coding.
+
+### 📅 Due Dates & Smart Lists
+- Full standard support for Todo.txt `due:YYYY-MM-DD` tags.
+- Smart list views: **Today**, **Overdue**, and **This Week**.
+- Proactive desktop notifications when tasks approach deadlines.
+
+### 🎧 Ambient Focus Sound Generator
+- Procedural real-time sound synthesizer using `Qt6::Multimedia` / `QAudioSink` (no external audio files needed).
+- Concentration soundscapes: **White Noise**, **Gentle Rain**, and **Mechanical Clock Ticking**.
+- Automatically mutes during breaks and resumes on work intervals.
+
+### 🚀 Quick Browser Jump ("Open in Browser")
+- Open any remote task or PR in your default web browser (`xdg-open`):
+  - In TUI: press `w` or `gx`.
+  - In GUI: click the 🌐 link button on the task card or details dialog.
+
+### 🗄️ Single-File SQLite Engine (`goforit.db`)
+- Complete persistence in a single ACID-compliant database.
+- Runtime database path selection (`--db <path>`), one-click **Move Database**, **Export Backup**, and **Import Backup**.
 
 ---
 
-## ⌨️ Console Terminal UI (`go-for-it-tui`) with Vim Keybindings
+## ⌨️ Console Terminal UI (`go-for-it-tui`) Cheat Sheet
 
-Run the standalone terminal UI binary `go-for-it-tui` (works over SSH / without X11 or Wayland) or pass `--tui` (`-t`) to `go-for-it-qt`:
+Run `go-for-it-tui` or `go-for-it-qt --tui`:
+
+| Key | Mode | Description |
+|---|---|---|
+| `j` / `k` | Normal | Navigate cursor down / up |
+| `gg` / `G` | Normal | Jump to top / bottom of task list |
+| `Ctrl+d` / `Ctrl+u` | Normal | Scroll half-page down / up |
+| `J` / `K` (`Shift+j/k`) | Normal | Move selected task down / up in order |
+| `h` / `l` or `gt` / `gT` | Normal | Switch workflow tab (All, To-Do, In Progress, Paused, Done, Canceled) |
+| `1` .. `6` | Normal | Direct jump to tab 1 through 6 |
+| `Space` or `x` | Normal | Toggle task status between Done and To-Do |
+| `s` | Normal | Open 5-state status picker |
+| `P` | Normal | Cycle task priority `(A)` -> `(B)` -> `(C)` -> `(D)` -> `(E)` -> None |
+| `Enter` | Normal | Select task as active Pomodoro task |
+| `t` | Normal | Start / Pause Pomodoro timer |
+| `B` | Normal | Skip current Pomodoro phase |
+| `R` | Normal | Reset current Pomodoro timer phase |
+| `w` or `gx` | Normal | **Open task / PR in web browser** (`xdg-open`) |
+| `o` / `a` | Normal | Add new task (enter `INSERT` mode) |
+| `i` / `e` / `cw` | Normal | Inline edit selected task title |
+| `E` (`Shift+e`) | Normal | Open multi-line description and comments editor |
+| `dd` | Normal | Delete selected task |
+| `r` / `Ctrl+r` | Normal | Sync current list with remote provider |
+| `L` / `[` / `]` | Normal | Open list picker (`L`) / switch previous (`[`) / next (`]`) list |
+| `p` | Normal | Toggle live preview pane |
+| `Ctrl+e` / `Ctrl+y` | Normal | Scroll preview pane down / up |
+| `/` | Normal | Live filter / search tasks (`Esc` to exit, `:noh` to clear) |
+| `?` or `:help` | Normal | Show interactive keyboard shortcuts help screen |
+| `:p <A-E>`, `:priority` | Ex | Set priority directly (e.g. `:p A` or `:p none`) |
+| `:sync` | Ex | Synchronize active list with remote tracker |
+| `:sort <mode>` | Ex | Sort tasks by `priority`, `date`, `due`, or `title` |
+| `:clear` | Ex | Clear completed / canceled tasks |
+| `:list <id>` | Ex | Switch list by ID |
+| `:q` / `:wq` | Ex | Quit TUI |
+
+---
+
+## 🛠️ Build & Installation
+
+### Dependencies
+- **CMake** `>= 3.21`
+- **C++20 compiler** (GCC `>= 11` or Clang `>= 14`)
+- **Qt 6** (`>= 6.5`):
+  `qt6-base`, `qt6-declarative`, `qt6-multimedia`, `libqt6sql6-sqlite`
+
+#### Ubuntu / Debian (22.04 / 24.04):
 ```bash
-go-for-it-tui
-# or
-go-for-it-qt --tui
+sudo apt update
+sudo apt install -y cmake ninja-build g++ qt6-base-dev qt6-declarative-dev \
+    qt6-multimedia-dev libqt6sql6-sqlite qml6-module-qtquick \
+    qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+    qml6-module-qtquick-dialogs qml6-module-qtquick-window
 ```
 
-### Vim Keybindings
-| Key | Action |
-|---|---|
-| `j` / `k` / `gg` / `G` / `Ctrl+d` / `Ctrl+u` | Move cursor down / up / top / bottom / half-page |
-| `J` / `K` (`Shift+j` / `Shift+k`) | Move selected task down / up in order |
-| `h` / `l` or `1`..`6` or `gt` / `gT` | Switch status tab (`All Open`, `To-Do`, `In Progress`, `Paused`, `Done`, `Canceled`) |
-| `Space` or `x` | Toggle task `Done` / `To-Do` |
-| `s` | Open status picker (`1:To-Do`, `2:In Progress`, `3:Paused`, `4:Done`, `5:Canceled`) |
-| `o` / `a` | Add new task (`INSERT` mode) |
-| `i` / `e` / `cw` | Edit selected task title inline |
-| `E` (`Shift+e`) | Edit selected task full description |
-| `dd` | Delete selected task |
-| `Enter` | Select task as active Pomodoro task |
-| `t` / `S` / `B` / `R` | Start/Pause Pomodoro timer (`t`), Skip phase (`B`), Reset phase (`R`) |
-| `r` / `Ctrl+r` | Sync current list with Jira / YouTrack |
-| `L` or `[` / `]` | Open List Picker (`L`) or switch to previous/next list (`[` / `]`) |
-| `p` / `Ctrl+e` / `Ctrl+y` | Toggle preview pane (`p`), scroll description & comments (`Ctrl+e` / `Ctrl+y`) |
-| `/` | Live search/filter tasks (`Esc` or `:noh` to clear) |
-| `:sync`, `:sort`, `:clear`, `:list`, `:q` | Vim Ex commands |
-| `?` or `:help` | Toggle keyboard shortcuts help screen |
+#### Arch Linux / Manjaro:
+```bash
+sudo pacman -S cmake ninja gcc qt6-base qt6-declarative qt6-multimedia
+```
 
----
-
-## 🛠️ Build & Run
-
-### Dependencies (Arch / Ubuntu / Fedora)
-- CMake `>= 3.21`
-- C++20 compiler (`GCC >= 11` or `Clang >= 14`)
-- Qt 6 (`>= 6.5`): `Core`, `Gui`, `Widgets`, `Qml`, `Quick`, `QuickControls2`, `Multimedia`, `DBus`, `Sql` (`QSQLITE`), `Network`, `Test`
-
-### Compile & Test
+### Compile & Run Tests
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-ctest --test-dir build --output-on-failure
+QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
-### Install
+### Install System-Wide
 ```bash
 sudo cmake --install build --prefix /usr/local
 ```
 
 ---
 
-## 📜 Credits & License
-
-- **Go for It Qt (`go-for-it-qt`)** — C++20 / Qt 6 port, SQLite storage engine, extended statuses, and Jira/YouTrack integration by **Yurii Myronchuk (@bladeroot)**.
-- Based on the original **Go-For-It!** (Vala / GTK3) created by **Manuel Kehl** (2014–2017) and **Jonathan Moerman** (2017–2021).
-- Licensed under the **GNU General Public License v3.0 (GPL-3.0)** — see [LICENSE](LICENSE).
-
----
-
-## 📦 System Packaging
-
-### Arch Linux / CachyOS (`PKGBUILD`)
-A ready-to-use `PKGBUILD` is included in the repository root and in `packaging/arch/PKGBUILD`:
-```bash
-makepkg -si
-```
+## 📦 Packages
 
 ### Debian / Ubuntu (`.deb`)
-You can build a `.deb` package directly with **CPack**:
+Download pre-built `.deb` binaries from the [GitHub Releases](https://github.com/bladeroot/go-for-it-qt/releases) page, or build locally:
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
 cmake --build build -j$(nproc)
 cpack --config build/CPackConfig.cmake -G DEB -B build
+sudo dpkg -i build/go-for-it-qt-*.deb
 ```
-Or using standard `dpkg-buildpackage` with `packaging/debian`:
+
+### Arch Linux (`PKGBUILD`)
+Use the included `PKGBUILD`:
 ```bash
-ln -sf packaging/debian debian
-dpkg-buildpackage -us -uc -b
+makepkg -si
 ```
+
+---
+
+## 📜 Credits & License
+
+- **Go for It Qt (`go-for-it-qt`)** — C++20 / Qt 6 rewrite, Terminal TUI, multi-tracker integrations, analytics, and audio synthesizer by **Yurii Myronchuk ([@bladeroot](https://github.com/bladeroot))**.
+- Inspired by the classic **Go-For-It!** (Vala / GTK3) by **Manuel Kehl** and **Jonathan Moerman**.
+- Licensed under the **GNU General Public License v3.0 (GPL-3.0)** — see [LICENSE](LICENSE).

@@ -15,7 +15,7 @@ Dialog {
         spacing: 10
 
         Label {
-            text: "Go for It Qt (go-for-it-qt) 1.9.5"
+            text: "Go for It Qt (go-for-it-qt) " + Qt.application.version
             font.bold: true
             font.pixelSize: 17
         }
@@ -23,7 +23,7 @@ Dialog {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            text: qsTr("A stylish to-do list with built-in productivity timer, SQLite storage, and Jira / YouTrack integration.")
+            text: qsTr("A stylish to-do list with built-in productivity timer, SQLite storage, terminal TUI, and multi-tracker integrations (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud Tasks).")
         }
 
         MenuSeparator { Layout.fillWidth: true }

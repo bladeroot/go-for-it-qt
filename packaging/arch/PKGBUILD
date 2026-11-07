@@ -1,8 +1,8 @@
 # Maintainer: Yurii Myronchuk <bladeroot@gmail.com>
 pkgname=go-for-it-qt
-pkgver=1.9.5
+pkgver=2.0.0
 pkgrel=1
-pkgdesc="A stylish to-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync (Qt 6)"
+pkgdesc="A stylish to-do list with built-in productivity timer, SQLite storage, TUI, and multi-tracker integrations (Qt 6)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/bladeroot/go-for-it-qt"
 license=('GPL-3.0-or-later')

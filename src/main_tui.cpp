@@ -6,6 +6,10 @@
 #include <QLoggingCategory>
 #include <QTextStream>
 
+#ifndef GOFI_VERSION
+#define GOFI_VERSION "2.0.0"
+#endif
+
 int main(int argc, char* argv[]) {
     if (qEnvironmentVariableIsEmpty("QT_FFMPEG_DECODING_HW_DEVICE_TYPES")) {
         qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", ",");
@@ -18,7 +22,7 @@ int main(int argc, char* argv[]) {
 
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("go-for-it-qt"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.9.5"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(GOFI_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("go-for-it-qt"));
 
     QCommandLineParser parser;

@@ -4,20 +4,32 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <name>Go for It Qt</name>
-  <summary>To-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync</summary>
+  <summary>To-do list with built-in productivity timer, SQLite storage, TUI, and multi-tracker sync</summary>
   <description>
     <p>
-      Go for It Qt is a modern C++20 / Qt 6 productivity application combining task management with a Pomodoro timer.
+      Go for It Qt is a modern C++20 / Qt 6 productivity application combining task management with a Pomodoro timer, terminal TUI, and multi-tracker integrations.
     </p>
     <p>Features:</p>
     <ul>
       <li>Single-file SQLite storage with backup export/import and customizable path</li>
-      <li>Native Jira (Cloud / Data Center) and JetBrains YouTrack issue synchronization</li>
-      <li>5 local workflow statuses (To-Do, In Progress, Paused, Done, Canceled/Rejected) with remote status mapping</li>
-      <li>Full task description and comments viewer</li>
-      <li>Automatic Pomodoro worklog / workItem time logging to Jira and YouTrack</li>
+      <li>Native integrations: GitHub, GitLab, Jira, JetBrains YouTrack, Redmine, Todoist, and Nextcloud Tasks (CalDAV)</li>
+      <li>Unified multi-account and multi-list views with per-integration remote status and priority mapping</li>
+      <li>Console Terminal UI (go-for-it-tui) with full Vim keybindings and ANSI priority colors</li>
+      <li>Productivity Analytics Dashboard with Pomodoro charts, context distribution, heatmap, and PDF/CSV reports</li>
+      <li>Always-on-top Mini-Player (PiP) window for uninterrupted focus</li>
+      <li>Due dates (due:YYYY-MM-DD) and smart filters (Today, Overdue, This Week)</li>
+      <li>Procedural Ambient Focus Sound Generator (White Noise, Rain, Ticking Clock)</li>
+      <li>Quick browser jump (xdg-open) via 'w'/'gx' in TUI or link button in GUI</li>
+      <li>Automatic Pomodoro worklog / time logging to remote issue trackers</li>
     </ul>
   </description>
+  <releases>
+    <release version="2.0.0" date="2026-11-07">
+      <description>
+        <p>Major 2.0.0 release: full C++20 and Qt 6 architecture, standalone Vim-style Terminal UI, 7 issue tracker integrations, productivity analytics dashboard, PiP mini-player, due dates, ambient focus sound, and priority mapping.</p>
+      </description>
+    </release>
+  </releases>
   <launchable type="desktop-id">go-for-it-qt.desktop</launchable>
   <url type="homepage">https://github.com/bladeroot/go-for-it-qt</url>
   <url type="bugtracker">https://github.com/bladeroot/go-for-it-qt/issues</url>

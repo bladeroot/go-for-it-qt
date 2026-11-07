@@ -10,6 +10,10 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
+#ifndef GOFI_VERSION
+#define GOFI_VERSION "2.0.0"
+#endif
+
 int main(int argc, char* argv[]) {
     // Audio-only usage of QtMultimedia: avoid probing GPU video decoding backends (VDPAU/VAAPI)
     if (qEnvironmentVariableIsEmpty("QT_FFMPEG_DECODING_HW_DEVICE_TYPES")) {
@@ -24,7 +28,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("go-for-it-qt"));
     QApplication::setApplicationDisplayName(QStringLiteral("Go for It Qt"));
-    QApplication::setApplicationVersion(QStringLiteral("1.9.5"));
+    QApplication::setApplicationVersion(QStringLiteral(GOFI_VERSION));
     QApplication::setOrganizationName(QStringLiteral("go-for-it-qt"));
     if (!QStandardPaths::locate(QStandardPaths::ApplicationsLocation, QStringLiteral("go-for-it-qt.desktop")).isEmpty()) {
         QApplication::setDesktopFileName(QStringLiteral("go-for-it-qt"));
