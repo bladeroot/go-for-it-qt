@@ -1,20 +1,21 @@
 Source: go-for-it-qt
-Section: utils
+Section: universe/utils
 Priority: optional
 Maintainer: Yurii Myronchuk <bladeroot@gmail.com>
 Build-Depends:
  debhelper-compat (= 13),
  cmake (>= 3.21),
  ninja-build,
- qt6-base-dev (>= 6.5),
- qt6-declarative-dev (>= 6.5),
- qt6-multimedia-dev (>= 6.5),
+ qt6-base-dev (>= 6.4),
+ qt6-declarative-dev (>= 6.4),
+ qt6-multimedia-dev (>= 6.4),
  libqt6sql6-sqlite
 Standards-Version: 4.6.2
 Homepage: https://github.com/bladeroot/go-for-it-qt
 Rules-Requires-Root: no
 
 Package: go-for-it-qt
+Section: universe/utils
 Architecture: any
 Depends:
  ${shlibs:Depends},
