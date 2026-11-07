@@ -690,7 +690,7 @@ private slots:
         // Filter: today
         proxy.setDueFilter(QStringLiteral("today"));
         QCOMPARE(proxy.rowCount(), 1);
-        QCOMPARE(proxy.data(proxy.index(0, 0), TaskStoreModel::DueDateStringRole).toString(), today.toString(Qt::ISODate));
+        QCOMPARE(proxy.data(proxy.index(0, 0), TaskStoreModel::DueDateStringRole).toString(), QDate::currentDate().toString(Qt::ISODate));
 
         // Filter: week
         proxy.setDueFilter(QStringLiteral("week"));
