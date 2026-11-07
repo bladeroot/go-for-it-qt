@@ -130,12 +130,7 @@ QString SystemHookService::hooksDirectory() const {
         return m_customHooksDirectory;
     }
     const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
-    const QString legacyDir = base + QStringLiteral("/go-for-it/hooks");
-    const QString modernDir = base + QStringLiteral("/go-for-it-qt/hooks");
-    if (QDir(legacyDir).exists() && !QDir(modernDir).exists()) {
-        return legacyDir;
-    }
-    return modernDir;
+    return base + QStringLiteral("/go-for-it-qt/hooks");
 }
 
 void SystemHookService::setCustomHooksDirectory(const QString& path) {
