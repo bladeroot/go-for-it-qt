@@ -95,6 +95,63 @@ Item {
             }
         }
 
+        // Ambient Focus Sound & Mini Player
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: 10
+
+            Label {
+                text: "🎧 " + qsTr("Ambient Sound:")
+                font.pixelSize: 12
+                opacity: 0.85
+            }
+
+            ComboBox {
+                id: ambientCombo
+                implicitWidth: 150
+                textRole: "label"
+                valueRole: "id"
+                model: app.ambient ? app.ambient.availableModes() : []
+                currentIndex: {
+                    if (!app.ambient) return 0
+                    for (let i = 0; i < count; ++i) {
+                        if (model[i].id === app.ambient.ambientMode) return i
+                    }
+                    return 0
+                }
+                onActivated: {
+                    if (app.ambient) {
+                        app.ambient.ambientMode = currentValue
+                    }
+                }
+            }
+
+            Slider {
+                id: volumeSlider
+                implicitWidth: 90
+                from: 0.0
+                to: 1.0
+                stepSize: 0.05
+                value: app.ambient ? app.ambient.volume : 0.5
+                visible: app.ambient && app.ambient.ambientMode !== "none"
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Volume: %1%").arg(Math.round(value * 100))
+                onMoved: {
+                    if (app.ambient) {
+                        app.ambient.volume = value
+                    }
+                }
+            }
+
+            Button {
+                text: "🗗 " + qsTr("Mini Player")
+                font.pixelSize: 12
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Always on Top Mini-Player (Ctrl+M)")
+                onClicked: rootWindow.toggleMiniPlayer()
+            }
+        }
+
         Item { Layout.fillHeight: true }
 
         RowLayout {

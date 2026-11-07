@@ -25,6 +25,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_doneProxy(this)
     , m_activityLog(logFilePath)
     , m_analytics(this)
+    , m_ambient(&m_timer, this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
     applyLanguageTranslator();
@@ -86,6 +87,9 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     connect(&m_autoSyncTimer, &QTimer::timeout, this, &AppController::syncAllRemoteLists);
     connect(&m_settings, &SettingsManager::autoSyncChanged, this, &AppController::updateAutoSyncTimer);
     updateAutoSyncTimer();
+
+    connect(&m_dueReminderTimer, &QTimer::timeout, this, &AppController::checkDueReminders);
+    m_dueReminderTimer.start(15 * 60 * 1000);
 
     connect(m_taskManager.todoModel(), &TaskStoreModel::countChanged, this, &AppController::onTodoListCountChanged);
     connect(m_taskManager.todoModel(), &TaskStoreModel::unviewedTodoCountChanged, this, &AppController::todoCountsChanged);
@@ -595,6 +599,7 @@ void AppController::onTodoListCountChanged() {
     } else {
         syncActiveTaskToTimer();
     }
+    checkDueReminders();
 }
 
 void AppController::applyLanguageTranslator() {
@@ -663,5 +668,33 @@ void AppController::openUrlExternally(const QUrl& url) {
     }
     m_issueTracker.setStatusMessage(tr("Opening %1 in browser...").arg(url.toString()));
 }
+
+void AppController::checkDueReminders() {
+    TaskStoreModel* model = m_taskManager.todoModel();
+    if (!model) return;
+
+    const int total = model->rowCount();
+    for (int i = 0; i < total; ++i) {
+        const TxtTask task = model->taskAt(i);
+        if (task.isDone() || !task.dueDate().isValid()) continue;
+
+        if (m_notifiedDueTaskIds.contains(task.id())) continue;
+
+        if (task.isOverdue()) {
+            m_notifications.notifyTaskEvent(
+                tr("Task Overdue"),
+                tr("Task '%1' is overdue (was due %2)").arg(task.description(), task.dueDateString())
+            );
+            m_notifiedDueTaskIds.insert(task.id());
+        } else if (task.isDueToday()) {
+            m_notifications.notifyTaskEvent(
+                tr("Task Due Today"),
+                tr("Task '%1' is due today!").arg(task.description())
+            );
+            m_notifiedDueTaskIds.insert(task.id());
+        }
+    }
+}
+
 
 } // namespace gofi

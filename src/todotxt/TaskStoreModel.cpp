@@ -65,6 +65,15 @@ QVariant TaskStoreModel::data(const QModelIndex& index, int role) const {
         return t.listName();
     case ListProviderRole:
         return t.listProvider();
+    case DueDateRole:
+    case DueDateStringRole:
+        return t.dueDateString();
+    case IsOverdueRole:
+        return t.isOverdue();
+    case IsDueTodayRole:
+        return t.isDueToday();
+    case IsDueThisWeekRole:
+        return t.isDueThisWeek();
     default:
         return {};
     }
@@ -116,7 +125,7 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
             emit taskBecameInvalid(index.row());
             return true;
         }
-        emit dataChanged(index, index, {DescriptionRole, SimpleTextRole, PriorityRole, PriorityStringRole, DurationRole, TokensRole, RichTextRole});
+        emit dataChanged(index, index, {DescriptionRole, SimpleTextRole, PriorityRole, PriorityStringRole, DurationRole, TokensRole, RichTextRole, DueDateRole, DueDateStringRole, IsOverdueRole, IsDueTodayRole, IsDueThisWeekRole});
         emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
@@ -165,7 +174,12 @@ QHash<int, QByteArray> TaskStoreModel::roleNames() const {
         {IsViewedRole, "isViewed"},
         {ListIdRole, "listId"},
         {ListNameRole, "listName"},
-        {ListProviderRole, "listProvider"}
+        {ListProviderRole, "listProvider"},
+        {DueDateRole, "dueDate"},
+        {DueDateStringRole, "dueDateString"},
+        {IsOverdueRole, "isOverdue"},
+        {IsDueTodayRole, "isDueToday"},
+        {IsDueThisWeekRole, "isDueThisWeek"}
     };
 }
 

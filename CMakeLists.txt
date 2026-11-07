@@ -54,6 +54,8 @@ set(GOFI_CORE_SOURCES
     src/core/ActivityLog.cpp
     src/core/AnalyticsService.h
     src/core/AnalyticsService.cpp
+    src/core/AmbientSoundService.h
+    src/core/AmbientSoundService.cpp
     src/core/TaskTimer.h
     src/core/TaskTimer.cpp
     src/core/NotificationService.h
@@ -110,6 +112,7 @@ qt_add_qml_module(go-for-it-qt
         qml/components/TaskRowDelegate.qml
         qml/components/TimerView.qml
         qml/components/TimerScheduleWidget.qml
+        qml/components/MiniPlayerWindow.qml
         qml/components/DashboardView.qml
         qml/dialogs/SettingsDialog.qml
         qml/dialogs/TxtListEditDialog.qml

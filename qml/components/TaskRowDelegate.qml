@@ -21,6 +21,10 @@ ItemDelegate {
     required property string listId
     required property string listName
     required property string listProvider
+    required property string dueDateString
+    required property bool isOverdue
+    required property bool isDueToday
+    required property bool isDueThisWeek
 
     readonly property url browserUrl: app.getTaskBrowserUrl(rowDelegate.listId, rowDelegate.jiraKey, rowDelegate.description)
 
@@ -148,6 +152,29 @@ ItemDelegate {
                 id: listBadgeLabel
                 anchors.centerIn: parent
                 text: rowDelegate.listName
+                font.pixelSize: 9
+                font.bold: true
+                color: "#ffffff"
+            }
+        }
+
+        Rectangle {
+            visible: !rowDelegate.editing && rowDelegate.dueDateString !== ""
+            implicitHeight: 18
+            implicitWidth: dueBadgeLabel.implicitWidth + 8
+            radius: 3
+            color: {
+                if (rowDelegate.isOverdue) return "#e74c3c"
+                if (rowDelegate.isDueToday) return "#e67e22"
+                if (rowDelegate.isDueThisWeek) return "#2980b9"
+                return "#7f8c8d"
+            }
+            opacity: 0.9
+
+            Label {
+                id: dueBadgeLabel
+                anchors.centerIn: parent
+                text: (rowDelegate.isOverdue ? "⏰ " : "📅 ") + rowDelegate.dueDateString
                 font.pixelSize: 9
                 font.bold: true
                 color: "#ffffff"

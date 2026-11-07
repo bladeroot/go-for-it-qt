@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ActivityLog.h"
+#include "AmbientSoundService.h"
 #include "AnalyticsService.h"
 #include "DesktopIntegration.h"
 #include "IssueTrackerService.h"
@@ -28,6 +29,7 @@ class AppController : public QObject {
     Q_PROPERTY(gofi::TaskFilterProxyModel* todoProxyModel READ todoProxyModel CONSTANT)
     Q_PROPERTY(gofi::TaskFilterProxyModel* doneProxyModel READ doneProxyModel CONSTANT)
     Q_PROPERTY(gofi::AnalyticsService* analytics READ analytics CONSTANT)
+    Q_PROPERTY(gofi::AmbientSoundService* ambient READ ambient CONSTANT)
     Q_PROPERTY(bool showingOverview READ showingOverview WRITE setShowingOverview NOTIFY showingOverviewChanged)
     Q_PROPERTY(QString currentListId READ currentListId NOTIFY currentListChanged)
     Q_PROPERTY(QString currentListName READ currentListName NOTIFY currentListChanged)
@@ -56,6 +58,7 @@ public:
     [[nodiscard]] TaskFilterProxyModel* todoProxyModel() noexcept { return &m_todoProxy; }
     [[nodiscard]] TaskFilterProxyModel* doneProxyModel() noexcept { return &m_doneProxy; }
     [[nodiscard]] AnalyticsService* analytics() noexcept { return &m_analytics; }
+    [[nodiscard]] AmbientSoundService* ambient() noexcept { return &m_ambient; }
 
     [[nodiscard]] bool showingOverview() const noexcept { return m_showingOverview; }
     void setShowingOverview(bool value);
@@ -105,6 +108,7 @@ public:
     Q_INVOKABLE QUrl taskBrowserUrl(bool fromDoneList, int proxyRow) const;
     Q_INVOKABLE void openTaskInBrowser(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void openUrlExternally(const QUrl& url);
+    Q_INVOKABLE void checkDueReminders();
 
 signals:
     void showingOverviewChanged();
@@ -140,8 +144,11 @@ private:
     TaskFilterProxyModel m_doneProxy;
     ActivityLog m_activityLog;
     AnalyticsService m_analytics;
+    AmbientSoundService m_ambient;
     DesktopIntegration m_desktopIntegration;
     QTimer m_autoSyncTimer;
+    QTimer m_dueReminderTimer;
+    QSet<qint64> m_notifiedDueTaskIds;
 
     QString m_currentListId;
     QString m_currentListName;

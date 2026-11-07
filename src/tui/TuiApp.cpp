@@ -1481,6 +1481,54 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         }
         return;
     }
+    if (cmdLine.startsWith(QStringLiteral("ambient"))) {
+        const QString mode = cmdLine.mid(7).trimmed().toLower();
+        if (mode.isEmpty() || mode == QStringLiteral("toggle")) {
+            const QString cur = m_app->ambient()->ambientMode();
+            const QString next = (cur == QStringLiteral("none")) ? QStringLiteral("rain") : QStringLiteral("none");
+            m_app->ambient()->setAmbientMode(next);
+            m_statusMessage = tr("Ambient focus sound: %1").arg(next);
+        } else if (mode == QStringLiteral("none") || mode == QStringLiteral("off")) {
+            m_app->ambient()->setAmbientMode(QStringLiteral("none"));
+            m_statusMessage = tr("Ambient focus sound turned off.");
+        } else if (mode.startsWith(QStringLiteral("white"))) {
+            m_app->ambient()->setAmbientMode(QStringLiteral("white_noise"));
+            m_statusMessage = tr("Ambient focus sound: White Noise.");
+        } else if (mode.startsWith(QStringLiteral("rain"))) {
+            m_app->ambient()->setAmbientMode(QStringLiteral("rain"));
+            m_statusMessage = tr("Ambient focus sound: Gentle Rain.");
+        } else if (mode.startsWith(QStringLiteral("clock")) || mode.startsWith(QStringLiteral("tick"))) {
+            m_app->ambient()->setAmbientMode(QStringLiteral("clock"));
+            m_statusMessage = tr("Ambient focus sound: Mechanical Clock Ticking.");
+        } else {
+            m_statusMessage = tr("Unknown ambient mode. Available: none, white, rain, clock");
+        }
+        return;
+    }
+    if (cmdLine == QStringLiteral("today")) {
+        m_app->todoProxyModel()->setDueFilter(QStringLiteral("today"));
+        clampSelection();
+        m_statusMessage = tr("Filtered tasks due today.");
+        return;
+    }
+    if (cmdLine == QStringLiteral("overdue")) {
+        m_app->todoProxyModel()->setDueFilter(QStringLiteral("overdue"));
+        clampSelection();
+        m_statusMessage = tr("Filtered overdue tasks.");
+        return;
+    }
+    if (cmdLine == QStringLiteral("week")) {
+        m_app->todoProxyModel()->setDueFilter(QStringLiteral("week"));
+        clampSelection();
+        m_statusMessage = tr("Filtered tasks due this week.");
+        return;
+    }
+    if (cmdLine == QStringLiteral("all")) {
+        m_app->todoProxyModel()->setDueFilter(QString());
+        clampSelection();
+        m_statusMessage = tr("Showing all tasks.");
+        return;
+    }
     m_statusMessage = tr("Unknown command: :%1 (try :help, :sync, :sort, :clear, :list, :q)").arg(cmdLine);
 }
 
@@ -1982,6 +2030,26 @@ void TuiApp::render() {
                 metaSuffix += QStringLiteral(" [%1/%2]").arg(formatSeconds(timerSec), formatSeconds(durSec));
             }
 
+            const QString dueDateStr = proxy->data(idx, TaskStoreModel::DueDateStringRole).toString();
+            const bool isOverdue = proxy->data(idx, TaskStoreModel::IsOverdueRole).toBool();
+            const bool isDueToday = proxy->data(idx, TaskStoreModel::IsDueTodayRole).toBool();
+            const bool isDueThisWeek = proxy->data(idx, TaskStoreModel::IsDueThisWeekRole).toBool();
+
+            QString dueBadgePlain;
+            QString dueBadgeStyled;
+            if (!dueDateStr.isEmpty()) {
+                dueBadgePlain = QStringLiteral(" [due:%1]").arg(dueDateStr);
+                if (isOverdue) {
+                    dueBadgeStyled = FG_RED + ESC_BOLD + dueBadgePlain + ESC_RESET;
+                } else if (isDueToday) {
+                    dueBadgeStyled = FG_ORANGE + ESC_BOLD + dueBadgePlain + ESC_RESET;
+                } else if (isDueThisWeek) {
+                    dueBadgeStyled = FG_CYAN + dueBadgePlain + ESC_RESET;
+                } else {
+                    dueBadgeStyled = FG_GRAY + dueBadgePlain + ESC_RESET;
+                }
+            }
+
             QString singleLineDesc = desc;
             singleLineDesc.replace(QLatin1Char('\r'), QLatin1Char(' '));
             singleLineDesc.replace(QLatin1Char('\n'), QLatin1Char(' '));
@@ -2019,7 +2087,7 @@ void TuiApp::render() {
             }
 
             const QString cursorMark = isSelected ? QStringLiteral(" > ") : (isActivePomodoro ? QStringLiteral(" • ") : QStringLiteral("   "));
-            const int availDescCols = qMax(10, m_cols - 14 - provCols - displayWidth(metaSuffix));
+            const int availDescCols = qMax(10, m_cols - 14 - provCols - displayWidth(metaSuffix) - displayWidth(dueBadgePlain));
             const QString cleanDesc = padRight(singleLineDesc, availDescCols);
 
             if (isSelected) {
@@ -2028,13 +2096,16 @@ void TuiApp::render() {
                     + provBadge
                     + FG_WHITE + cleanDesc
                     + FG_PURPLE + metaSuffix
+                    + (!dueBadgePlain.isEmpty() ? (ESC_BOLD + dueBadgePlain) : QString())
                     + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
                 out += (isActivePomodoro ? FG_CYAN : FG_GRAY) + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
                     + prioColor + prioStr + QLatin1Char(' ')
                     + provBadge
                     + (isClosedTab() ? (FG_GRAY + ESC_STRIKE) : FG_WHITE) + cleanDesc + ESC_RESET
-                    + FG_GRAY + metaSuffix + ESC_RESET + QStringLiteral("\033[K\r\n");
+                    + FG_GRAY + metaSuffix + ESC_RESET
+                    + dueBadgeStyled
+                    + QStringLiteral("\033[K\r\n");
             }
         }
 

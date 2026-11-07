@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "pages"
 import "dialogs"
+import "components"
 
 ApplicationWindow {
     id: rootWindow
@@ -29,6 +30,16 @@ ApplicationWindow {
 
     function persistGeometry() {
         app.settings.saveWindowGeometry(rootWindow.width, rootWindow.height, rootWindow.x, rootWindow.y)
+    }
+
+    function toggleMiniPlayer() {
+        if (miniPlayerWindow.visible) {
+            miniPlayerWindow.hide()
+        } else {
+            miniPlayerWindow.show()
+            miniPlayerWindow.raise()
+            miniPlayerWindow.requestActivate()
+        }
     }
 
     onWidthChanged: if (visible) app.settings.windowWidth = width
@@ -77,6 +88,10 @@ ApplicationWindow {
     }
 
     // Dynamic Configurable Shortcuts
+    Shortcut {
+        sequence: "Ctrl+M"
+        onActivated: rootWindow.toggleMiniPlayer()
+    }
     Shortcut {
         sequence: app.shortcuts.shortcutFor("filter")
         onActivated: rootWindow.showFilterBar = !rootWindow.showFilterBar
@@ -250,6 +265,15 @@ ApplicationWindow {
             }
 
             ToolButton {
+                visible: !app.showingOverview
+                text: "🗗"
+                font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Always on Top Mini-Player (Ctrl+M)")
+                onClicked: rootWindow.toggleMiniPlayer()
+            }
+
+            ToolButton {
                 text: "☰"
                 font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
                 ToolTip.visible: hovered
@@ -333,6 +357,11 @@ ApplicationWindow {
                         text: qsTr("Clear Done List")
                         onTriggered: app.clearDoneTasks()
                     }
+                    MenuItem {
+                        text: "🗗 " + qsTr("Always on Top Mini-Player")
+                        shortcut: "Ctrl+M"
+                        onTriggered: rootWindow.toggleMiniPlayer()
+                    }
                     MenuSeparator {}
                     MenuItem {
                         text: qsTr("📊 Productivity Dashboard & Reports")
@@ -386,5 +415,9 @@ ApplicationWindow {
 
     AboutDialog {
         id: aboutDialog
+    }
+
+    MiniPlayerWindow {
+        id: miniPlayerWindow
     }
 }

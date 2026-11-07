@@ -85,6 +85,90 @@ Item {
             }
         }
 
+        // Smart Due Filters (All / Overdue / Today / This Week)
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 8
+            Layout.rightMargin: 8
+            Layout.topMargin: 2
+            Layout.bottomMargin: 2
+            visible: !listRoot.isDoneList
+            spacing: 6
+
+            Label {
+                text: qsTr("Due:")
+                font.pixelSize: 11
+                font.bold: true
+                opacity: 0.7
+            }
+
+            ButtonGroup { id: dueGroup }
+
+            Button {
+                text: qsTr("All")
+                checkable: true
+                checked: listRoot.proxyModel ? (listRoot.proxyModel.dueFilter === "" || listRoot.proxyModel.dueFilter === "all") : true
+                ButtonGroup.group: dueGroup
+                font.pixelSize: 11
+                implicitHeight: 22
+                padding: 4
+                onClicked: if (listRoot.proxyModel) listRoot.proxyModel.dueFilter = ""
+            }
+
+            Button {
+                text: "⏰ " + qsTr("Overdue")
+                checkable: true
+                checked: listRoot.proxyModel ? listRoot.proxyModel.dueFilter === "overdue" : false
+                ButtonGroup.group: dueGroup
+                font.pixelSize: 11
+                implicitHeight: 22
+                padding: 4
+                contentItem: Text {
+                    text: parent.text
+                    font.pixelSize: 11
+                    font.bold: parent.checked
+                    color: parent.checked ? "#e74c3c" : palette.windowText
+                }
+                onClicked: if (listRoot.proxyModel) listRoot.proxyModel.dueFilter = "overdue"
+            }
+
+            Button {
+                text: "📅 " + qsTr("Today")
+                checkable: true
+                checked: listRoot.proxyModel ? listRoot.proxyModel.dueFilter === "today" : false
+                ButtonGroup.group: dueGroup
+                font.pixelSize: 11
+                implicitHeight: 22
+                padding: 4
+                contentItem: Text {
+                    text: parent.text
+                    font.pixelSize: 11
+                    font.bold: parent.checked
+                    color: parent.checked ? "#e67e22" : palette.windowText
+                }
+                onClicked: if (listRoot.proxyModel) listRoot.proxyModel.dueFilter = "today"
+            }
+
+            Button {
+                text: "🗓 " + qsTr("This Week")
+                checkable: true
+                checked: listRoot.proxyModel ? listRoot.proxyModel.dueFilter === "week" : false
+                ButtonGroup.group: dueGroup
+                font.pixelSize: 11
+                implicitHeight: 22
+                padding: 4
+                contentItem: Text {
+                    text: parent.text
+                    font.pixelSize: 11
+                    font.bold: parent.checked
+                    color: parent.checked ? "#2980b9" : palette.windowText
+                }
+                onClicked: if (listRoot.proxyModel) listRoot.proxyModel.dueFilter = "week"
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
         ToolBar {
             Layout.fillWidth: true
             visible: listRoot.showFilter

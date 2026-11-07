@@ -10,6 +10,7 @@ class TaskFilterProxyModel : public QSortFilterProxyModel {
     Q_OBJECT
     Q_PROPERTY(QString filterQuery READ filterQuery WRITE setFilterQuery NOTIFY filterQueryChanged)
     Q_PROPERTY(QString statusFilter READ statusFilter WRITE setStatusFilter NOTIFY statusFilterChanged)
+    Q_PROPERTY(QString dueFilter READ dueFilter WRITE setDueFilter NOTIFY dueFilterChanged)
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
 
 public:
@@ -36,11 +37,15 @@ public:
     [[nodiscard]] QString statusFilter() const { return m_statusFilter; }
     void setStatusFilter(const QString& status);
 
+    [[nodiscard]] QString dueFilter() const { return m_dueFilter; }
+    void setDueFilter(const QString& filter);
+
     Q_INVOKABLE int mapToSourceRow(int proxyRow) const;
 
 signals:
     void filterQueryChanged();
     void statusFilterChanged();
+    void dueFilterChanged();
     void countChanged();
 
 protected:
@@ -52,6 +57,7 @@ private:
 
     QString m_filterQuery;
     QString m_statusFilter;
+    QString m_dueFilter;
     QVector<TxtPart> m_searchParts;
     std::optional<PrioConstraint> m_prioConstraint;
 };

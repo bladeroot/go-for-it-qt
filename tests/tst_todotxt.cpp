@@ -1,3 +1,4 @@
+#include "core/AmbientSoundService.h"
 #include "core/AnalyticsService.h"
 #include "core/AppController.h"
 #include "core/IssueTrackerService.h"
@@ -593,6 +594,121 @@ private slots:
         QVERIFY(QFileInfo(pdfPath).size() > 500);
         QFile::remove(pdfPath);
         QFile::remove(testDbPath);
+    }
+
+    void testDueDatesAndSmartFilters() {
+        const QDate today = QDate::currentDate();
+        const QDate yesterday = today.addDays(-1);
+        const QDate inThreeDays = today.addDays(3);
+        const QDate nextMonth = today.addMonths(1);
+
+        TxtTask taskOverdue = TxtTask::fromSimpleTxt(
+            QStringLiteral("Fix critical bug due:%1 +security").arg(yesterday.toString(Qt::ISODate)), false, false
+        );
+        QVERIFY(taskOverdue.dueDate().isValid());
+        QCOMPARE(taskOverdue.dueDate(), yesterday);
+        QVERIFY(taskOverdue.isOverdue());
+        QVERIFY(!taskOverdue.isDueToday());
+        QVERIFY(!taskOverdue.isDueThisWeek());
+
+        TxtTask taskToday = TxtTask::fromSimpleTxt(
+            QStringLiteral("Ship release v2 due:%1 @release").arg(today.toString(Qt::ISODate)), false, false
+        );
+        QVERIFY(taskToday.dueDate().isValid());
+        QCOMPARE(taskToday.dueDate(), today);
+        QVERIFY(!taskToday.isOverdue());
+        QVERIFY(taskToday.isDueToday());
+        QVERIFY(taskToday.isDueThisWeek());
+
+        TxtTask taskWeek = TxtTask::fromSimpleTxt(
+            QStringLiteral("Weekly meeting due:%1 +sync").arg(inThreeDays.toString(Qt::ISODate)), false, false
+        );
+        QVERIFY(taskWeek.dueDate().isValid());
+        QVERIFY(!taskWeek.isOverdue());
+        QVERIFY(!taskWeek.isDueToday());
+        QVERIFY(taskWeek.isDueThisWeek());
+
+        TxtTask taskFar = TxtTask::fromSimpleTxt(
+            QStringLiteral("Future planning due:%1").arg(nextMonth.toString(Qt::ISODate)), false, false
+        );
+        QVERIFY(taskFar.dueDate().isValid());
+        QVERIFY(!taskFar.isOverdue());
+        QVERIFY(!taskFar.isDueToday());
+        QVERIFY(!taskFar.isDueThisWeek());
+
+        // Model & Proxy filtering tests
+        TaskStoreModel model;
+        model.appendTask(taskOverdue);
+        model.appendTask(taskToday);
+        model.appendTask(taskWeek);
+        model.appendTask(taskFar);
+        QCOMPARE(model.rowCount(), 4);
+
+        TaskFilterProxyModel proxy;
+        proxy.setSourceModel(&model);
+        QCOMPARE(proxy.rowCount(), 4);
+
+        // Filter: overdue
+        proxy.setDueFilter(QStringLiteral("overdue"));
+        QCOMPARE(proxy.rowCount(), 1);
+        QCOMPARE(proxy.data(proxy.index(0, 0), TaskStoreModel::DueDateStringRole).toString(), yesterday.toString(Qt::ISODate));
+
+        // Filter: today
+        proxy.setDueFilter(QStringLiteral("today"));
+        QCOMPARE(proxy.rowCount(), 1);
+        QCOMPARE(proxy.data(proxy.index(0, 0), TaskStoreModel::DueDateStringRole).toString(), today.toString(Qt::ISODate));
+
+        // Filter: week
+        proxy.setDueFilter(QStringLiteral("week"));
+        QCOMPARE(proxy.rowCount(), 2); // today + inThreeDays
+
+        // Reset filter
+        proxy.setDueFilter(QString());
+        QCOMPARE(proxy.rowCount(), 4);
+
+        // Filter via query string "due:today"
+        proxy.setFilterQuery(QStringLiteral("due:today"));
+        QCOMPARE(proxy.rowCount(), 1);
+
+        proxy.setFilterQuery(QStringLiteral("due:overdue"));
+        QCOMPARE(proxy.rowCount(), 1);
+
+        proxy.setFilterQuery(QStringLiteral("due:week"));
+        QCOMPARE(proxy.rowCount(), 2);
+    }
+
+    void testAmbientSoundGeneration() {
+        const QString whiteNoisePath = QStringLiteral("/tmp/test_ambient_white.wav");
+        const QString rainPath = QStringLiteral("/tmp/test_ambient_rain.wav");
+        const QString clockPath = QStringLiteral("/tmp/test_ambient_clock.wav");
+
+        QFile::remove(whiteNoisePath);
+        QFile::remove(rainPath);
+        QFile::remove(clockPath);
+
+        QVERIFY(AmbientSoundService::generateAmbientWav(QStringLiteral("white_noise"), whiteNoisePath));
+        QVERIFY(QFile::exists(whiteNoisePath));
+        QVERIFY(QFileInfo(whiteNoisePath).size() > 44);
+
+        QVERIFY(AmbientSoundService::generateAmbientWav(QStringLiteral("rain"), rainPath));
+        QVERIFY(QFile::exists(rainPath));
+        QVERIFY(QFileInfo(rainPath).size() > 44);
+
+        QVERIFY(AmbientSoundService::generateAmbientWav(QStringLiteral("clock"), clockPath));
+        QVERIFY(QFile::exists(clockPath));
+        QVERIFY(QFileInfo(clockPath).size() > 44);
+
+        // Verify RIFF WAVE header in one of the files
+        QFile f(clockPath);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray hdr = f.read(12);
+        QVERIFY(hdr.startsWith("RIFF"));
+        QVERIFY(hdr.endsWith("WAVE"));
+        f.close();
+
+        QFile::remove(whiteNoisePath);
+        QFile::remove(rainPath);
+        QFile::remove(clockPath);
     }
 };
 

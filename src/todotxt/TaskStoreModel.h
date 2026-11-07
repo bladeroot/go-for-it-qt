@@ -34,7 +34,12 @@ public:
         IsViewedRole,
         ListIdRole,
         ListNameRole,
-        ListProviderRole
+        ListProviderRole,
+        DueDateRole,
+        DueDateStringRole,
+        IsOverdueRole,
+        IsDueTodayRole,
+        IsDueThisWeekRole
     };
 
     explicit TaskStoreModel(bool doneByDefault = false, QObject* parent = nullptr);

@@ -97,6 +97,13 @@ public:
     [[nodiscard]] QDate completionDate() const noexcept { return m_completionDate; }
     void setCompletionDate(const QDate& date) noexcept { m_completionDate = date; }
 
+    [[nodiscard]] QDate dueDate() const noexcept { return m_dueDate; }
+    void setDueDate(const QDate& date);
+    [[nodiscard]] QString dueDateString() const;
+    [[nodiscard]] bool isOverdue() const;
+    [[nodiscard]] bool isDueToday() const;
+    [[nodiscard]] bool isDueThisWeek() const;
+
     [[nodiscard]] quint32 timerValue() const noexcept { return m_timerValue; }
     void setTimerValue(quint32 seconds) noexcept { m_timerValue = seconds; }
 
@@ -136,6 +143,7 @@ private:
     QVector<TxtPart> m_parts;
     QDate m_creationDate;
     QDate m_completionDate;
+    QDate m_dueDate;
     quint32 m_timerValue = 0;
     quint32 m_duration = 0;
     quint32 m_jiraSyncedSeconds = 0;

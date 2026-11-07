@@ -231,6 +231,21 @@ QString TxtTask::richText() const {
             break;
         }
         case TxtPartType::Tag: {
+            if (p.tagName == QStringLiteral("due")) {
+                const QDate d = QDate::fromString(p.content, Qt::ISODate);
+                QString color = QStringLiteral("#7f8c8d");
+                if (d.isValid()) {
+                    if (d < QDate::currentDate()) {
+                        color = QStringLiteral("#e74c3c"); // Overdue red
+                    } else if (d == QDate::currentDate()) {
+                        color = QStringLiteral("#e67e22"); // Today orange
+                    } else if (d <= QDate::currentDate().addDays(7)) {
+                        color = QStringLiteral("#2980b9"); // This week blue
+                    }
+                }
+                segments.append(QStringLiteral("<span style=\"color:%1;font-weight:bold;\">due:%2</span>").arg(color, p.content.toHtmlEscaped()));
+                break;
+            }
             const QString esc = (p.tagName + QLatin1Char(':') + p.content).toHtmlEscaped();
             segments.append(esc);
             break;
@@ -411,6 +426,11 @@ void TxtTask::parseDescriptionTokens(const QStringList& tokens, int startIndex) 
                     m_duration = parsedDuration;
                     continue;
                 }
+            } else if (part.tagName == QStringLiteral("due")) {
+                const QDate d = QDate::fromString(part.content, Qt::ISODate);
+                if (d.isValid()) {
+                    m_dueDate = d;
+                }
             }
         }
         m_parts.append(std::move(part));
@@ -442,6 +462,37 @@ void TxtTask::rebuildDescriptionFromParts() {
         }
     }
     m_description = segments.join(QLatin1Char(' '));
+}
+
+QString TxtTask::dueDateString() const {
+    return m_dueDate.isValid() ? m_dueDate.toString(Qt::ISODate) : QString();
+}
+
+bool TxtTask::isOverdue() const {
+    return !m_done && m_dueDate.isValid() && m_dueDate < QDate::currentDate();
+}
+
+bool TxtTask::isDueToday() const {
+    return !m_done && m_dueDate.isValid() && m_dueDate == QDate::currentDate();
+}
+
+bool TxtTask::isDueThisWeek() const {
+    if (m_done || !m_dueDate.isValid()) return false;
+    const QDate today = QDate::currentDate();
+    return m_dueDate >= today && m_dueDate <= today.addDays(7);
+}
+
+void TxtTask::setDueDate(const QDate& date) {
+    m_dueDate = date;
+    for (int i = static_cast<int>(m_parts.size()) - 1; i >= 0; --i) {
+        if (m_parts[i].type == TxtPartType::Tag && m_parts[i].tagName == QStringLiteral("due")) {
+            m_parts.removeAt(i);
+        }
+    }
+    if (m_dueDate.isValid()) {
+        m_parts.append({TxtPartType::Tag, m_dueDate.toString(Qt::ISODate), QStringLiteral("due")});
+    }
+    rebuildDescriptionFromParts();
 }
 
 } // namespace gofi
