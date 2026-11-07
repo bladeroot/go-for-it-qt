@@ -1129,9 +1129,14 @@ void TuiApp::openTaskMarkdownView() {
     const QString details = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
     const QVariantList comments = proxy->data(idx, TaskStoreModel::CommentsRole).toList();
     const QString status = proxy->data(idx, TaskStoreModel::StatusRole).toString();
+    const quint8 prio = static_cast<quint8>(proxy->data(idx, TaskStoreModel::PriorityRole).toUInt());
+    QString prioLabel;
+    if (prio < 26) {
+        prioLabel = QStringLiteral(" [(%1)]").arg(QChar('A' + prio));
+    }
 
-    m_markdownTitle = QStringLiteral("%1 [%2]").arg(desc, statusLabel(status));
-    QString fullMd = QStringLiteral("# %1\n\n").arg(desc);
+    m_markdownTitle = QStringLiteral("%1%2 [%3]").arg(desc, prioLabel, statusLabel(status));
+    QString fullMd = QStringLiteral("# %1%2\n\n").arg(desc, prioLabel);
 
     const QString listId = proxy->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString jiraKey = proxy->data(idx, TaskStoreModel::JiraKeyRole).toString();
@@ -2048,7 +2053,12 @@ void TuiApp::render() {
             QString prioColor = FG_GRAY;
             if (prio < 26) {
                 prioStr = QStringLiteral("(%1)").arg(QChar('A' + prio));
-                prioColor = (prio == 0) ? FG_RED : (prio == 1 ? FG_ORANGE : FG_YELLOW);
+                if (prio == 0) prioColor = FG_RED + ESC_BOLD;
+                else if (prio == 1) prioColor = FG_ORANGE + ESC_BOLD;
+                else if (prio == 2) prioColor = FG_YELLOW + ESC_BOLD;
+                else if (prio == 3) prioColor = FG_CYAN;
+                else if (prio == 4) prioColor = FG_GREEN;
+                else prioColor = FG_GRAY;
             }
 
             QString metaSuffix;
@@ -2120,7 +2130,7 @@ void TuiApp::render() {
 
             if (isSelected) {
                 out += BG_SELECTED + FG_CYAN + ESC_BOLD + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
-                    + prioColor + prioStr + QLatin1Char(' ')
+                    + prioColor + prioStr + ESC_RESET + BG_SELECTED + QLatin1Char(' ')
                     + provBadge
                     + FG_WHITE + cleanDesc
                     + FG_PURPLE + metaSuffix
@@ -2128,7 +2138,7 @@ void TuiApp::render() {
                     + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
                 out += (isActivePomodoro ? FG_CYAN : FG_GRAY) + cursorMark + unreadDot + QLatin1Char(' ') + statusColor + statusBadge + QLatin1Char(' ')
-                    + prioColor + prioStr + QLatin1Char(' ')
+                    + prioColor + prioStr + ESC_RESET + QLatin1Char(' ')
                     + provBadge
                     + (isClosedTab() ? (FG_GRAY + ESC_STRIKE) : FG_WHITE) + cleanDesc + ESC_RESET
                     + FG_GRAY + metaSuffix + ESC_RESET
@@ -2152,8 +2162,21 @@ void TuiApp::render() {
                 const QString details = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
                 const QVariantList comments = proxy->data(idx, TaskStoreModel::CommentsRole).toList();
                 const QString status = proxy->data(idx, TaskStoreModel::StatusRole).toString();
+                const quint8 prio = static_cast<quint8>(proxy->data(idx, TaskStoreModel::PriorityRole).toUInt());
+                QString prioBadge;
+                if (prio < 26) {
+                    QString color = FG_GRAY;
+                    if (prio == 0) color = FG_RED + ESC_BOLD;
+                    else if (prio == 1) color = FG_ORANGE + ESC_BOLD;
+                    else if (prio == 2) color = FG_YELLOW + ESC_BOLD;
+                    else if (prio == 3) color = FG_CYAN;
+                    else if (prio == 4) color = FG_GREEN;
+                    prioBadge = QStringLiteral("  ") + color + QStringLiteral("[(%1)]").arg(QChar('A' + prio)) + ESC_RESET;
+                }
 
-                previewLines.append(ESC_BOLD + FG_CYAN + QStringLiteral("  %1  [%2]").arg(desc, statusLabel(status)) + ESC_RESET);
+                previewLines.append(ESC_BOLD + FG_CYAN + QStringLiteral("  %1").arg(desc) + ESC_RESET
+                    + QStringLiteral("  [%1]").arg(statusLabel(status))
+                    + prioBadge);
 
                 const QString listId = proxy->data(idx, TaskStoreModel::ListIdRole).toString();
                 const QString jiraKey = proxy->data(idx, TaskStoreModel::JiraKeyRole).toString();
