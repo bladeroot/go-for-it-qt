@@ -16,10 +16,10 @@ permissions:
 
 jobs:
   build-and-package:
-    name: Build, Test & Package (.deb in Ubuntu 24.10)
+    name: Build, Test & Package (.deb in Debian Trixie)
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:24.10
+      image: debian:trixie-slim
     steps:
       - name: Install Git & system dependencies
         run: |
