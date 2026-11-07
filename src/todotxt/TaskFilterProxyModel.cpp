@@ -44,6 +44,20 @@ void TaskFilterProxyModel::setDueFilter(const QString& filter) {
     emit countChanged();
 }
 
+void TaskFilterProxyModel::setReferenceDate(const QDate& date) {
+    if (m_referenceDate == date) return;
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    beginFilterChange();
+    #endif
+    m_referenceDate = date;
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    #else
+    invalidateFilter();
+    #endif
+    emit countChanged();
+}
+
 void TaskFilterProxyModel::setFilterQuery(const QString& query) {
     if (m_filterQuery == query) {
         return;
@@ -166,10 +180,11 @@ bool TaskFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& so
     if (!m_statusFilter.isEmpty() && task.status() != m_statusFilter) {
         return false;
     }
+    const QDate ref = referenceDate();
     if (!m_dueFilter.isEmpty() && m_dueFilter != QStringLiteral("all")) {
-        if (m_dueFilter == QStringLiteral("today") && !task.isDueToday()) return false;
-        if (m_dueFilter == QStringLiteral("overdue") && !task.isOverdue()) return false;
-        if (m_dueFilter == QStringLiteral("week") && !task.isDueThisWeek()) return false;
+        if (m_dueFilter == QStringLiteral("today") && !task.isDueToday(ref)) return false;
+        if (m_dueFilter == QStringLiteral("overdue") && !task.isOverdue(ref)) return false;
+        if (m_dueFilter == QStringLiteral("week") && !task.isDueThisWeek(ref)) return false;
     }
     if (!checkPriority(task)) {
         return false;
@@ -189,9 +204,9 @@ bool TaskFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& so
         } else {
             bool matched = false;
             if (needle.type == TxtPartType::Tag && needle.tagName.toLower() == QStringLiteral("due")) {
-                if (needle.content == QStringLiteral("today") && task.isDueToday()) matched = true;
-                else if (needle.content == QStringLiteral("overdue") && task.isOverdue()) matched = true;
-                else if (needle.content == QStringLiteral("week") && task.isDueThisWeek()) matched = true;
+                if (needle.content == QStringLiteral("today") && task.isDueToday(ref)) matched = true;
+                else if (needle.content == QStringLiteral("overdue") && task.isOverdue(ref)) matched = true;
+                else if (needle.content == QStringLiteral("week") && task.isDueThisWeek(ref)) matched = true;
             }
             if (!matched) {
                 for (const TxtPart& part : parts) {

@@ -7,6 +7,7 @@
 #include <QFontMetrics>
 #include <QIcon>
 #include <QPainter>
+#include <QStandardPaths>
 #include <QStyle>
 
 namespace gofi {
@@ -252,6 +253,9 @@ void DesktopIntegration::updateLauncherBadge() {
 }
 
 void DesktopIntegration::emitUnityLauncherUpdate(const QVariantMap& properties) {
+    if (QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) {
         return;

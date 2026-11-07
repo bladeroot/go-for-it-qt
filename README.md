@@ -66,7 +66,7 @@ Sync tasks, fetch rich descriptions and comments, and automatically log Pomodoro
     - `on_break_start`: Triggered when break begins (e.g. restore status, notify smart home).
     - `on_pomodoro_completed`: Triggered on successful Pomodoro completion.
     - `on_task_completed`: Triggered when any task is marked Done.
-  - Scripts folder: `~/.config/go-for-it/hooks/` with automated template generation.
+  - Scripts folder: `~/.config/go-for-it-qt/hooks/` with automated template generation.
   - Contextual environment variables: `$GOFI_EVENT`, `$GOFI_TASK_TITLE`, `$GOFI_TASK_KEY`, `$GOFI_TASK_ID`, `$GOFI_PHASE`, `$GOFI_DURATION_SEC`.
 
 ### 🚀 Quick Browser Jump ("Open in Browser")

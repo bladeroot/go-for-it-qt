@@ -40,6 +40,9 @@ public:
     [[nodiscard]] QString dueFilter() const { return m_dueFilter; }
     void setDueFilter(const QString& filter);
 
+    [[nodiscard]] QDate referenceDate() const { return m_referenceDate.isValid() ? m_referenceDate : QDate::currentDate(); }
+    void setReferenceDate(const QDate& date);
+
     Q_INVOKABLE int mapToSourceRow(int proxyRow) const;
 
 signals:
@@ -58,6 +61,7 @@ private:
     QString m_filterQuery;
     QString m_statusFilter;
     QString m_dueFilter;
+    QDate m_referenceDate;
     QVector<TxtPart> m_searchParts;
     std::optional<PrioConstraint> m_prioConstraint;
 };

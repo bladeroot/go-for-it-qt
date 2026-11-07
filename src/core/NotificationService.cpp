@@ -32,7 +32,7 @@ bool NotificationService::isAudioPlaybackEnabled() {
     if (!s_audioPlaybackEnabled) {
         return false;
     }
-    if (qEnvironmentVariableIsSet("QT_QPA_PLATFORM") && qgetenv("QT_QPA_PLATFORM") == "offscreen") {
+    if (QStandardPaths::isTestModeEnabled()) {
         return false;
     }
     if (qEnvironmentVariableIsSet("GOFI_NO_SOUND")) {
@@ -173,6 +173,10 @@ void NotificationService::onDurationExceeded() {
 
 void NotificationService::sendDesktopNotification(const QString& title, const QString& body) {
     emit desktopNotification(title, body);
+
+    if (QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
 
     // Send standard Freedesktop DBus notification if session bus is available
     QDBusConnection bus = QDBusConnection::sessionBus();

@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -24,14 +25,7 @@ void SystemHookService::setSystemIntegrationEnabled(bool enabled) {
 }
 
 bool SystemHookService::isSystemIntegrationEnabled() {
-    if (!s_systemIntegrationEnabled) {
-        return false;
-    }
-    if (QStandardPaths::isTestModeEnabled() ||
-        (qEnvironmentVariableIsSet("QT_QPA_PLATFORM") && qgetenv("QT_QPA_PLATFORM") == "offscreen")) {
-        return false;
-    }
-    return true;
+    return s_systemIntegrationEnabled;
 }
 
 SystemHookService::SystemHookService(AppController* controller,
@@ -43,6 +37,19 @@ SystemHookService::SystemHookService(AppController* controller,
     , m_settings(settings)
     , m_timer(timer)
 {
+    // Crash recovery: check if a previous run crashed while GNOME banners were disabled
+    if (!QStandardPaths::isTestModeEnabled()) {
+        QSettings crashState(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
+        if (crashState.value(QStringLiteral("State/gnome_banners_inhibited"), false).toBool()) {
+            QProcess::execute(QStringLiteral("gsettings"),
+                             {QStringLiteral("set"),
+                              QStringLiteral("org.gnome.desktop.notifications"),
+                              QStringLiteral("show-banners"),
+                              QStringLiteral("true")});
+            crashState.remove(QStringLiteral("State/gnome_banners_inhibited"));
+        }
+    }
+
     if (m_timer) {
         connect(m_timer, &TaskTimer::workStarted, this, &SystemHookService::onWorkStarted);
         connect(m_timer, &TaskTimer::breakStarted, this, &SystemHookService::onBreakStarted);
@@ -55,7 +62,13 @@ SystemHookService::SystemHookService(AppController* controller,
     }
 
     if (m_settings) {
+        if (m_settings->customHooksEnabled() && !QStandardPaths::isTestModeEnabled()) {
+            ensureHooksDirectory();
+        }
         connect(m_settings, &SettingsManager::hookSettingsChanged, this, [this]() {
+            if (m_settings->customHooksEnabled() && !QStandardPaths::isTestModeEnabled()) {
+                ensureHooksDirectory();
+            }
             if (!m_settings->dndFocusEnabled() && m_dndActive) {
                 applyDnd(false);
             }
@@ -159,7 +172,7 @@ void SystemHookService::applyDnd(bool enable) {
 
     if (enable == m_dndActive) return;
 
-    if (!isSystemIntegrationEnabled()) {
+    if (!isSystemIntegrationEnabled() || QStandardPaths::isTestModeEnabled()) {
         m_dndActive = enable;
         emit dndFocusActiveChanged();
         return;
@@ -201,6 +214,8 @@ void SystemHookService::applyDnd(bool enable) {
                                       QStringLiteral("show-banners"),
                                       QStringLiteral("false")});
                     m_gnomeBannersDisabled = true;
+                    QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"))
+                        .setValue(QStringLiteral("State/gnome_banners_inhibited"), true);
                 }
             }
         }
@@ -227,6 +242,8 @@ void SystemHookService::applyDnd(bool enable) {
                               QStringLiteral("show-banners"),
                               QStringLiteral("true")});
             m_gnomeBannersDisabled = false;
+            QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"))
+                .remove(QStringLiteral("State/gnome_banners_inhibited"));
         }
 
         m_dndActive = false;
@@ -241,7 +258,7 @@ void SystemHookService::applySleepInhibit(bool enable) {
 
     if (enable == m_sleepInhibitActive) return;
 
-    if (!isSystemIntegrationEnabled()) {
+    if (!isSystemIntegrationEnabled() || QStandardPaths::isTestModeEnabled()) {
         m_sleepInhibitActive = enable;
         emit sleepInhibitActiveChanged();
         return;

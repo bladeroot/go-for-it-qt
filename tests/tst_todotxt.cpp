@@ -631,44 +631,44 @@ private slots:
     }
 
     void testDueDatesAndSmartFilters() {
-        const QDate today = QDate::currentDate();
-        const QDate yesterday = today.addDays(-1);
-        const QDate inThreeDays = today.addDays(3);
-        const QDate nextMonth = today.addMonths(1);
+        const QDate refDate(2026, 11, 7);
+        const QDate yesterday = refDate.addDays(-1);
+        const QDate inThreeDays = refDate.addDays(3);
+        const QDate nextMonth = refDate.addMonths(1);
 
         TxtTask taskOverdue = TxtTask::fromSimpleTxt(
             QStringLiteral("Fix critical bug due:%1 +security").arg(yesterday.toString(Qt::ISODate)), false, false
         );
         QVERIFY(taskOverdue.dueDate().isValid());
         QCOMPARE(taskOverdue.dueDate(), yesterday);
-        QVERIFY(taskOverdue.isOverdue());
-        QVERIFY(!taskOverdue.isDueToday());
-        QVERIFY(!taskOverdue.isDueThisWeek());
+        QVERIFY(taskOverdue.isOverdue(refDate));
+        QVERIFY(!taskOverdue.isDueToday(refDate));
+        QVERIFY(!taskOverdue.isDueThisWeek(refDate));
 
         TxtTask taskToday = TxtTask::fromSimpleTxt(
-            QStringLiteral("Ship release v2 due:%1 @release").arg(today.toString(Qt::ISODate)), false, false
+            QStringLiteral("Ship release v2 due:%1 @release").arg(refDate.toString(Qt::ISODate)), false, false
         );
         QVERIFY(taskToday.dueDate().isValid());
-        QCOMPARE(taskToday.dueDate(), today);
-        QVERIFY(!taskToday.isOverdue());
-        QVERIFY(taskToday.isDueToday());
-        QVERIFY(taskToday.isDueThisWeek());
+        QCOMPARE(taskToday.dueDate(), refDate);
+        QVERIFY(!taskToday.isOverdue(refDate));
+        QVERIFY(taskToday.isDueToday(refDate));
+        QVERIFY(taskToday.isDueThisWeek(refDate));
 
         TxtTask taskWeek = TxtTask::fromSimpleTxt(
             QStringLiteral("Weekly meeting due:%1 +sync").arg(inThreeDays.toString(Qt::ISODate)), false, false
         );
         QVERIFY(taskWeek.dueDate().isValid());
-        QVERIFY(!taskWeek.isOverdue());
-        QVERIFY(!taskWeek.isDueToday());
-        QVERIFY(taskWeek.isDueThisWeek());
+        QVERIFY(!taskWeek.isOverdue(refDate));
+        QVERIFY(!taskWeek.isDueToday(refDate));
+        QVERIFY(taskWeek.isDueThisWeek(refDate));
 
         TxtTask taskFar = TxtTask::fromSimpleTxt(
             QStringLiteral("Future planning due:%1").arg(nextMonth.toString(Qt::ISODate)), false, false
         );
         QVERIFY(taskFar.dueDate().isValid());
-        QVERIFY(!taskFar.isOverdue());
-        QVERIFY(!taskFar.isDueToday());
-        QVERIFY(!taskFar.isDueThisWeek());
+        QVERIFY(!taskFar.isOverdue(refDate));
+        QVERIFY(!taskFar.isDueToday(refDate));
+        QVERIFY(!taskFar.isDueThisWeek(refDate));
 
         // Model & Proxy filtering tests
         TaskStoreModel model;
@@ -679,6 +679,7 @@ private slots:
         QCOMPARE(model.rowCount(), 4);
 
         TaskFilterProxyModel proxy;
+        proxy.setReferenceDate(refDate);
         proxy.setSourceModel(&model);
         QCOMPARE(proxy.rowCount(), 4);
 
@@ -690,7 +691,7 @@ private slots:
         // Filter: today
         proxy.setDueFilter(QStringLiteral("today"));
         QCOMPARE(proxy.rowCount(), 1);
-        QCOMPARE(proxy.data(proxy.index(0, 0), TaskStoreModel::DueDateStringRole).toString(), QDate::currentDate().toString(Qt::ISODate));
+        QCOMPARE(proxy.data(proxy.index(0, 0), TaskStoreModel::DueDateStringRole).toString(), refDate.toString(Qt::ISODate));
 
         // Filter: week
         proxy.setDueFilter(QStringLiteral("week"));
@@ -921,7 +922,6 @@ private slots:
     void testListManagerModelEntryAtAndGet() {
         const QString testDb = m_testSandbox.filePath(QStringLiteral("test_list_mgr.db"));
         QFile::remove(testDb);
-        DatabaseManager::instance().initialize(testDb);
 
         AppController controller(QString(), testDb);
         ListManagerModel* mgr = controller.listManager();
@@ -948,6 +948,45 @@ private slots:
         QCOMPARE(cppEntry.id, entry0.value(QStringLiteral("id")).toString());
 
         QFile::remove(testDb);
+    }
+
+    void testRealHookProcessExecutionInSandbox() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("test_real_hook.db"));
+        QFile::remove(testDb);
+
+        AppController controller(QString(), testDb);
+        SettingsManager* settings = controller.settings();
+        SystemHookService* hooks = controller.systemHooks();
+        QVERIFY(settings != nullptr);
+        QVERIFY(hooks != nullptr);
+
+        SystemHookService::setSystemIntegrationEnabled(true);
+
+        const QString hookOutputDir = m_testSandbox.filePath(QStringLiteral("hook_run"));
+        QDir().mkpath(hookOutputDir);
+        const QString markerFile = QDir(hookOutputDir).filePath(QStringLiteral("hook_executed.marker"));
+        QFile::remove(markerFile);
+
+        settings->setCustomHooksEnabled(true);
+        settings->setHookWorkStartCommand(QStringLiteral("echo 'test_payload' > '%1'").arg(markerFile));
+
+        QSignalSpy spy(hooks, &SystemHookService::hookExecuted);
+        QVERIFY(hooks->testHook(QStringLiteral("work_start")));
+
+        QVERIFY(spy.wait(2000));
+        QCOMPARE(spy.count(), 1);
+        const QList<QVariant> args = spy.takeFirst();
+        QCOMPARE(args.at(0).toString(), QStringLiteral("work_start"));
+        QCOMPARE(args.at(1).toBool(), true);
+
+        QVERIFY(QFile::exists(markerFile));
+        QFile f(markerFile);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(f.readAll()).trimmed(), QStringLiteral("test_payload"));
+
+        SystemHookService::setSystemIntegrationEnabled(false);
+        QFile::remove(testDb);
+        QFile::remove(markerFile);
     }
 };
 

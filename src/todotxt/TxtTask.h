@@ -100,9 +100,9 @@ public:
     [[nodiscard]] QDate dueDate() const noexcept { return m_dueDate; }
     void setDueDate(const QDate& date);
     [[nodiscard]] QString dueDateString() const;
-    [[nodiscard]] bool isOverdue() const;
-    [[nodiscard]] bool isDueToday() const;
-    [[nodiscard]] bool isDueThisWeek() const;
+    [[nodiscard]] bool isOverdue(const QDate& refDate = QDate::currentDate()) const;
+    [[nodiscard]] bool isDueToday(const QDate& refDate = QDate::currentDate()) const;
+    [[nodiscard]] bool isDueThisWeek(const QDate& refDate = QDate::currentDate()) const;
 
     [[nodiscard]] quint32 timerValue() const noexcept { return m_timerValue; }
     void setTimerValue(quint32 seconds) noexcept { m_timerValue = seconds; }

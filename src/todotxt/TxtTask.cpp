@@ -468,18 +468,17 @@ QString TxtTask::dueDateString() const {
     return m_dueDate.isValid() ? m_dueDate.toString(Qt::ISODate) : QString();
 }
 
-bool TxtTask::isOverdue() const {
-    return !m_done && m_dueDate.isValid() && m_dueDate < QDate::currentDate();
+bool TxtTask::isOverdue(const QDate& refDate) const {
+    return !m_done && m_dueDate.isValid() && m_dueDate < refDate;
 }
 
-bool TxtTask::isDueToday() const {
-    return !m_done && m_dueDate.isValid() && m_dueDate == QDate::currentDate();
+bool TxtTask::isDueToday(const QDate& refDate) const {
+    return !m_done && m_dueDate.isValid() && m_dueDate == refDate;
 }
 
-bool TxtTask::isDueThisWeek() const {
+bool TxtTask::isDueThisWeek(const QDate& refDate) const {
     if (m_done || !m_dueDate.isValid()) return false;
-    const QDate today = QDate::currentDate();
-    return m_dueDate >= today && m_dueDate <= today.addDays(7);
+    return m_dueDate >= refDate && m_dueDate <= refDate.addDays(7);
 }
 
 void TxtTask::setDueDate(const QDate& date) {
