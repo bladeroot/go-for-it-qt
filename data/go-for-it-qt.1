@@ -1,0 +1,33 @@
+.TH GO-FOR-IT-QT 1 "November 2026" "go-for-it-qt 2.0.0" "User Commands"
+.SH NAME
+go-for-it-qt \- productivity to-do list with built-in Pomodoro timer (Qt 6 GUI)
+.SH SYNOPSIS
+.B go-for-it-qt
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+\fBGo for It Qt\fR is a modern productivity application combining a task list with a built-in Pomodoro timer, SQLite storage, and issue tracker synchronization.
+.SH OPTIONS
+.TP
+\fB\-\-tui\fR
+Launch terminal UI (TUI) frontend instead of Qt Quick GUI.
+.TP
+\fB\-\-db\fR \fIPATH\fR
+Path to custom SQLite database file.
+.TP
+\fB\-\-list\fR
+Print available task lists to stdout and exit.
+.TP
+\fB\-\-load\fR \fILIST_ID\fR
+Open directly into specified list ID or name.
+.TP
+\fB\-\-logfile\fR \fIPATH\fR
+Write application debug and activity log to specified file.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Display command-line help and exit.
+.TP
+\fB\-v\fR, \fB\-\-version\fR
+Display version information and exit.
+.SH AUTHORS
+Written by Yurii Myronchuk <bladeroot@gmail.com>.
+Based on original Go-For-It by Manuel Kehl and Jonathan Moerman.

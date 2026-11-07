@@ -219,6 +219,11 @@ install(FILES README.md AUTHORS
     COMPONENT Runtime
 )
 
+install(FILES data/go-for-it-qt.1 data/go-for-it-tui.1
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+    COMPONENT Runtime
+)
+
 # ==============================================================================
 # CPack Configuration (for `cpack -G DEB` / `cpack -G TGZ`)
 # ==============================================================================

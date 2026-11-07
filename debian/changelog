@@ -1,19 +1,25 @@
 go-for-it-qt (2.0.0-1) unstable; urgency=medium
 
   * Major Release 2.0.0: Full C++20 / Qt 6 rewrite with GUI and TUI clients.
-  * Native issue tracker and task integrations: GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, and Nextcloud Tasks (CalDAV/VTODO).
-  * Multi-account and multi-list aggregate views with per-integration remote status and priority mapping.
-  * Full Vim-style Terminal UI (go-for-it-tui) with ANSI color-coded priorities and keyboard workflow.
-  * Productivity Analytics Dashboard with Pomodoro charts, tag distribution, activity heatmap, and PDF/CSV billing reports.
+  * Native issue tracker and task integrations: GitHub, GitLab, Jira,
+    YouTrack, Redmine, Todoist, and Nextcloud Tasks (CalDAV/VTODO).
+  * Multi-account and multi-list aggregate views with per-integration
+    remote status and priority mapping.
+  * Full Vim-style Terminal UI (go-for-it-tui) with ANSI color-coded
+    priorities and keyboard workflow.
+  * Productivity Analytics Dashboard with Pomodoro charts, tag
+    distribution, activity heatmap, and PDF/CSV billing reports.
   * Always-on-top Mini-Player (PiP) window for uninterrupted focus.
-  * Due dates (due:YYYY-MM-DD) and smart filters (Today, Overdue, This Week).
-  * Procedural Ambient Focus Sound Generator (White Noise, Rain, Ticking Clock).
-  * Quick task jump to browser (xdg-open) via 'w'/'gx' in TUI and link button in GUI.
+  * Due dates (due:YYYY-MM-DD) and smart filters (Today, Overdue, Week).
+  * Procedural Ambient Focus Sound Generator (White Noise, Rain, Clock).
+  * Quick task jump to browser (xdg-open) via 'w'/'gx' in TUI and
+    link button in GUI.
 
  -- Yurii Myronchuk <bladeroot@gmail.com>  Sat, 07 Nov 2026 04:30:00 +0100
 
 go-for-it-qt (1.9.5-1) unstable; urgency=medium
 
-  * Initial release of Go for It Qt (C++20 / Qt 6 port with SQLite storage and Jira/YouTrack integration).
+  * Initial release of Go for It Qt (C++20 / Qt 6 port with SQLite
+    storage and Jira/YouTrack integration).
 
  -- Yurii Myronchuk <bladeroot@gmail.com>  Fri, 06 Nov 2026 11:00:00 +0100

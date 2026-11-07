@@ -9,6 +9,6 @@ Exec=go-for-it-qt
 Icon=go-for-it-qt
 Terminal=false
 Type=Application
-Categories=Office;ProjectManagement;Utility;Qt;
+Categories=Office;ProjectManagement;Qt;
 StartupNotify=true
 StartupWMClass=go-for-it-qt

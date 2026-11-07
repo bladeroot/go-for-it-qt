@@ -26,7 +26,7 @@ Depends:
  qml6-module-qtquick-layouts,
  qml6-module-qtquick-window,
  qml6-module-qtquick-dialogs
-Description: To-do list with built-in productivity timer, SQLite storage, and Jira/YouTrack sync
+Description: to-do list with built-in productivity timer and tracker sync
  Go for It Qt is a modern C++20 / Qt 6 productivity application combining task
  management with a built-in Pomodoro timer, single-file SQLite storage, and
  native Jira / JetBrains YouTrack integration.
