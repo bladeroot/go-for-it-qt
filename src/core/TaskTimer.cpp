@@ -87,6 +87,11 @@ void TaskTimer::start() {
     m_running = true;
     m_tickTimer.start();
     emit runningChanged();
+    if (!m_breakActive) {
+        emit workStarted();
+    } else {
+        emit breakStarted();
+    }
     updateState();
 }
 

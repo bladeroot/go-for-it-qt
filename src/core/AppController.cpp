@@ -26,6 +26,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_activityLog(logFilePath)
     , m_analytics(this)
     , m_ambient(&m_timer, this)
+    , m_systemHooks(this, &m_settings, &m_timer, this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
     applyLanguageTranslator();
@@ -310,11 +311,17 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     const QModelIndex idx = store->index(sourceRow, 0);
     const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
     const bool currentDone = store->data(idx, TaskStoreModel::DoneRole).toBool();
-    store->setData(idx, !currentDone, TaskStoreModel::DoneRole);
+    const bool willBeDone = !currentDone;
+    store->setData(idx, willBeDone, TaskStoreModel::DoneRole);
     m_notifications.notifyTaskEvent(
         tr("Task status changed"),
-        QStringLiteral("%1 → %2").arg(desc, !currentDone ? tr("Done") : tr("To-Do"))
+        QStringLiteral("%1 → %2").arg(desc, willBeDone ? tr("Done") : tr("To-Do"))
     );
+    if (willBeDone) {
+        const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
+        const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+        m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
+    }
 }
 
 void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus) {
@@ -332,6 +339,11 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
             tr("Task status changed"),
             QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
         );
+        if (newStatus == QStringLiteral("Done")) {
+            const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
+            const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+            m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
+        }
     }
 }
 

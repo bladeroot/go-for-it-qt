@@ -56,6 +56,19 @@ Sync tasks, fetch rich descriptions and comments, and automatically log Pomodoro
 - Concentration soundscapes: **White Noise**, **Gentle Rain**, and **Mechanical Clock Ticking**.
 - Automatically mutes during breaks and resumes on work intervals.
 
+### 🪝 Focus Mode System Hooks & DND Integration
+- **Deep Focus Mode**:
+  - Automatic **Do Not Disturb (DND)**: Inhibit notifications across GNOME Shell, KDE Plasma, and Freedesktop desktops during Work intervals.
+  - **Screen Wake / Sleep Inhibit**: Keep screen awake and prevent lock/screensaver during active Pomodoro work.
+- **Custom Event Hooks**:
+  - Execute arbitrary shell commands or scripts on timer and task events:
+    - `on_work_start`: Triggered when work session starts (e.g. update Slack/Discord status, dim smart lights).
+    - `on_break_start`: Triggered when break begins (e.g. restore status, notify smart home).
+    - `on_pomodoro_completed`: Triggered on successful Pomodoro completion.
+    - `on_task_completed`: Triggered when any task is marked Done.
+  - Scripts folder: `~/.config/go-for-it/hooks/` with automated template generation.
+  - Contextual environment variables: `$GOFI_EVENT`, `$GOFI_TASK_TITLE`, `$GOFI_TASK_KEY`, `$GOFI_TASK_ID`, `$GOFI_PHASE`, `$GOFI_DURATION_SEC`.
+
 ### 🚀 Quick Browser Jump ("Open in Browser")
 - Open any remote task or PR in your default web browser (`xdg-open`):
   - In TUI: press `w` or `gx`.
@@ -98,6 +111,9 @@ Run `go-for-it-tui` or `go-for-it-qt --tui`:
 | `/` | Normal | Live filter / search tasks (`Esc` to exit, `:noh` to clear) |
 | `?` or `:help` | Normal | Show interactive keyboard shortcuts help screen |
 | `:p <A-E>`, `:priority` | Ex | Set priority directly (e.g. `:p A` or `:p none`) |
+| `:dnd [on/off]` | Ex | Toggle Do Not Disturb (DND) focus mode |
+| `:hooks [on/off]` | Ex | Enable / disable user event hooks |
+| `:hook test <event>` | Ex | Test execute hook (`work_start`, `break_start`, `task_completed`) |
 | `:sync` | Ex | Synchronize active list with remote tracker |
 | `:sort <mode>` | Ex | Sort tasks by `priority`, `date`, `due`, or `title` |
 | `:clear` | Ex | Clear completed / canceled tasks |

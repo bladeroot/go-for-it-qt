@@ -50,6 +50,8 @@ public:
 signals:
     void runningChanged();
     void breakActiveChanged();
+    void workStarted();
+    void breakStarted();
     void timerUpdated();
     void activeTaskChanged();
     void activeTaskTimeUpdated(uint totalSeconds);

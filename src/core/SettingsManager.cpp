@@ -444,6 +444,76 @@ void SettingsManager::setLastLoadedListId(const QString& id) {
     DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("SavedState/last_list_id"), id);
 }
 
+bool SettingsManager::dndFocusEnabled() const {
+    return m_settings.value(QStringLiteral("Hooks/dnd_focus"), false).toBool();
+}
+
+void SettingsManager::setDndFocusEnabled(bool value) {
+    if (dndFocusEnabled() == value) return;
+    m_settings.setValue(QStringLiteral("Hooks/dnd_focus"), value);
+    emit hookSettingsChanged();
+}
+
+bool SettingsManager::inhibitSleepEnabled() const {
+    return m_settings.value(QStringLiteral("Hooks/inhibit_sleep"), false).toBool();
+}
+
+void SettingsManager::setInhibitSleepEnabled(bool value) {
+    if (inhibitSleepEnabled() == value) return;
+    m_settings.setValue(QStringLiteral("Hooks/inhibit_sleep"), value);
+    emit hookSettingsChanged();
+}
+
+bool SettingsManager::customHooksEnabled() const {
+    return m_settings.value(QStringLiteral("Hooks/custom_hooks"), false).toBool();
+}
+
+void SettingsManager::setCustomHooksEnabled(bool value) {
+    if (customHooksEnabled() == value) return;
+    m_settings.setValue(QStringLiteral("Hooks/custom_hooks"), value);
+    emit hookSettingsChanged();
+}
+
+QString SettingsManager::hookWorkStartCommand() const {
+    return m_settings.value(QStringLiteral("Hooks/cmd_work_start")).toString();
+}
+
+void SettingsManager::setHookWorkStartCommand(const QString& cmd) {
+    if (hookWorkStartCommand() == cmd) return;
+    m_settings.setValue(QStringLiteral("Hooks/cmd_work_start"), cmd);
+    emit hookSettingsChanged();
+}
+
+QString SettingsManager::hookBreakStartCommand() const {
+    return m_settings.value(QStringLiteral("Hooks/cmd_break_start")).toString();
+}
+
+void SettingsManager::setHookBreakStartCommand(const QString& cmd) {
+    if (hookBreakStartCommand() == cmd) return;
+    m_settings.setValue(QStringLiteral("Hooks/cmd_break_start"), cmd);
+    emit hookSettingsChanged();
+}
+
+QString SettingsManager::hookPomodoroCompletedCommand() const {
+    return m_settings.value(QStringLiteral("Hooks/cmd_pomodoro_completed")).toString();
+}
+
+void SettingsManager::setHookPomodoroCompletedCommand(const QString& cmd) {
+    if (hookPomodoroCompletedCommand() == cmd) return;
+    m_settings.setValue(QStringLiteral("Hooks/cmd_pomodoro_completed"), cmd);
+    emit hookSettingsChanged();
+}
+
+QString SettingsManager::hookTaskCompletedCommand() const {
+    return m_settings.value(QStringLiteral("Hooks/cmd_task_completed")).toString();
+}
+
+void SettingsManager::setHookTaskCompletedCommand(const QString& cmd) {
+    if (hookTaskCompletedCommand() == cmd) return;
+    m_settings.setValue(QStringLiteral("Hooks/cmd_task_completed"), cmd);
+    emit hookSettingsChanged();
+}
+
 void SettingsManager::rebuildSchedule() {
     const int mode = timerMode();
     if (mode == Simple) {

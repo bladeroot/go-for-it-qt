@@ -9,6 +9,7 @@
 #include "NotificationService.h"
 #include "SettingsManager.h"
 #include "ShortcutManager.h"
+#include "SystemHookService.h"
 #include "TaskFilterProxyModel.h"
 #include "TaskManager.h"
 #include "TaskTimer.h"
@@ -30,6 +31,7 @@ class AppController : public QObject {
     Q_PROPERTY(gofi::TaskFilterProxyModel* doneProxyModel READ doneProxyModel CONSTANT)
     Q_PROPERTY(gofi::AnalyticsService* analytics READ analytics CONSTANT)
     Q_PROPERTY(gofi::AmbientSoundService* ambient READ ambient CONSTANT)
+    Q_PROPERTY(gofi::SystemHookService* systemHooks READ systemHooks CONSTANT)
     Q_PROPERTY(bool showingOverview READ showingOverview WRITE setShowingOverview NOTIFY showingOverviewChanged)
     Q_PROPERTY(QString currentListId READ currentListId NOTIFY currentListChanged)
     Q_PROPERTY(QString currentListName READ currentListName NOTIFY currentListChanged)
@@ -59,6 +61,7 @@ public:
     [[nodiscard]] TaskFilterProxyModel* doneProxyModel() noexcept { return &m_doneProxy; }
     [[nodiscard]] AnalyticsService* analytics() noexcept { return &m_analytics; }
     [[nodiscard]] AmbientSoundService* ambient() noexcept { return &m_ambient; }
+    [[nodiscard]] SystemHookService* systemHooks() noexcept { return &m_systemHooks; }
 
     [[nodiscard]] bool showingOverview() const noexcept { return m_showingOverview; }
     void setShowingOverview(bool value);
@@ -146,6 +149,7 @@ private:
     ActivityLog m_activityLog;
     AnalyticsService m_analytics;
     AmbientSoundService m_ambient;
+    SystemHookService m_systemHooks;
     DesktopIntegration m_desktopIntegration;
     QTimer m_autoSyncTimer;
     QTimer m_dueReminderTimer;

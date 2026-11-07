@@ -69,6 +69,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background soundscapes to enhance concentration: **White Noise**, **Gentle Rain**, and **Mechanical Clock Ticking**.
 - Automatic smart pause during Pomodoro break intervals and resume during work cycles.
 
+### 🪝 Focus Mode System Hooks & DND Integration
+- **Desktop Do Not Disturb (DND)**:
+  - Automatic notification inhibition across GNOME Shell, KDE Plasma, and Freedesktop desktops during Work sessions.
+  - **Screen Sleep Inhibit**: Prevents idle sleep and screen locking during active Pomodoro intervals.
+- **Custom User Hooks**:
+  - Run arbitrary shell commands or scripts on lifecycle events (`on_work_start`, `on_break_start`, `on_pomodoro_completed`, `on_task_completed`).
+  - Standard hooks directory: `~/.config/go-for-it/hooks/` with automated sample script creation.
+  - Exposes context via `$GOFI_EVENT`, `$GOFI_TASK_TITLE`, `$GOFI_TASK_KEY`, `$GOFI_TASK_ID`, `$GOFI_PHASE`, `$GOFI_DURATION_SEC`.
+  - TUI Ex-commands `:dnd [on|off]`, `:hooks [on|off]`, and `:hook test <event>`.
+
 ### 📦 Packaging & CI/CD
 - GitHub Actions CI workflow generating Ubuntu/Debian `.deb` packages automatically on tagged releases (`v*`).
 - Ready-to-build Arch Linux `PKGBUILD` and Debian packaging files.

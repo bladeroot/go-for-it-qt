@@ -46,6 +46,13 @@ class SettingsManager : public QObject {
     Q_PROPERTY(bool notifyOnTaskChanges READ notifyOnTaskChanges WRITE setNotifyOnTaskChanges NOTIFY soundSettingsChanged)
     Q_PROPERTY(bool notifyTaskChangesSound READ notifyTaskChangesSound WRITE setNotifyTaskChangesSound NOTIFY soundSettingsChanged)
     Q_PROPERTY(bool notifyTaskChangesPopup READ notifyTaskChangesPopup WRITE setNotifyTaskChangesPopup NOTIFY soundSettingsChanged)
+    Q_PROPERTY(bool dndFocusEnabled READ dndFocusEnabled WRITE setDndFocusEnabled NOTIFY hookSettingsChanged)
+    Q_PROPERTY(bool inhibitSleepEnabled READ inhibitSleepEnabled WRITE setInhibitSleepEnabled NOTIFY hookSettingsChanged)
+    Q_PROPERTY(bool customHooksEnabled READ customHooksEnabled WRITE setCustomHooksEnabled NOTIFY hookSettingsChanged)
+    Q_PROPERTY(QString hookWorkStartCommand READ hookWorkStartCommand WRITE setHookWorkStartCommand NOTIFY hookSettingsChanged)
+    Q_PROPERTY(QString hookBreakStartCommand READ hookBreakStartCommand WRITE setHookBreakStartCommand NOTIFY hookSettingsChanged)
+    Q_PROPERTY(QString hookPomodoroCompletedCommand READ hookPomodoroCompletedCommand WRITE setHookPomodoroCompletedCommand NOTIFY hookSettingsChanged)
+    Q_PROPERTY(QString hookTaskCompletedCommand READ hookTaskCompletedCommand WRITE setHookTaskCompletedCommand NOTIFY hookSettingsChanged)
 
 public:
     enum TimerMode {
@@ -186,6 +193,27 @@ public:
     [[nodiscard]] QString lastLoadedListId() const;
     void setLastLoadedListId(const QString& id);
 
+    [[nodiscard]] bool dndFocusEnabled() const;
+    void setDndFocusEnabled(bool value);
+
+    [[nodiscard]] bool inhibitSleepEnabled() const;
+    void setInhibitSleepEnabled(bool value);
+
+    [[nodiscard]] bool customHooksEnabled() const;
+    void setCustomHooksEnabled(bool value);
+
+    [[nodiscard]] QString hookWorkStartCommand() const;
+    void setHookWorkStartCommand(const QString& cmd);
+
+    [[nodiscard]] QString hookBreakStartCommand() const;
+    void setHookBreakStartCommand(const QString& cmd);
+
+    [[nodiscard]] QString hookPomodoroCompletedCommand() const;
+    void setHookPomodoroCompletedCommand(const QString& cmd);
+
+    [[nodiscard]] QString hookTaskCompletedCommand() const;
+    void setHookTaskCompletedCommand(const QString& cmd);
+
 signals:
     void timerDurationChanged();
     void reminderTimeChanged();
@@ -202,6 +230,7 @@ signals:
     void windowGeometryChanged();
     void startupBehaviorChanged();
     void autoSyncChanged();
+    void hookSettingsChanged();
 
 private:
     void rebuildSchedule();

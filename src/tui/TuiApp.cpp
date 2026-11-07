@@ -1548,6 +1548,48 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         m_statusMessage = tr("Filtered tasks due this week.");
         return;
     }
+    if (cmdLine.startsWith(QStringLiteral("dnd"))) {
+        const QString arg = cmdLine.mid(3).trimmed().toLower();
+        if (arg == QStringLiteral("on") || arg == QStringLiteral("1") || arg == QStringLiteral("enable")) {
+            m_app->settings()->setDndFocusEnabled(true);
+            m_statusMessage = tr("Do Not Disturb (DND) focus mode enabled for Work cycles.");
+        } else if (arg == QStringLiteral("off") || arg == QStringLiteral("0") || arg == QStringLiteral("disable")) {
+            m_app->settings()->setDndFocusEnabled(false);
+            m_statusMessage = tr("Do Not Disturb (DND) focus mode disabled.");
+        } else {
+            const bool cur = m_app->settings()->dndFocusEnabled();
+            m_app->settings()->setDndFocusEnabled(!cur);
+            m_statusMessage = tr("Do Not Disturb (DND) focus mode: %1").arg(!cur ? tr("ON") : tr("OFF"));
+        }
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("hooks"))) {
+        const QString arg = cmdLine.mid(5).trimmed().toLower();
+        if (arg == QStringLiteral("on") || arg == QStringLiteral("1") || arg == QStringLiteral("enable")) {
+            m_app->settings()->setCustomHooksEnabled(true);
+            m_statusMessage = tr("System event hooks enabled.");
+        } else if (arg == QStringLiteral("off") || arg == QStringLiteral("0") || arg == QStringLiteral("disable")) {
+            m_app->settings()->setCustomHooksEnabled(false);
+            m_statusMessage = tr("System event hooks disabled.");
+        } else {
+            const bool cur = m_app->settings()->customHooksEnabled();
+            m_app->settings()->setCustomHooksEnabled(!cur);
+            m_statusMessage = tr("System event hooks: %1").arg(!cur ? tr("ON") : tr("OFF"));
+        }
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("hook"))) {
+        QString event = cmdLine.mid(4).trimmed();
+        if (event.startsWith(QStringLiteral("test "))) {
+            event = event.mid(5).trimmed();
+        } else if (event == QStringLiteral("test")) {
+            event = QStringLiteral("work_start");
+        }
+        if (event.isEmpty()) event = QStringLiteral("work_start");
+        m_app->systemHooks()->testHook(event);
+        m_statusMessage = tr("Tested hook event '%1' (dir: %2)").arg(event, m_app->systemHooks()->hooksDirectory());
+        return;
+    }
     if (cmdLine == QStringLiteral("all")) {
         m_app->todoProxyModel()->setDueFilter(QString());
         clampSelection();
@@ -1785,7 +1827,7 @@ void TuiApp::render() {
             tr("  w / gx                            Open task / issue in web browser (GitHub, GitLab, Jira, YouTrack...)"),
             tr("  U or :stats / :dashboard          Open Productivity Dashboard (Pomodoro stats, Heatmap, +Project/@Context)"),
             tr("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
-            tr("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
+            tr("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :dnd, :hooks, :hook test, :q)")
         };
         for (int r = 0; r < bodyRows; ++r) {
             if (r < helpLines.size()) {

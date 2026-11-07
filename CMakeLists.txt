@@ -58,6 +58,8 @@ set(GOFI_CORE_SOURCES
     src/core/AnalyticsService.cpp
     src/core/AmbientSoundService.h
     src/core/AmbientSoundService.cpp
+    src/core/SystemHookService.h
+    src/core/SystemHookService.cpp
     src/core/TaskTimer.h
     src/core/TaskTimer.cpp
     src/core/NotificationService.h

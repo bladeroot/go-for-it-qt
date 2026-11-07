@@ -5,6 +5,7 @@
 #include "core/NotificationService.h"
 #include "core/Schedule.h"
 #include "core/ShortcutManager.h"
+#include "core/SystemHookService.h"
 #include "todotxt/TaskFilterProxyModel.h"
 #include "todotxt/TaskStoreModel.h"
 #include "todotxt/TxtTask.h"
@@ -820,6 +821,68 @@ private slots:
         QCOMPARE(prio2, TxtTask::NoPriority);    // none
 
         QFile::remove(testDb);
+    }
+
+    void testSystemHookServiceAndFocusSettings() {
+        const QString testDb = QStringLiteral("/tmp/test_gofi_hooks.db");
+        QFile::remove(testDb);
+
+        AppController controller(QString(), testDb);
+        SettingsManager* settings = controller.settings();
+        SystemHookService* hooks = controller.systemHooks();
+        QVERIFY(settings != nullptr);
+        QVERIFY(hooks != nullptr);
+
+        // Test focus & hook settings
+        bool signalEmitted = false;
+        connect(settings, &SettingsManager::hookSettingsChanged, [&signalEmitted]() {
+            signalEmitted = true;
+        });
+
+        settings->setDndFocusEnabled(true);
+        QVERIFY(settings->dndFocusEnabled());
+        QVERIFY(signalEmitted);
+
+        signalEmitted = false;
+        settings->setInhibitSleepEnabled(true);
+        QVERIFY(settings->inhibitSleepEnabled());
+        QVERIFY(signalEmitted);
+
+        signalEmitted = false;
+        settings->setCustomHooksEnabled(true);
+        QVERIFY(settings->customHooksEnabled());
+        QVERIFY(signalEmitted);
+
+        settings->setHookWorkStartCommand(QStringLiteral("echo 'working'"));
+        QCOMPARE(settings->hookWorkStartCommand(), QStringLiteral("echo 'working'"));
+
+        settings->setHookTaskCompletedCommand(QStringLiteral("echo 'done'"));
+        QCOMPARE(settings->hookTaskCompletedCommand(), QStringLiteral("echo 'done'"));
+
+        // Test hooks directory creation and sample script
+        const QString hooksDir = QStringLiteral("/tmp/test_gofi_hooks");
+        QDir(hooksDir).removeRecursively();
+        hooks->setCustomHooksDirectory(hooksDir);
+        const QString dirPath = hooks->hooksDirectory();
+        QCOMPARE(dirPath, hooksDir);
+        QVERIFY(QDir(dirPath).exists());
+        QVERIFY(QFile::exists(QDir(dirPath).filePath(QStringLiteral("sample_hook.sh"))));
+
+        // Test testHook execution
+        QVERIFY(hooks->testHook(QStringLiteral("work_start")));
+        QVERIFY(hooks->testHook(QStringLiteral("task_completed")));
+        QVERIFY(!hooks->testHook(QStringLiteral("invalid_event")));
+
+        // Test timer start triggers work_start hook / DND
+        controller.addNewTask(QStringLiteral("Test Task for Hook @focus"));
+        controller.setActiveTodoRow(0);
+        controller.timer()->start();
+        QVERIFY(controller.timer()->isRunning());
+        controller.timer()->stop();
+        QVERIFY(!controller.timer()->isRunning());
+
+        QFile::remove(testDb);
+        QDir(hooksDir).removeRecursively();
     }
 };
 

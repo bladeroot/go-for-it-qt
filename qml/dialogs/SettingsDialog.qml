@@ -7,8 +7,8 @@ Dialog {
     id: settingsDialogRoot
     title: qsTr("Settings")
     anchors.centerIn: parent
-    width: 480
-    height: 460
+    width: 520
+    height: 480
     modal: true
     standardButtons: Dialog.Close
 
@@ -28,6 +28,7 @@ Dialog {
             TabButton { text: qsTr("Shortcuts") }
             TabButton { text: qsTr("Plugins") }
             TabButton { text: qsTr("Storage") }
+            TabButton { text: qsTr("Hooks & Focus") }
         }
 
         StackLayout {
@@ -502,6 +503,161 @@ Dialog {
 
                     Label {
                         id: storageStatusLabel
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 12
+                        color: palette.highlight
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // 7. Hooks & Focus Page
+            ScrollView {
+                clip: true
+                ColumnLayout {
+                    width: settingsDialogRoot.availableWidth - 20
+                    spacing: 10
+
+                    Label { text: qsTr("Focus Mode System Integrations"); font.bold: true }
+
+                    CheckBox {
+                        text: qsTr("Enable 'Do Not Disturb' (DND) during Work phase")
+                        checked: app.settings.dndFocusEnabled
+                        onToggled: app.settings.dndFocusEnabled = checked
+                    }
+
+                    CheckBox {
+                        text: qsTr("Prevent screen locking / sleep during Work phase")
+                        checked: app.settings.inhibitSleepEnabled
+                        onToggled: app.settings.inhibitSleepEnabled = checked
+                    }
+
+                    MenuSeparator { Layout.fillWidth: true }
+
+                    Label { text: qsTr("Custom System Event Hooks"); font.bold: true }
+
+                    CheckBox {
+                        text: qsTr("Enable custom hook commands and scripts")
+                        checked: app.settings.customHooksEnabled
+                        onToggled: app.settings.customHooksEnabled = checked
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: qsTr("Variables passed: $GOFI_EVENT, $GOFI_TASK_TITLE, $GOFI_TASK_KEY, $GOFI_PHASE, $GOFI_DURATION_SEC")
+                        font.pixelSize: 11
+                        color: palette.placeholderText
+                    }
+
+                    // On work start
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: qsTr("Work session started (on_work_start):"); font.pixelSize: 12 }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: workStartCmdField
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("e.g. slack-status focus || true")
+                                text: app.settings.hookWorkStartCommand
+                                onEditingFinished: app.settings.hookWorkStartCommand = text
+                            }
+                            Button {
+                                text: qsTr("Test")
+                                onClicked: {
+                                    app.systemHooks.testHook("work_start")
+                                    hookStatusLabel.text = qsTr("Tested 'work_start' hook.")
+                                }
+                            }
+                        }
+                    }
+
+                    // On break start
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: qsTr("Break session started (on_break_start):"); font.pixelSize: 12 }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: breakStartCmdField
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("e.g. slack-status active || true")
+                                text: app.settings.hookBreakStartCommand
+                                onEditingFinished: app.settings.hookBreakStartCommand = text
+                            }
+                            Button {
+                                text: qsTr("Test")
+                                onClicked: {
+                                    app.systemHooks.testHook("break_start")
+                                    hookStatusLabel.text = qsTr("Tested 'break_start' hook.")
+                                }
+                            }
+                        }
+                    }
+
+                    // On pomodoro completed
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: qsTr("Pomodoro interval completed (on_pomodoro_completed):"); font.pixelSize: 12 }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: pomodoroCompletedCmdField
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("e.g. notify-send 'Pomodoro finished!'")
+                                text: app.settings.hookPomodoroCompletedCommand
+                                onEditingFinished: app.settings.hookPomodoroCompletedCommand = text
+                            }
+                            Button {
+                                text: qsTr("Test")
+                                onClicked: {
+                                    app.systemHooks.testHook("pomodoro_completed")
+                                    hookStatusLabel.text = qsTr("Tested 'pomodoro_completed' hook.")
+                                }
+                            }
+                        }
+                    }
+
+                    // On task completed
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: qsTr("Task marked Done (on_task_completed):"); font.pixelSize: 12 }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: taskCompletedCmdField
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("e.g. echo \"Done: $GOFI_TASK_TITLE\" >> ~/completed.log")
+                                text: app.settings.hookTaskCompletedCommand
+                                onEditingFinished: app.settings.hookTaskCompletedCommand = text
+                            }
+                            Button {
+                                text: qsTr("Test")
+                                onClicked: {
+                                    app.systemHooks.testHook("task_completed")
+                                    hookStatusLabel.text = qsTr("Tested 'task_completed' hook.")
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("📂 Open Scripts Folder (~/.config/go-for-it/hooks)")
+                            onClicked: app.systemHooks.openHooksFolder()
+                        }
+                    }
+
+                    Label {
+                        id: hookStatusLabel
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
                         font.pixelSize: 12
