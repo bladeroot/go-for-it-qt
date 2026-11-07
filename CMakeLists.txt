@@ -39,7 +39,9 @@ if(COMMAND qt_standard_project_setup)
 endif()
 if(COMMAND qt_policy)
     qt_policy(SET QTP0001 NEW)
-    qt_policy(SET QTP0004 NEW)
+    if(QT_VERSION VERSION_GREATER_EQUAL "6.8.0")
+        qt_policy(SET QTP0004 NEW)
+    endif()
 endif()
 
 set(GOFI_CORE_SOURCES
