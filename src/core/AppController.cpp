@@ -173,8 +173,7 @@ void AppController::selectListById(const QString& listId) {
     setShowingOverview(false);
     emit currentListChanged();
 
-    if (entry.provider == QStringLiteral("Jira") || entry.provider == QStringLiteral("YouTrack")
-        || entry.provider == QStringLiteral("GitHub") || entry.provider == QStringLiteral("GitLab")) {
+    if (entry.provider != QStringLiteral("SQLite") && entry.provider != QStringLiteral("Todo.txt")) {
         m_issueTracker.syncListIssues(entry);
     }
 }
@@ -273,8 +272,7 @@ void AppController::syncAllRemoteLists() {
         if (m_isMultiListView && !m_activeFilterListIds.isEmpty() && !m_activeFilterListIds.contains(entry.id)) {
             continue;
         }
-        if (entry.provider == QStringLiteral("Jira") || entry.provider == QStringLiteral("YouTrack")
-            || entry.provider == QStringLiteral("GitHub") || entry.provider == QStringLiteral("GitLab")) {
+        if (entry.provider != QStringLiteral("SQLite") && entry.provider != QStringLiteral("Todo.txt")) {
             m_issueTracker.syncListIssues(entry);
         }
     }
@@ -349,8 +347,7 @@ void AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QSt
     const int listIdx = m_listManager.indexOfId(targetListId);
     if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
         const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
-        if (listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack")
-            || listEntry.provider == QStringLiteral("GitHub") || listEntry.provider == QStringLiteral("GitLab")) {
+        if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")) {
             m_issueTracker.updateIssueDescription(listEntry, task.jiraKey(), details);
         }
     }
@@ -377,8 +374,7 @@ void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QStrin
 
     if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
         const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
-        if (listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack")
-            || listEntry.provider == QStringLiteral("GitHub") || listEntry.provider == QStringLiteral("GitLab")) {
+        if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")) {
             m_issueTracker.postIssueComment(listEntry, task.jiraKey(), commentText);
         }
     }
@@ -560,8 +556,7 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
     const int listIdx = m_listManager.indexOfId(targetListId);
     if (listIdx >= 0 && !jiraKey.isEmpty()) {
         const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
-        if ((listEntry.provider == QStringLiteral("Jira") || listEntry.provider == QStringLiteral("YouTrack")
-             || listEntry.provider == QStringLiteral("GitHub") || listEntry.provider == QStringLiteral("GitLab"))
+        if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")
             && listEntry.autoWorklog) {
             m_issueTracker.postWorklog(listEntry, activeTaskId, logId, jiraKey, startTimeUtc, runtimeSeconds);
         }

@@ -134,6 +134,8 @@ ItemDelegate {
                 if (rowDelegate.listProvider === "GitLab") return "#e24329"
                 if (rowDelegate.listProvider === "Jira") return "#0052cc"
                 if (rowDelegate.listProvider === "YouTrack") return "#e02f5c"
+                if (rowDelegate.listProvider === "Redmine") return "#d32f2f"
+                if (rowDelegate.listProvider === "Todoist") return "#e44332"
                 return "#5c6b73"
             }
             opacity: 0.85

@@ -66,10 +66,14 @@ public:
     static QVector<RemoteIssueItem> parseGitHubIssuesJson(const QByteArray& jsonBytes);
     static QVector<RemoteIssueItem> parseGitLabIssuesJson(const QByteArray& jsonBytes);
     static QVector<RemoteIssueItem> parseGitLabMergeRequestsJson(const QByteArray& jsonBytes);
+    static QVector<RemoteIssueItem> parseRedmineIssuesJson(const QByteArray& jsonBytes);
+    static QVector<RemoteIssueItem> parseTodoistTasksJson(const QByteArray& jsonBytes);
     static QVariantList parseJiraStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
     static QVariantList parseYouTrackStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
     static QVariantList parseGitHubStatuses(const QVariantMap& existingMapping = {});
     static QVariantList parseGitLabStatuses(const QVariantMap& existingMapping = {});
+    static QVariantList parseRedmineStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
+    static QVariantList parseTodoistStatuses(const QVariantMap& existingMapping = {});
     static QString mapRemoteStatusToLocal(const QString& remoteStatus,
                                           const QString& categoryHint = {},
                                           const QVariantMap& customMapping = {});
@@ -96,6 +100,8 @@ private:
     void fetchYouTrackIssues(const TodoListEntry& entry);
     void fetchGitHubIssues(const TodoListEntry& entry);
     void fetchGitLabIssues(const TodoListEntry& entry);
+    void fetchRedmineIssues(const TodoListEntry& entry);
+    void fetchTodoistTasks(const TodoListEntry& entry);
     void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName);
 
     QNetworkAccessManager m_nam;

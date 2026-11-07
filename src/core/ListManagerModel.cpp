@@ -182,6 +182,8 @@ QString ListManagerModel::saveListConfig(const QVariantMap& config, const QStrin
         entry.jiraUrl = QStringLiteral("https://api.github.com");
     } else if (entry.provider == QStringLiteral("GitLab") && entry.jiraUrl.isEmpty()) {
         entry.jiraUrl = QStringLiteral("https://gitlab.com");
+    } else if (entry.provider == QStringLiteral("Todoist") && entry.jiraUrl.isEmpty()) {
+        entry.jiraUrl = QStringLiteral("https://api.todoist.com");
     }
     entry.jiraUser = config.value(QStringLiteral("jiraUser")).toString().trimmed();
     entry.jiraJql = config.value(QStringLiteral("jiraJql")).toString().trimmed();

@@ -284,6 +284,62 @@ private slots:
         QCOMPARE(mrs[0].durationSeconds, 1800U);
     }
 
+    void testRedmineIssuesParser() {
+        const QByteArray rmJson = QByteArray(
+            "{"
+            "  \"issues\": ["
+            "    {"
+            "      \"id\": 1024,"
+            "      \"project\": {\"id\": 3, \"name\": \"Mobile Client\", \"identifier\": \"mobile-client\"},"
+            "      \"tracker\": {\"id\": 1, \"name\": \"Defect\"},"
+            "      \"status\": {\"id\": 2, \"name\": \"In Progress\", \"is_closed\": false},"
+            "      \"priority\": {\"id\": 4, \"name\": \"High\"},"
+            "      \"subject\": \"Crash on push notification\","
+            "      \"description\": \"Stacktrace details\","
+            "      \"estimated_hours\": 2.5"
+            "    }"
+            "  ],"
+            "  \"total_count\": 1"
+            "}"
+        );
+
+        const QVector<RemoteIssueItem> items = IssueTrackerService::parseRedmineIssuesJson(rmJson);
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items[0].key, QStringLiteral("RM#mobile-client#1024"));
+        QVERIFY(items[0].description.contains(QStringLiteral("RM#1024 Crash on push notification")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+mobile-client")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+Defect")));
+        QVERIFY(items[0].description.contains(QStringLiteral("@In_Progress")));
+        QCOMPARE(items[0].details, QStringLiteral("Stacktrace details"));
+        QCOMPARE(items[0].remoteStatus, QStringLiteral("In Progress"));
+        QCOMPARE(items[0].durationSeconds, 9000U);
+    }
+
+    void testTodoistTasksParser() {
+        const QByteArray tdJson = QByteArray(
+            "["
+            "  {"
+            "    \"id\": \"7723910\","
+            "    \"content\": \"Refactor database migration\","
+            "    \"description\": \"Clean up old columns\","
+            "    \"is_completed\": false,"
+            "    \"priority\": 4,"
+            "    \"labels\": [\"backend\", \"p1\"]"
+            "  }"
+            "]"
+        );
+
+        const QVector<RemoteIssueItem> items = IssueTrackerService::parseTodoistTasksJson(tdJson);
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items[0].key, QStringLiteral("TD#7723910"));
+        QVERIFY(items[0].description.contains(QStringLiteral("TD#7723910 Refactor database migration")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+backend")));
+        QVERIFY(items[0].description.contains(QStringLiteral("@open")));
+        QCOMPARE(items[0].priority, 0);
+        QCOMPARE(items[0].details, QStringLiteral("Clean up old columns"));
+        QCOMPARE(items[0].remoteStatus, QStringLiteral("open"));
+    }
+
     void testMultiListDatabaseLoading() {
         DatabaseManager& db = DatabaseManager::instance();
         db.initialize(QStringLiteral(":memory:"));

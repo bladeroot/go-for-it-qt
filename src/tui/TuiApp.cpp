@@ -816,12 +816,14 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
     }
     if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i" || seq == "h" || seq == "l") {
         if (m_listEditRow == 1) {
-            // Cycle provider: SQLite -> Jira -> YouTrack -> GitHub -> GitLab
+            // Cycle provider: SQLite -> Jira -> YouTrack -> GitHub -> GitLab -> Redmine -> Todoist
             const QString cur = m_editingListCfg.value(QStringLiteral("provider")).toString();
             if (cur == QStringLiteral("SQLite")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
             else if (cur == QStringLiteral("Jira")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("YouTrack");
             else if (cur == QStringLiteral("YouTrack")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("GitHub");
             else if (cur == QStringLiteral("GitHub")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("GitLab");
+            else if (cur == QStringLiteral("GitLab")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Redmine");
+            else if (cur == QStringLiteral("Redmine")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Todoist");
             else m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("SQLite");
             return;
         }
@@ -1677,6 +1679,8 @@ void TuiApp::render() {
                 else if (e.provider == QStringLiteral("GitLab")) provColor = FG_ORANGE;
                 else if (e.provider == QStringLiteral("Jira")) provColor = FG_CYAN;
                 else if (e.provider == QStringLiteral("YouTrack")) provColor = FG_YELLOW;
+                else if (e.provider == QStringLiteral("Redmine")) provColor = FG_RED;
+                else if (e.provider == QStringLiteral("Todoist")) provColor = FG_ORANGE;
                 else if (e.provider == QStringLiteral("SQLite")) provColor = FG_GREEN;
 
                 const QString provBadge = provColor + QStringLiteral("[%1]").arg(padRight(e.provider, 8)) + ESC_RESET;
@@ -1771,6 +1775,12 @@ void TuiApp::render() {
                     provCols = 7;
                 } else if (prov == QStringLiteral("YouTrack")) {
                     provBadge = FG_YELLOW + QStringLiteral("[YT] ") + ESC_RESET;
+                    provCols = 5;
+                } else if (prov == QStringLiteral("Redmine")) {
+                    provBadge = FG_RED + QStringLiteral("[RM] ") + ESC_RESET;
+                    provCols = 5;
+                } else if (prov == QStringLiteral("Todoist")) {
+                    provBadge = FG_ORANGE + QStringLiteral("[TD] ") + ESC_RESET;
                     provCols = 5;
                 } else if (prov == QStringLiteral("SQLite")) {
                     provBadge = FG_GREEN + QStringLiteral("[Local] ") + ESC_RESET;

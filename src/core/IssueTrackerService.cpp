@@ -176,6 +176,18 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
             req.setRawHeader("PRIVATE-TOKEN", token.toUtf8());
             req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
         }
+    } else if (entry.provider == QStringLiteral("Redmine")) {
+        if (!token.isEmpty()) {
+            req.setRawHeader("X-Redmine-API-Key", token.toUtf8());
+        }
+        if (!user.isEmpty() && !token.isEmpty()) {
+            const QByteArray credentials = (user + QLatin1Char(':') + token).toUtf8().toBase64();
+            req.setRawHeader("Authorization", QByteArray("Basic ") + credentials);
+        }
+    } else if (entry.provider == QStringLiteral("Todoist")) {
+        if (!token.isEmpty()) {
+            req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
+        }
     } else if (!forceBearerAuth && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
         const QByteArray credentials = (user + QLatin1Char(':') + token).toUtf8().toBase64();
         req.setRawHeader("Authorization", QByteArray("Basic ") + credentials);
@@ -700,6 +712,129 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
     return result;
 }
 
+QVector<RemoteIssueItem> IssueTrackerService::parseRedmineIssuesJson(const QByteArray& jsonBytes) {
+    QVector<RemoteIssueItem> result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isObject()) return result;
+
+    const QJsonArray issues = doc.object().value(QStringLiteral("issues")).toArray();
+    result.reserve(issues.size());
+
+    for (const QJsonValue& val : issues) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const int id = obj.value(QStringLiteral("id")).toInt();
+        if (id <= 0) continue;
+
+        const QString subject = obj.value(QStringLiteral("subject")).toString().trimmed();
+        const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
+
+        QString statusName;
+        const QJsonObject statusObj = obj.value(QStringLiteral("status")).toObject();
+        statusName = statusObj.value(QStringLiteral("name")).toString().trimmed();
+        const bool isClosed = statusObj.value(QStringLiteral("is_closed")).toBool(false);
+
+        QString projectName;
+        QString projectIdent;
+        const QJsonObject projObj = obj.value(QStringLiteral("project")).toObject();
+        projectName = projObj.value(QStringLiteral("name")).toString().trimmed();
+        projectIdent = projObj.value(QStringLiteral("identifier")).toString().trimmed();
+        if (projectIdent.isEmpty()) {
+            projectIdent = sanitizeTagToken(projectName);
+        }
+
+        QString trackerName;
+        const QJsonObject trackerObj = obj.value(QStringLiteral("tracker")).toObject();
+        trackerName = trackerObj.value(QStringLiteral("name")).toString().trimmed();
+
+        QString priorityName;
+        const QJsonObject prioObj = obj.value(QStringLiteral("priority")).toObject();
+        priorityName = prioObj.value(QStringLiteral("name")).toString().trimmed();
+        const quint8 prio = mapPriorityName(priorityName);
+
+        const double estHours = obj.value(QStringLiteral("estimated_hours")).toDouble(0.0);
+        const quint32 durationSeconds = static_cast<quint32>(qMax(0.0, estHours * 3600.0));
+
+        const QString displayKey = QStringLiteral("RM#%1").arg(id);
+        const QString key = !projectIdent.isEmpty()
+            ? QStringLiteral("RM#%1#%2").arg(projectIdent).arg(id)
+            : displayKey;
+
+        QString desc = displayKey + QLatin1Char(' ') + (subject.isEmpty() ? displayKey : subject);
+        if (!projectIdent.isEmpty()) {
+            desc += QStringLiteral(" +") + sanitizeTagToken(projectIdent);
+        }
+        if (!trackerName.isEmpty()) {
+            desc += QStringLiteral(" +") + sanitizeTagToken(trackerName);
+        }
+        if (!statusName.isEmpty()) {
+            desc += QStringLiteral(" @") + sanitizeTagToken(statusName);
+        }
+
+        RemoteIssueItem item;
+        item.key = key;
+        item.description = desc;
+        item.details = description;
+        item.remoteStatus = isClosed ? QStringLiteral("Closed") : (statusName.isEmpty() ? QStringLiteral("open") : statusName);
+        item.priority = prio;
+        item.durationSeconds = durationSeconds;
+        result.append(std::move(item));
+    }
+    return result;
+}
+
+QVector<RemoteIssueItem> IssueTrackerService::parseTodoistTasksJson(const QByteArray& jsonBytes) {
+    QVector<RemoteIssueItem> result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isArray()) return result;
+
+    const QJsonArray tasks = doc.array();
+    result.reserve(tasks.size());
+
+    for (const QJsonValue& val : tasks) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const QString id = obj.value(QStringLiteral("id")).toVariant().toString().trimmed();
+        if (id.isEmpty()) continue;
+
+        const QString content = obj.value(QStringLiteral("content")).toString().trimmed();
+        const QString description = obj.value(QStringLiteral("description")).toString().trimmed();
+        const bool isCompleted = obj.value(QStringLiteral("is_completed")).toBool(false);
+        const int priorityNum = obj.value(QStringLiteral("priority")).toInt(1);
+
+        quint8 prio = TxtTask::NoPriority;
+        if (priorityNum >= 4) prio = 0;      // (A) - p1
+        else if (priorityNum == 3) prio = 1; // (B) - p2
+        else if (priorityNum == 2) prio = 2; // (C) - p3
+
+        QStringList labels;
+        const QJsonArray labelsArr = obj.value(QStringLiteral("labels")).toArray();
+        for (const QJsonValue& lVal : labelsArr) {
+            const QString lStr = lVal.toString().trimmed();
+            if (!lStr.isEmpty()) {
+                labels.append(QStringLiteral("+") + sanitizeTagToken(lStr));
+            }
+        }
+
+        const QString displayKey = QStringLiteral("TD#%1").arg(id);
+        QString desc = displayKey + QLatin1Char(' ') + (content.isEmpty() ? displayKey : content);
+        for (const QString& lb : labels) {
+            desc += QLatin1Char(' ') + lb;
+        }
+        desc += isCompleted ? QStringLiteral(" @completed") : QStringLiteral(" @open");
+
+        RemoteIssueItem item;
+        item.key = displayKey;
+        item.description = desc;
+        item.details = description;
+        item.remoteStatus = isCompleted ? QStringLiteral("completed") : QStringLiteral("open");
+        item.priority = prio;
+        item.durationSeconds = 0;
+        result.append(std::move(item));
+    }
+    return result;
+}
+
 QVariantList IssueTrackerService::parseGitHubStatuses(const QVariantMap& existingMapping) {
     const QStringList statuses = {
         QStringLiteral("open"),
@@ -733,6 +868,46 @@ QVariantList IssueTrackerService::parseGitLabStatuses(const QVariantMap& existin
         });
     }
     return result;
+}
+
+QVariantList IssueTrackerService::parseRedmineStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping) {
+    QVariantList list;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isObject()) return list;
+
+    const QJsonArray arr = doc.object().value(QStringLiteral("issue_statuses")).toArray();
+    for (const QJsonValue& val : arr) {
+        if (!val.isObject()) continue;
+        const QJsonObject obj = val.toObject();
+        const QString name = obj.value(QStringLiteral("name")).toString().trimmed();
+        if (name.isEmpty()) continue;
+        const bool isClosed = obj.value(QStringLiteral("is_closed")).toBool(false);
+
+        QVariantMap entry;
+        entry[QStringLiteral("remoteName")] = name;
+        entry[QStringLiteral("localStatus")] = mapRemoteStatusToLocal(
+            name,
+            isClosed ? QStringLiteral("Done") : QString(),
+            existingMapping
+        );
+        list.append(entry);
+    }
+    return list;
+}
+
+QVariantList IssueTrackerService::parseTodoistStatuses(const QVariantMap& existingMapping) {
+    QVariantList list;
+    const QStringList standard = {
+        QStringLiteral("open"),
+        QStringLiteral("completed")
+    };
+    for (const QString& s : standard) {
+        QVariantMap entry;
+        entry[QStringLiteral("remoteName")] = s;
+        entry[QStringLiteral("localStatus")] = mapRemoteStatusToLocal(s, {}, existingMapping);
+        list.append(entry);
+    }
+    return list;
 }
 
 QVariantList IssueTrackerService::parseJiraStatusesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping) {
@@ -809,6 +984,10 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
     }
     if (provider == QStringLiteral("GitLab")) {
         emit remoteStatusesLoaded(parseGitLabStatuses(existingMapping));
+        return;
+    }
+    if (provider == QStringLiteral("Todoist")) {
+        emit remoteStatusesLoaded(parseTodoistStatuses(existingMapping));
         return;
     }
 
@@ -895,6 +1074,19 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
                 emit remoteStatusesLoaded(parseYouTrackStatusesJson(fbReply->readAll(), existingMapping));
             });
         });
+    } else if (provider == QStringLiteral("Redmine")) {
+        QUrl url(baseUrl + QStringLiteral("/issue_statuses.json"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, tempEntry, false);
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, existingMapping]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                emit remoteStatusesError(tr("Failed to load Redmine statuses: %1").arg(reply->errorString()));
+                return;
+            }
+            emit remoteStatusesLoaded(parseRedmineStatusesJson(reply->readAll(), existingMapping));
+        });
     }
 }
 
@@ -907,6 +1099,10 @@ void IssueTrackerService::syncListIssues(const TodoListEntry& listEntry) {
         fetchGitHubIssues(listEntry);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
         fetchGitLabIssues(listEntry);
+    } else if (listEntry.provider == QStringLiteral("Redmine")) {
+        fetchRedmineIssues(listEntry);
+    } else if (listEntry.provider == QStringLiteral("Todoist")) {
+        fetchTodoistTasks(listEntry);
     }
 }
 
@@ -1204,6 +1400,80 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     }
 }
 
+void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
+    const QString baseUrl = normalizeBaseUrl(entry.jiraUrl);
+    if (baseUrl.isEmpty()) {
+        const QString msg = tr("Redmine Server URL is empty.");
+        setStatusMessage(msg);
+        emit syncFailed(entry.id, msg);
+        return;
+    }
+
+    setSyncing(true);
+    setStatusMessage(tr("Syncing issues from Redmine..."));
+
+    QString queryStr = entry.jiraJql.trimmed();
+    if (queryStr.isEmpty()) {
+        queryStr = QStringLiteral("assigned_to_id=me&status_id=open&limit=100");
+    } else {
+        if (!queryStr.contains(QStringLiteral("limit="))) {
+            queryStr += QStringLiteral("&limit=100");
+        }
+    }
+    if (queryStr.startsWith(QLatin1Char('?'))) {
+        queryStr.remove(0, 1);
+    }
+
+    QUrl url(baseUrl + QStringLiteral("/issues.json?") + queryStr);
+    QNetworkRequest req(url);
+    applyAuthHeader(req, entry);
+
+    QNetworkReply* reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setSyncing(false);
+            const QString errMsg = tr("Redmine sync error: %1").arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
+        }
+
+        const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(reply->readAll());
+        processSyncedItems(entry, items, QStringLiteral("Redmine"));
+    });
+}
+
+void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
+    setSyncing(true);
+    setStatusMessage(tr("Syncing tasks from Todoist..."));
+
+    const QString apiUrl = QStringLiteral("https://api.todoist.com/rest/v2/tasks");
+    const QString queryStr = entry.jiraJql.trimmed();
+    QUrl url(apiUrl);
+    if (!queryStr.isEmpty()) {
+        url.setQuery(queryStr.startsWith(QLatin1Char('?')) ? queryStr.mid(1) : queryStr);
+    }
+
+    QNetworkRequest req(url);
+    applyAuthHeader(req, entry);
+
+    QNetworkReply* reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setSyncing(false);
+            const QString errMsg = tr("Todoist sync error: %1").arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
+        }
+
+        const QVector<RemoteIssueItem> items = parseTodoistTasksJson(reply->readAll());
+        processSyncedItems(entry, items, QStringLiteral("Todoist"));
+    });
+}
+
 void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                                       qint64 taskId,
                                       qint64 activityLogId,
@@ -1368,6 +1638,62 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             if (reply->error() == QNetworkReply::NoError) {
                 DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
                 setStatusMessage(tr("Logged %1m to GitLab %2").arg(minutes).arg(issueKey));
+                emit worklogPosted(issueKey, minutes * 60U);
+            }
+        });
+    } else if (listEntry.provider == QStringLiteral("Redmine")) {
+        QString numStr;
+        if (issueKey.contains(QLatin1Char('#'))) {
+            numStr = issueKey.split(QLatin1Char('#')).last();
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
+        if (numStr.isEmpty()) return;
+
+        const double hours = qMax(0.01, static_cast<double>(runtimeSeconds) / 3600.0);
+        QUrl url(baseUrl + QStringLiteral("/time_entries.json"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject timeEntryObj{
+            {QStringLiteral("issue_id"), numStr.toInt()},
+            {QStringLiteral("hours"), hours},
+            {QStringLiteral("spent_on"), startTimeUtc.toUTC().toString(QStringLiteral("yyyy-MM-dd"))},
+            {QStringLiteral("comments"), QStringLiteral("Logged via Go for It Qt Pomodoro timer")}
+        };
+        QJsonObject payload{{QStringLiteral("time_entry"), timeEntryObj}};
+
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, runtimeSeconds]() {
+            reply->deleteLater();
+            if (reply->error() == QNetworkReply::NoError) {
+                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
+                setStatusMessage(tr("Logged %1m to Redmine %2").arg(runtimeSeconds / 60U).arg(issueKey));
+                emit worklogPosted(issueKey, runtimeSeconds);
+            }
+        });
+    } else if (listEntry.provider == QStringLiteral("Todoist")) {
+        QString taskId = issueKey;
+        if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
+        if (taskId.isEmpty()) return;
+
+        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("task_id"), taskId},
+            {QStringLiteral("content"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
+        };
+
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+            reply->deleteLater();
+            if (reply->error() == QNetworkReply::NoError) {
+                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
+                setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
                 emit worklogPosted(issueKey, minutes * 60U);
             }
         });
@@ -1711,6 +2037,53 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             }
             setStatusMessage(tr("Updated description on GitLab %1.").arg(issueKey));
         });
+    } else if (listEntry.provider == QStringLiteral("Redmine")) {
+        QString numStr;
+        if (issueKey.contains(QLatin1Char('#'))) {
+            numStr = issueKey.split(QLatin1Char('#')).last();
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
+        if (numStr.isEmpty()) return;
+
+        QUrl url(baseUrl + QStringLiteral("/issues/") + numStr + QStringLiteral(".json"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("issue"), QJsonObject{{QStringLiteral("description"), markdownDetails}}}
+        };
+        QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to update description on Redmine (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Updated description on Redmine issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("Todoist")) {
+        QString taskId = issueKey;
+        if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
+        if (taskId.isEmpty()) return;
+
+        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + taskId);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("description"), markdownDetails}
+        };
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to update description on Todoist (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Updated description on Todoist task %1.").arg(issueKey));
+        });
     }
 }
 
@@ -1877,6 +2250,54 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                 return;
             }
             setStatusMessage(tr("Posted comment to GitLab %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("Redmine")) {
+        QString numStr;
+        if (issueKey.contains(QLatin1Char('#'))) {
+            numStr = issueKey.split(QLatin1Char('#')).last();
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
+        if (numStr.isEmpty()) return;
+
+        QUrl url(baseUrl + QStringLiteral("/issues/") + numStr + QStringLiteral(".json"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("issue"), QJsonObject{{QStringLiteral("notes"), markdownComment}}}
+        };
+        QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to post comment to Redmine (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Posted comment to Redmine issue %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("Todoist")) {
+        QString taskId = issueKey;
+        if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
+        if (taskId.isEmpty()) return;
+
+        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{
+            {QStringLiteral("task_id"), taskId},
+            {QStringLiteral("content"), markdownComment}
+        };
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setStatusMessage(tr("Failed to post comment to Todoist (%1): %2").arg(issueKey, reply->errorString()));
+                return;
+            }
+            setStatusMessage(tr("Posted comment to Todoist task %1.").arg(issueKey));
         });
     }
 }
