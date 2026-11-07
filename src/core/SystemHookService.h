@@ -23,6 +23,9 @@ public:
                                QObject* parent = nullptr);
     ~SystemHookService() override;
 
+    static void setSystemIntegrationEnabled(bool enabled);
+    [[nodiscard]] static bool isSystemIntegrationEnabled();
+
     [[nodiscard]] bool isDndFocusActive() const noexcept { return m_dndActive; }
     [[nodiscard]] bool isSleepInhibitActive() const noexcept { return m_sleepInhibitActive; }
     [[nodiscard]] QString hooksDirectory() const;

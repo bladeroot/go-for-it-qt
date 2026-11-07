@@ -20,7 +20,7 @@ int SettingsManager::taskDuration() const {
 
 void SettingsManager::setTaskDuration(int seconds) {
     if (taskDuration() == seconds) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/task_duration"), qMax(1, seconds));
+    m_settings.setValue(QStringLiteral("Timer/task_duration"), qMax(1, seconds));
     rebuildSchedule();
     emit timerDurationChanged();
 }
@@ -31,7 +31,7 @@ int SettingsManager::breakDuration() const {
 
 void SettingsManager::setBreakDuration(int seconds) {
     if (breakDuration() == seconds) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/break_duration"), qMax(0, seconds));
+    m_settings.setValue(QStringLiteral("Timer/break_duration"), qMax(0, seconds));
     rebuildSchedule();
     emit timerDurationChanged();
 }
@@ -42,7 +42,7 @@ int SettingsManager::longBreakDuration() const {
 
 void SettingsManager::setLongBreakDuration(int seconds) {
     if (longBreakDuration() == seconds) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/long_break_duration"), qMax(0, seconds));
+    m_settings.setValue(QStringLiteral("Timer/long_break_duration"), qMax(0, seconds));
     rebuildSchedule();
     emit timerDurationChanged();
 }
@@ -53,7 +53,7 @@ int SettingsManager::pomodoroPeriod() const {
 
 void SettingsManager::setPomodoroPeriod(int period) {
     if (pomodoroPeriod() == period) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/pomodoro_period"), qMax(1, period));
+    m_settings.setValue(QStringLiteral("Timer/pomodoro_period"), qMax(1, period));
     rebuildSchedule();
     emit timerDurationChanged();
 }
@@ -64,7 +64,7 @@ int SettingsManager::reminderTime() const {
 
 void SettingsManager::setReminderTime(int seconds) {
     if (reminderTime() == seconds) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/reminder_time"), qBound(0, seconds, 600));
+    m_settings.setValue(QStringLiteral("Timer/reminder_time"), qBound(0, seconds, 600));
     emit reminderTimeChanged();
 }
 
@@ -74,7 +74,7 @@ int SettingsManager::timerMode() const {
 
 void SettingsManager::setTimerMode(int mode) {
     if (timerMode() == mode) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/timer_mode"), mode);
+    m_settings.setValue(QStringLiteral("Timer/timer_mode"), mode);
     rebuildSchedule();
     emit timerModeChanged();
     emit timerDurationChanged();
@@ -89,7 +89,7 @@ QVariantList SettingsManager::customScheduleVariant() const {
 }
 
 void SettingsManager::setCustomScheduleVariant(const QVariantList& pairs) {
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/custom_schedule"), pairs);
+    m_settings.setValue(QStringLiteral("Timer/custom_schedule"), pairs);
     if (timerMode() == Custom) {
         rebuildSchedule();
         emit timerDurationChanged();
@@ -102,7 +102,7 @@ bool SettingsManager::resumeTasksAfterBreak() const {
 
 void SettingsManager::setResumeTasksAfterBreak(bool value) {
     if (resumeTasksAfterBreak() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/resume_tasks_after_break"), value);
+    m_settings.setValue(QStringLiteral("Timer/resume_tasks_after_break"), value);
     emit resumeTasksAfterBreakChanged();
 }
 
@@ -112,7 +112,7 @@ bool SettingsManager::resetTimerOnTaskSwitch() const {
 
 void SettingsManager::setResetTimerOnTaskSwitch(bool value) {
     if (resetTimerOnTaskSwitch() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Timer/reset_timer_on_task_switch"), value);
+    m_settings.setValue(QStringLiteral("Timer/reset_timer_on_task_switch"), value);
     emit resetTimerOnTaskSwitchChanged();
 }
 
@@ -122,7 +122,7 @@ bool SettingsManager::newTasksOnTop() const {
 
 void SettingsManager::setNewTasksOnTop(bool value) {
     if (newTasksOnTop() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Behavior/new_tasks_on_top"), value);
+    m_settings.setValue(QStringLiteral("Behavior/new_tasks_on_top"), value);
     emit newTasksOnTopChanged();
 }
 
@@ -166,7 +166,7 @@ int SettingsManager::colorScheme() const {
 
 void SettingsManager::setColorScheme(int scheme) {
     if (colorScheme() == scheme) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("UI/color_scheme"), scheme);
+    m_settings.setValue(QStringLiteral("UI/color_scheme"), scheme);
     emit colorSchemeChanged();
     emit useDarkThemeChanged();
 }
@@ -191,7 +191,7 @@ bool SettingsManager::useSmallToolbarIcons() const {
 
 void SettingsManager::setUseSmallToolbarIcons(bool value) {
     if (useSmallToolbarIcons() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("UI/small_toolbar_icons"), value);
+    m_settings.setValue(QStringLiteral("UI/small_toolbar_icons"), value);
     emit appearanceChanged();
 }
 
@@ -201,7 +201,7 @@ bool SettingsManager::switcherUseIcons() const {
 
 void SettingsManager::setSwitcherUseIcons(bool value) {
     if (switcherUseIcons() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("UI/switcher_use_icons"), value);
+    m_settings.setValue(QStringLiteral("UI/switcher_use_icons"), value);
     emit appearanceChanged();
 }
 
@@ -211,7 +211,7 @@ bool SettingsManager::useHeaderBar() const {
 
 void SettingsManager::setUseHeaderBar(bool value) {
     if (useHeaderBar() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("UI/use_header_bar"), value);
+    m_settings.setValue(QStringLiteral("UI/use_header_bar"), value);
     emit appearanceChanged();
 }
 
@@ -221,7 +221,7 @@ bool SettingsManager::muteSounds() const {
 
 void SettingsManager::setMuteSounds(bool value) {
     if (muteSounds() == value) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/mute"), value);
+    m_settings.setValue(QStringLiteral("Sounds/mute"), value);
     emit soundSettingsChanged();
 }
 
@@ -231,7 +231,7 @@ QString SettingsManager::reminderSoundFile() const {
 
 void SettingsManager::setReminderSoundFile(const QString& file) {
     if (reminderSoundFile() == file) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/reminder_sound_file"), file);
+    m_settings.setValue(QStringLiteral("Sounds/reminder_sound_file"), file);
     emit soundSettingsChanged();
 }
 
@@ -241,7 +241,7 @@ QString SettingsManager::breakStartSoundFile() const {
 
 void SettingsManager::setBreakStartSoundFile(const QString& file) {
     if (breakStartSoundFile() == file) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/break_start_sound_file"), file);
+    m_settings.setValue(QStringLiteral("Sounds/break_start_sound_file"), file);
     emit soundSettingsChanged();
 }
 
@@ -251,7 +251,7 @@ QString SettingsManager::breakEndSoundFile() const {
 
 void SettingsManager::setBreakEndSoundFile(const QString& file) {
     if (breakEndSoundFile() == file) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/break_end_sound_file"), file);
+    m_settings.setValue(QStringLiteral("Sounds/break_end_sound_file"), file);
     emit soundSettingsChanged();
 }
 
@@ -262,7 +262,7 @@ double SettingsManager::reminderSoundVolume() const {
 void SettingsManager::setReminderSoundVolume(double vol) {
     const double clamped = qBound(0.0, vol, 1.0);
     if (qFuzzyCompare(reminderSoundVolume(), clamped)) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/reminder_sound_volume"), clamped);
+    m_settings.setValue(QStringLiteral("Sounds/reminder_sound_volume"), clamped);
     emit soundSettingsChanged();
 }
 
@@ -273,7 +273,7 @@ double SettingsManager::breakStartSoundVolume() const {
 void SettingsManager::setBreakStartSoundVolume(double vol) {
     const double clamped = qBound(0.0, vol, 1.0);
     if (qFuzzyCompare(breakStartSoundVolume(), clamped)) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/break_start_sound_volume"), clamped);
+    m_settings.setValue(QStringLiteral("Sounds/break_start_sound_volume"), clamped);
     emit soundSettingsChanged();
 }
 
@@ -284,7 +284,7 @@ double SettingsManager::breakEndSoundVolume() const {
 void SettingsManager::setBreakEndSoundVolume(double vol) {
     const double clamped = qBound(0.0, vol, 1.0);
     if (qFuzzyCompare(breakEndSoundVolume(), clamped)) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Sounds/break_end_sound_volume"), clamped);
+    m_settings.setValue(QStringLiteral("Sounds/break_end_sound_volume"), clamped);
     emit soundSettingsChanged();
 }
 
@@ -294,7 +294,7 @@ bool SettingsManager::trayIndicatorEnabled() const {
 
 void SettingsManager::setTrayIndicatorEnabled(bool enabled) {
     if (trayIndicatorEnabled() == enabled) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Plugins/appindicator"), enabled);
+    m_settings.setValue(QStringLiteral("Plugins/appindicator"), enabled);
     emit pluginsChanged();
 }
 
@@ -304,7 +304,7 @@ bool SettingsManager::launcherIndicatorEnabled() const {
 
 void SettingsManager::setLauncherIndicatorEnabled(bool enabled) {
     if (launcherIndicatorEnabled() == enabled) return;
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("Plugins/launcherindicator"), enabled);
+    m_settings.setValue(QStringLiteral("Plugins/launcherindicator"), enabled);
     emit pluginsChanged();
 }
 
@@ -313,7 +313,7 @@ QSize SettingsManager::windowSize() const {
 }
 
 void SettingsManager::setWindowSize(const QSize& size) {
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("SavedState/window_size"), size);
+    m_settings.setValue(QStringLiteral("SavedState/window_size"), size);
 }
 
 QPoint SettingsManager::windowPosition() const {
@@ -321,7 +321,7 @@ QPoint SettingsManager::windowPosition() const {
 }
 
 void SettingsManager::setWindowPosition(const QPoint& pos) {
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("SavedState/window_pos"), pos);
+    m_settings.setValue(QStringLiteral("SavedState/window_pos"), pos);
 }
 
 void SettingsManager::setWindowWidth(int w) {
@@ -441,7 +441,7 @@ QString SettingsManager::lastLoadedListId() const {
 }
 
 void SettingsManager::setLastLoadedListId(const QString& id) {
-    DatabaseManager::instance().setSetting(QStringLiteral("lastSynced"), QStringLiteral("1")); m_settings.setValue(QStringLiteral("SavedState/last_list_id"), id);
+    m_settings.setValue(QStringLiteral("SavedState/last_list_id"), id);
 }
 
 bool SettingsManager::dndFocusEnabled() const {

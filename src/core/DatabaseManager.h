@@ -50,6 +50,7 @@ public:
     static DatabaseManager& instance();
 
     bool initialize(const QString& customDbPath = {});
+    void close();
     [[nodiscard]] bool isOpen() const;
     [[nodiscard]] QString databasePath() const { return m_dbPath; }
     bool relocateDatabase(const QString& newDbPath, bool copyExisting = true);

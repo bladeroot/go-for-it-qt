@@ -17,6 +17,23 @@
 
 namespace gofi {
 
+static bool s_systemIntegrationEnabled = true;
+
+void SystemHookService::setSystemIntegrationEnabled(bool enabled) {
+    s_systemIntegrationEnabled = enabled;
+}
+
+bool SystemHookService::isSystemIntegrationEnabled() {
+    if (!s_systemIntegrationEnabled) {
+        return false;
+    }
+    if (QStandardPaths::isTestModeEnabled() ||
+        (qEnvironmentVariableIsSet("QT_QPA_PLATFORM") && qgetenv("QT_QPA_PLATFORM") == "offscreen")) {
+        return false;
+    }
+    return true;
+}
+
 SystemHookService::SystemHookService(AppController* controller,
                                      SettingsManager* settings,
                                      TaskTimer* timer,
@@ -26,8 +43,6 @@ SystemHookService::SystemHookService(AppController* controller,
     , m_settings(settings)
     , m_timer(timer)
 {
-    ensureHooksDirectory();
-
     if (m_timer) {
         connect(m_timer, &TaskTimer::workStarted, this, &SystemHookService::onWorkStarted);
         connect(m_timer, &TaskTimer::breakStarted, this, &SystemHookService::onBreakStarted);
@@ -69,7 +84,12 @@ QString SystemHookService::hooksDirectory() const {
         return m_customHooksDirectory;
     }
     const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
-    return base + QStringLiteral("/go-for-it/hooks");
+    const QString legacyDir = base + QStringLiteral("/go-for-it/hooks");
+    const QString modernDir = base + QStringLiteral("/go-for-it-qt/hooks");
+    if (QDir(legacyDir).exists() && !QDir(modernDir).exists()) {
+        return legacyDir;
+    }
+    return modernDir;
 }
 
 void SystemHookService::setCustomHooksDirectory(const QString& path) {
@@ -139,6 +159,12 @@ void SystemHookService::applyDnd(bool enable) {
 
     if (enable == m_dndActive) return;
 
+    if (!isSystemIntegrationEnabled()) {
+        m_dndActive = enable;
+        emit dndFocusActiveChanged();
+        return;
+    }
+
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (enable) {
         // 1. Freedesktop Notifications Inhibit
@@ -161,12 +187,22 @@ void SystemHookService::applyDnd(bool enable) {
         // 2. GNOME Shell fallback: gsettings set org.gnome.desktop.notifications show-banners false
         const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP").toLower();
         if (desktop.contains(QStringLiteral("gnome")) || desktop.contains(QStringLiteral("unity"))) {
-            QProcess::execute(QStringLiteral("gsettings"),
-                             {QStringLiteral("set"),
-                              QStringLiteral("org.gnome.desktop.notifications"),
-                              QStringLiteral("show-banners"),
-                              QStringLiteral("false")});
-            m_gnomeBannersDisabled = true;
+            QProcess queryProc;
+            queryProc.start(QStringLiteral("gsettings"),
+                           {QStringLiteral("get"),
+                            QStringLiteral("org.gnome.desktop.notifications"),
+                            QStringLiteral("show-banners")});
+            if (queryProc.waitForFinished(500)) {
+                const QString val = QString::fromUtf8(queryProc.readAllStandardOutput()).trimmed();
+                if (val == QStringLiteral("true")) {
+                    QProcess::execute(QStringLiteral("gsettings"),
+                                     {QStringLiteral("set"),
+                                      QStringLiteral("org.gnome.desktop.notifications"),
+                                      QStringLiteral("show-banners"),
+                                      QStringLiteral("false")});
+                    m_gnomeBannersDisabled = true;
+                }
+            }
         }
 
         m_dndActive = true;
@@ -204,6 +240,12 @@ void SystemHookService::applySleepInhibit(bool enable) {
     }
 
     if (enable == m_sleepInhibitActive) return;
+
+    if (!isSystemIntegrationEnabled()) {
+        m_sleepInhibitActive = enable;
+        emit sleepInhibitActiveChanged();
+        return;
+    }
 
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (enable) {
@@ -262,6 +304,11 @@ void SystemHookService::runCommandOrScript(const QString& eventName,
     }
 
     if (programToRun.isEmpty()) {
+        return;
+    }
+
+    if (!isSystemIntegrationEnabled()) {
+        emit hookExecuted(eventName, true, QStringLiteral("[Simulated in test mode]"));
         return;
     }
 

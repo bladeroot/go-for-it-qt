@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QUrl>
 
 namespace gofi {
@@ -90,7 +91,9 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     updateAutoSyncTimer();
 
     connect(&m_dueReminderTimer, &QTimer::timeout, this, &AppController::checkDueReminders);
-    m_dueReminderTimer.start(15 * 60 * 1000);
+    if (!QStandardPaths::isTestModeEnabled()) {
+        m_dueReminderTimer.start(15 * 60 * 1000);
+    }
 
     connect(m_taskManager.todoModel(), &TaskStoreModel::countChanged, this, &AppController::onTodoListCountChanged);
     connect(m_taskManager.todoModel(), &TaskStoreModel::unviewedTodoCountChanged, this, &AppController::todoCountsChanged);

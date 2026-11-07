@@ -22,6 +22,7 @@ private:
 private slots:
     void initTestCase() {
         NotificationService::setAudioPlaybackEnabled(false);
+        SystemHookService::setSystemIntegrationEnabled(false);
         QVERIFY(m_testSandbox.isValid());
         const QString configDir = m_testSandbox.filePath(QStringLiteral("config"));
         const QString dataDir = m_testSandbox.filePath(QStringLiteral("data"));
@@ -41,6 +42,10 @@ private slots:
         if (m_testSandbox.isValid()) {
             m_testSandbox.remove();
         }
+    }
+
+    void cleanup() {
+        DatabaseManager::instance().close();
     }
 
     void testParseTodoTxtFullLine() {
@@ -126,13 +131,14 @@ private slots:
         const QString csvPath = tempDir.filePath(QStringLiteral("activity.csv"));
 
         QString listId;
+        int initialCount = 0;
         {
             AppController ctrl(csvPath, dbPath);
             listId = ctrl.listManager()->addList(QStringLiteral("SQLiteTestList"));
             ctrl.selectListById(listId);
             QCOMPARE(ctrl.currentListId(), listId);
 
-            const int initialCount = ctrl.todoProxyModel()->rowCount();
+            initialCount = ctrl.todoProxyModel()->rowCount();
             ctrl.addNewTask(QStringLiteral("(A) Port Go-For-It to SQLite +QtPort @dev duration:30m"));
             QCOMPARE(ctrl.todoProxyModel()->rowCount(), initialCount + 1);
 
@@ -143,13 +149,14 @@ private slots:
 
             QVERIFY(ctrl.timer()->hasActiveTask());
             ctrl.markActiveTaskDone();
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), initialCount);
             QCOMPARE(ctrl.doneProxyModel()->rowCount(), 1);
         }
 
         // Verify persistence by reloading from the same SQLite database
         const QVector<TxtTask> reloadedTodo = DatabaseManager::instance().loadTasks(listId, false);
         const QVector<TxtTask> reloadedDone = DatabaseManager::instance().loadTasks(listId, true);
-        QCOMPARE(reloadedTodo.size(), 3);
+        QCOMPARE(reloadedTodo.size(), initialCount);
         QCOMPARE(reloadedDone.size(), 1);
     }
 
@@ -562,7 +569,7 @@ private slots:
         QCOMPARE(AnalyticsService::formatDuration(7200), QStringLiteral("2h 00m"));
 
         // Temporary Database for Activity Logs
-        const QString testDbPath = QStringLiteral("/tmp/gofi_analytics_test.db");
+        const QString testDbPath = m_testSandbox.filePath(QStringLiteral("gofi_analytics_test.db"));
         QFile::remove(testDbPath);
         DatabaseManager& db = DatabaseManager::instance();
         db.initialize(testDbPath);
@@ -599,7 +606,7 @@ private slots:
         QCOMPARE(heatmap.size(), 14);
 
         // CSV Export
-        const QString csvPath = QStringLiteral("/tmp/test_billing.csv");
+        const QString csvPath = m_testSandbox.filePath(QStringLiteral("test_billing.csv"));
         QFile::remove(csvPath);
         QVERIFY(analytics.exportBillingCsv(csvPath, QStringLiteral("all")));
         QVERIFY(QFile::exists(csvPath));
@@ -614,7 +621,7 @@ private slots:
         QFile::remove(csvPath);
 
         // PDF Export
-        const QString pdfPath = QStringLiteral("/tmp/test_billing.pdf");
+        const QString pdfPath = m_testSandbox.filePath(QStringLiteral("test_billing.pdf"));
         QFile::remove(pdfPath);
         QVERIFY(analytics.exportBillingPdf(pdfPath, QStringLiteral("all")));
         QVERIFY(QFile::exists(pdfPath));
@@ -705,9 +712,9 @@ private slots:
     }
 
     void testAmbientSoundGeneration() {
-        const QString whiteNoisePath = QStringLiteral("/tmp/test_ambient_white.wav");
-        const QString rainPath = QStringLiteral("/tmp/test_ambient_rain.wav");
-        const QString clockPath = QStringLiteral("/tmp/test_ambient_clock.wav");
+        const QString whiteNoisePath = m_testSandbox.filePath(QStringLiteral("test_ambient_white.wav"));
+        const QString rainPath = m_testSandbox.filePath(QStringLiteral("test_ambient_rain.wav"));
+        const QString clockPath = m_testSandbox.filePath(QStringLiteral("test_ambient_clock.wav"));
 
         QFile::remove(whiteNoisePath);
         QFile::remove(rainPath);
@@ -792,7 +799,7 @@ private slots:
         QCOMPARE(IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("High"), customJiraMapping), static_cast<quint8>(1));
 
         // 3. Database persistence of priorityMapping in TodoListEntry
-        const QString testDb = QStringLiteral("/tmp/gofi_prio_mapping_test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi_prio_mapping_test.db"));
         QFile::remove(testDb);
         DatabaseManager& db = DatabaseManager::instance();
         db.initialize(testDb);
@@ -850,7 +857,7 @@ private slots:
     }
 
     void testSystemHookServiceAndFocusSettings() {
-        const QString testDb = QStringLiteral("/tmp/test_gofi_hooks.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("test_gofi_hooks.db"));
         QFile::remove(testDb);
 
         AppController controller(QString(), testDb);
@@ -886,7 +893,7 @@ private slots:
         QCOMPARE(settings->hookTaskCompletedCommand(), QStringLiteral("echo 'done'"));
 
         // Test hooks directory creation and sample script
-        const QString hooksDir = QStringLiteral("/tmp/test_gofi_hooks");
+        const QString hooksDir = m_testSandbox.filePath(QStringLiteral("test_gofi_hooks"));
         QDir(hooksDir).removeRecursively();
         hooks->setCustomHooksDirectory(hooksDir);
         const QString dirPath = hooks->hooksDirectory();
@@ -912,7 +919,7 @@ private slots:
     }
 
     void testListManagerModelEntryAtAndGet() {
-        const QString testDb = QStringLiteral("/tmp/test_list_mgr.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("test_list_mgr.db"));
         QFile::remove(testDb);
         DatabaseManager::instance().initialize(testDb);
 

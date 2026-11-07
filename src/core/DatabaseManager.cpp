@@ -90,7 +90,14 @@ DatabaseManager& DatabaseManager::instance() {
 }
 
 DatabaseManager::~DatabaseManager() {
-    if (QCoreApplication::instance() && QSqlDatabase::contains(m_connectionName)) {
+    close();
+}
+
+void DatabaseManager::close() {
+    if (!QCoreApplication::instance()) {
+        return;
+    }
+    if (QSqlDatabase::contains(m_connectionName)) {
         {
             QSqlDatabase database = QSqlDatabase::database(m_connectionName, false);
             if (database.isOpen()) {
@@ -99,6 +106,7 @@ DatabaseManager::~DatabaseManager() {
         }
         QSqlDatabase::removeDatabase(m_connectionName);
     }
+    m_dbPath.clear();
 }
 
 bool DatabaseManager::initialize(const QString& customDbPath) {
