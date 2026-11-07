@@ -148,6 +148,15 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
         emit taskDataChanged();
         return true;
     }
+    case PriorityRole: {
+        const quint8 prio = static_cast<quint8>(value.toUInt());
+        if (t.priority() == prio) return false;
+        t.setPriority(prio);
+        emit dataChanged(index, index, {PriorityRole, PriorityStringRole, SimpleTextRole});
+        emit taskUpdated(index.row(), t);
+        emit taskDataChanged();
+        return true;
+    }
     default:
         return false;
     }

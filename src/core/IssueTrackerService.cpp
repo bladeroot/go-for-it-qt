@@ -333,6 +333,264 @@ quint8 IssueTrackerService::mapPriorityName(const QString& priorityName) {
     return TxtTask::NoPriority;
 }
 
+quint8 IssueTrackerService::mapRemotePriorityToLocal(const QString& remotePriority, const QVariantMap& customMapping) {
+    const QString p = remotePriority.trimmed();
+    if (p.isEmpty()) return TxtTask::NoPriority;
+
+    if (!customMapping.isEmpty()) {
+        const auto parseLocalPrio = [](const QString& val) -> quint8 {
+            const QString v = val.trimmed().toUpper();
+            if (v == QStringLiteral("A") || v == QStringLiteral("0")) return 0;
+            if (v == QStringLiteral("B") || v == QStringLiteral("1")) return 1;
+            if (v == QStringLiteral("C") || v == QStringLiteral("2")) return 2;
+            if (v == QStringLiteral("D") || v == QStringLiteral("3")) return 3;
+            if (v == QStringLiteral("E") || v == QStringLiteral("4")) return 4;
+            return TxtTask::NoPriority;
+        };
+
+        if (customMapping.contains(p)) {
+            return parseLocalPrio(customMapping.value(p).toString());
+        }
+
+        const QString pLower = p.toLower();
+        for (auto it = customMapping.constBegin(); it != customMapping.constEnd(); ++it) {
+            if (it.key().trimmed().toLower() == pLower) {
+                return parseLocalPrio(it.value().toString());
+            }
+        }
+    }
+
+    return mapPriorityName(p);
+}
+
+QVariantList IssueTrackerService::defaultPrioritiesForProvider(const QString& provider, const QVariantMap& existingMapping) const {
+    struct DefaultPrio {
+        const char* name;
+        const char* local;
+    };
+
+    QVector<DefaultPrio> presets;
+    if (provider == QStringLiteral("Jira")) {
+        presets = {
+            {"Highest", "A"},
+            {"High", "B"},
+            {"Medium", "C"},
+            {"Low", "D"},
+            {"Lowest", "E"}
+        };
+    } else if (provider == QStringLiteral("YouTrack")) {
+        presets = {
+            {"Show-stopper", "A"},
+            {"Critical", "A"},
+            {"Major", "B"},
+            {"Normal", "C"},
+            {"Minor", "D"}
+        };
+    } else if (provider == QStringLiteral("GitHub")) {
+        presets = {
+            {"p0", "A"},
+            {"p1", "A"},
+            {"priority:critical", "A"},
+            {"priority:high", "B"},
+            {"p2", "B"},
+            {"priority:medium", "C"},
+            {"p3", "C"},
+            {"priority:low", "D"}
+        };
+    } else if (provider == QStringLiteral("GitLab")) {
+        presets = {
+            {"priority::critical", "A"},
+            {"priority::high", "B"},
+            {"priority::medium", "C"},
+            {"priority::low", "D"}
+        };
+    } else if (provider == QStringLiteral("Redmine")) {
+        presets = {
+            {"Immediate", "A"},
+            {"Urgent", "A"},
+            {"High", "B"},
+            {"Normal", "C"},
+            {"Low", "D"}
+        };
+    } else if (provider == QStringLiteral("Todoist")) {
+        presets = {
+            {"Priority 4 (P1 Urgent)", "A"},
+            {"Priority 3 (P2 High)", "B"},
+            {"Priority 2 (P3 Medium)", "C"},
+            {"Priority 1 (P4 Normal)", "none"}
+        };
+    } else if (provider == QStringLiteral("Nextcloud")) {
+        presets = {
+            {"1 (Highest)", "A"},
+            {"2-4 (High)", "B"},
+            {"5 (Medium)", "C"},
+            {"6-8 (Low)", "D"},
+            {"9 (Lowest)", "E"}
+        };
+    }
+
+    QVariantList result;
+    QSet<QString> seen;
+
+    for (const auto& dp : presets) {
+        const QString name = QString::fromUtf8(dp.name);
+        seen.insert(name.toLower());
+        QString localP = QString::fromUtf8(dp.local);
+        if (existingMapping.contains(name)) {
+            localP = existingMapping.value(name).toString();
+        } else {
+            for (auto it = existingMapping.constBegin(); it != existingMapping.constEnd(); ++it) {
+                if (it.key().trimmed().toLower() == name.toLower()) {
+                    localP = it.value().toString();
+                    break;
+                }
+            }
+        }
+        result.append(QVariantMap{
+            {QStringLiteral("remoteName"), name},
+            {QStringLiteral("localPriority"), localP}
+        });
+    }
+
+    for (auto it = existingMapping.constBegin(); it != existingMapping.constEnd(); ++it) {
+        if (!seen.contains(it.key().trimmed().toLower())) {
+            result.append(QVariantMap{
+                {QStringLiteral("remoteName"), it.key()},
+                {QStringLiteral("localPriority"), it.value().toString()}
+            });
+        }
+    }
+
+    return result;
+}
+
+QVariantList IssueTrackerService::parseJiraPrioritiesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping) {
+    QVariantList result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isArray()) return result;
+
+    const auto prioToStr = [](quint8 p) -> QString {
+        if (p == 0) return QStringLiteral("A");
+        if (p == 1) return QStringLiteral("B");
+        if (p == 2) return QStringLiteral("C");
+        if (p == 3) return QStringLiteral("D");
+        if (p == 4) return QStringLiteral("E");
+        return QStringLiteral("none");
+    };
+
+    QSet<QString> seen;
+    for (const QJsonValue& val : doc.array()) {
+        const QJsonObject obj = val.toObject();
+        const QString name = obj.value(QStringLiteral("name")).toString().trimmed();
+        if (name.isEmpty() || seen.contains(name.toLower())) continue;
+        seen.insert(name.toLower());
+
+        QString localP = prioToStr(mapPriorityName(name));
+        if (existingMapping.contains(name)) {
+            localP = existingMapping.value(name).toString();
+        }
+        result.append(QVariantMap{
+            {QStringLiteral("remoteName"), name},
+            {QStringLiteral("localPriority"), localP}
+        });
+    }
+    return result;
+}
+
+QVariantList IssueTrackerService::parseRedminePrioritiesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping) {
+    QVariantList result;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
+    if (!doc.isObject()) return result;
+
+    const auto prioToStr = [](quint8 p) -> QString {
+        if (p == 0) return QStringLiteral("A");
+        if (p == 1) return QStringLiteral("B");
+        if (p == 2) return QStringLiteral("C");
+        if (p == 3) return QStringLiteral("D");
+        if (p == 4) return QStringLiteral("E");
+        return QStringLiteral("none");
+    };
+
+    const QJsonArray prios = doc.object().value(QStringLiteral("issue_priorities")).toArray();
+    for (const QJsonValue& val : prios) {
+        const QJsonObject obj = val.toObject();
+        const QString name = obj.value(QStringLiteral("name")).toString().trimmed();
+        if (name.isEmpty()) continue;
+        QString localP = prioToStr(mapPriorityName(name));
+        if (existingMapping.contains(name)) {
+            localP = existingMapping.value(name).toString();
+        }
+        result.append(QVariantMap{
+            {QStringLiteral("remoteName"), name},
+            {QStringLiteral("localPriority"), localP}
+        });
+    }
+    return result;
+}
+
+void IssueTrackerService::fetchRemotePriorities(const QString& provider,
+                                                const QString& serverUrl,
+                                                const QString& username,
+                                                const QString& apiToken,
+                                                const QVariantMap& existingMapping)
+{
+    if (provider == QStringLiteral("GitHub") || provider == QStringLiteral("GitLab")
+        || provider == QStringLiteral("Todoist") || provider == QStringLiteral("Nextcloud")) {
+        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        return;
+    }
+
+    const QString baseUrl = normalizeBaseUrl(serverUrl);
+    if (baseUrl.isEmpty()) {
+        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        return;
+    }
+
+    TodoListEntry tempEntry;
+    tempEntry.provider = provider;
+    tempEntry.jiraUrl = baseUrl;
+    tempEntry.jiraUser = username;
+    tempEntry.apiToken = apiToken;
+
+    if (provider == QStringLiteral("Jira")) {
+        QUrl url(baseUrl + QStringLiteral("/rest/api/2/priority"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, tempEntry, false);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, provider, existingMapping]() {
+            reply->deleteLater();
+            if (reply->error() == QNetworkReply::NoError) {
+                const QVariantList list = parseJiraPrioritiesJson(reply->readAll(), existingMapping);
+                if (!list.isEmpty()) {
+                    emit remotePrioritiesLoaded(list);
+                    return;
+                }
+            }
+            emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        });
+    } else if (provider == QStringLiteral("Redmine")) {
+        QUrl url(baseUrl + QStringLiteral("/enumerations/issue_priorities.json"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, tempEntry);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, provider, existingMapping]() {
+            reply->deleteLater();
+            if (reply->error() == QNetworkReply::NoError) {
+                const QVariantList list = parseRedminePrioritiesJson(reply->readAll(), existingMapping);
+                if (!list.isEmpty()) {
+                    emit remotePrioritiesLoaded(list);
+                    return;
+                }
+            }
+            emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        });
+    } else {
+        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+    }
+}
+
 QVector<RemoteIssueItem> IssueTrackerService::parseJiraIssuesJson(const QByteArray& jsonBytes) {
     QVector<RemoteIssueItem> result;
     const QJsonDocument doc = QJsonDocument::fromJson(jsonBytes);
@@ -394,6 +652,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseJiraIssuesJson(const QByteArr
         item.comments = parsedComments;
         item.remoteStatus = rawStatusName;
         item.remoteStatusCategory = statusCategoryKey;
+        item.remotePriority = priorityName;
         item.priority = mapPriorityName(priorityName);
         item.durationSeconds = origEstimate;
         result.append(std::move(item));
@@ -480,6 +739,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseYouTrackIssuesJson(const QByt
         item.comments = parsedComments;
         item.remoteStatus = rawStateName;
         item.remoteStatusCategory = isResolved ? QStringLiteral("done") : QStringLiteral("");
+        item.remotePriority = priorityName;
         item.priority = mapPriorityName(priorityName);
         item.durationSeconds = durationSec;
         result.append(std::move(item));
@@ -543,6 +803,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
             : displayKey;
 
         quint8 prio = TxtTask::NoPriority;
+        QString detectedPriorityName;
         QStringList labelTags;
         const QJsonArray labelsArr = obj.value(QStringLiteral("labels")).toArray();
         for (const QJsonValue& lVal : labelsArr) {
@@ -554,8 +815,12 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
             }
             if (labelName.isEmpty()) continue;
 
-            if (prio == TxtTask::NoPriority) {
-                prio = mapPriorityName(labelName);
+            const quint8 mapped = mapPriorityName(labelName);
+            if (mapped != TxtTask::NoPriority && prio == TxtTask::NoPriority) {
+                prio = mapped;
+                detectedPriorityName = labelName;
+            } else if (detectedPriorityName.isEmpty() && (labelName.startsWith(QStringLiteral("p"), Qt::CaseInsensitive) || labelName.contains(QStringLiteral("priority"), Qt::CaseInsensitive))) {
+                detectedPriorityName = labelName;
             }
             labelTags.append(QStringLiteral("+") + sanitizeTagToken(labelName));
         }
@@ -583,6 +848,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
         item.description = desc;
         item.details = body;
         item.remoteStatus = remoteStatus;
+        item.remotePriority = detectedPriorityName;
         item.priority = prio;
         item.durationSeconds = 0;
         result.append(std::move(item));
@@ -632,13 +898,18 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabIssuesJson(const QByteA
             : displayKey;
 
         quint8 prio = TxtTask::NoPriority;
+        QString detectedPriorityName;
         QStringList labelTags;
         const QJsonArray labels = obj.value(QStringLiteral("labels")).toArray();
         for (const QJsonValue& lVal : labels) {
             const QString lName = lVal.isString() ? lVal.toString().trimmed() : lVal.toObject().value(QStringLiteral("name")).toString().trimmed();
             if (lName.isEmpty()) continue;
-            if (prio == TxtTask::NoPriority) {
-                prio = mapPriorityName(lName);
+            const quint8 mapped = mapPriorityName(lName);
+            if (mapped != TxtTask::NoPriority && prio == TxtTask::NoPriority) {
+                prio = mapped;
+                detectedPriorityName = lName;
+            } else if (detectedPriorityName.isEmpty() && (lName.startsWith(QStringLiteral("p"), Qt::CaseInsensitive) || lName.contains(QStringLiteral("priority"), Qt::CaseInsensitive))) {
+                detectedPriorityName = lName;
             }
             labelTags.append(QStringLiteral("+") + sanitizeTagToken(lName));
         }
@@ -661,6 +932,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabIssuesJson(const QByteA
         item.description = desc;
         item.details = description;
         item.remoteStatus = state;
+        item.remotePriority = detectedPriorityName;
         item.priority = prio;
         item.durationSeconds = estSec;
         result.append(std::move(item));
@@ -717,13 +989,18 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
             : displayKey;
 
         quint8 prio = TxtTask::NoPriority;
+        QString detectedPriorityName;
         QStringList labelTags;
         const QJsonArray labels = obj.value(QStringLiteral("labels")).toArray();
         for (const QJsonValue& lVal : labels) {
             const QString lName = lVal.isString() ? lVal.toString().trimmed() : lVal.toObject().value(QStringLiteral("name")).toString().trimmed();
             if (lName.isEmpty()) continue;
-            if (prio == TxtTask::NoPriority) {
-                prio = mapPriorityName(lName);
+            const quint8 mapped = mapPriorityName(lName);
+            if (mapped != TxtTask::NoPriority && prio == TxtTask::NoPriority) {
+                prio = mapped;
+                detectedPriorityName = lName;
+            } else if (detectedPriorityName.isEmpty() && (lName.startsWith(QStringLiteral("p"), Qt::CaseInsensitive) || lName.contains(QStringLiteral("priority"), Qt::CaseInsensitive))) {
+                detectedPriorityName = lName;
             }
             labelTags.append(QStringLiteral("+") + sanitizeTagToken(lName));
         }
@@ -748,6 +1025,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
         item.description = desc;
         item.details = description;
         item.remoteStatus = remoteStatus;
+        item.remotePriority = detectedPriorityName;
         item.priority = prio;
         item.durationSeconds = estSec;
         result.append(std::move(item));
@@ -819,6 +1097,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseRedmineIssuesJson(const QByte
         item.description = desc;
         item.details = description;
         item.remoteStatus = isClosed ? QStringLiteral("Closed") : (statusName.isEmpty() ? QStringLiteral("open") : statusName);
+        item.remotePriority = priorityName;
         item.priority = prio;
         item.durationSeconds = durationSeconds;
         result.append(std::move(item));
@@ -871,6 +1150,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseTodoistTasksJson(const QByteA
         item.description = desc;
         item.details = description;
         item.remoteStatus = isCompleted ? QStringLiteral("completed") : QStringLiteral("open");
+        item.remotePriority = QStringLiteral("Priority %1").arg(priorityNum);
         item.priority = prio;
         item.durationSeconds = 0;
         result.append(std::move(item));
@@ -985,6 +1265,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseNextcloudTasksIcs(const QByte
         item.details = description;
         item.comments = comments;
         item.remoteStatus = statusStr.isEmpty() ? QStringLiteral("needs-action") : statusStr;
+        item.remotePriority = priorityNum > 0 ? QString::number(priorityNum) : QString();
         item.priority = prio;
         item.durationSeconds = durationSeconds;
         result.append(std::move(item));
@@ -1431,10 +1712,14 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         const QString localStatus = mapRemoteStatusToLocal(
             item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
         );
+        quint8 localPriority = item.priority;
+        if (!entry.priorityMapping.isEmpty()) {
+            localPriority = mapRemotePriorityToLocal(item.remotePriority, entry.priorityMapping);
+        }
         bool isNew = false;
         QString oldStatus;
         db.upsertRemoteIssueTask(
-            entry.id, item.key, item.description, localStatus, item.priority,
+            entry.id, item.key, item.description, localStatus, localPriority,
             item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
         );
         if (isNew) {

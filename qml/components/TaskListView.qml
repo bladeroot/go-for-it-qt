@@ -230,10 +230,12 @@ Item {
                         listRoot.isDoneList,
                         index,
                         jiraKey,
-                        description,
+                        taskStatus,
                         details,
                         comments,
-                        webUrl
+                        webUrl,
+                        priorityString,
+                        dueDateString
                     )
                 }
             }

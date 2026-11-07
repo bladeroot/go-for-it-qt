@@ -54,6 +54,20 @@ QVariantMap deserializeStatusMapping(const QString& json) {
     return {};
 }
 
+QString serializePriorityMapping(const QVariantMap& map) {
+    if (map.isEmpty()) return QStringLiteral("");
+    return QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(QJsonDocument::Compact));
+}
+
+QVariantMap deserializePriorityMapping(const QString& json) {
+    if (json.isEmpty()) return {};
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (doc.isObject()) {
+        return doc.object().toVariantMap();
+    }
+    return {};
+}
+
 QString serializeCommentsList(const QVariantList& comments) {
     if (comments.isEmpty()) return QStringLiteral("");
     return QString::fromUtf8(QJsonDocument(QJsonArray::fromVariantList(comments)).toJson(QJsonDocument::Compact));
@@ -165,13 +179,15 @@ bool DatabaseManager::createSchema() {
             "  jira_jql TEXT NOT NULL DEFAULT '',"
             "  api_token TEXT NOT NULL DEFAULT '',"
             "  auto_worklog INTEGER NOT NULL DEFAULT 1,"
-            "  status_mapping TEXT NOT NULL DEFAULT ''"
+            "  status_mapping TEXT NOT NULL DEFAULT '',"
+            "  priority_mapping TEXT NOT NULL DEFAULT ''"
             ");"))) {
         return false;
     }
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN api_token TEXT NOT NULL DEFAULT '';"));
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN auto_worklog INTEGER NOT NULL DEFAULT 1;"));
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN status_mapping TEXT NOT NULL DEFAULT '';"));
+    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN priority_mapping TEXT NOT NULL DEFAULT '';"));
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tasks ("
@@ -322,7 +338,7 @@ QVector<TodoListEntry> DatabaseManager::loadLists() const {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "SELECT id, name, provider, activity_log_path, add_creation_dates, "
-        "reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping "
+        "reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping, priority_mapping "
         "FROM lists ORDER BY sort_order ASC, rowid ASC"
     ));
     if (!q.exec()) {
@@ -343,6 +359,7 @@ QVector<TodoListEntry> DatabaseManager::loadLists() const {
         e.apiToken = q.value(10).toString();
         e.autoWorklog = q.value(11).toInt() != 0;
         e.statusMapping = deserializeStatusMapping(q.value(12).toString());
+        e.priorityMapping = deserializePriorityMapping(q.value(13).toString());
         e.directoryPath = m_dbPath;
         result.append(std::move(e));
     }
@@ -353,9 +370,9 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "INSERT INTO lists (id, name, provider, sort_order, activity_log_path, "
-        "add_creation_dates, reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping) "
+        "add_creation_dates, reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping, priority_mapping) "
         "VALUES (:id, :name, :provider, :sort_order, :activity_log_path, "
-        ":add_creation_dates, :reminder_time, :custom_schedule, :jira_url, :jira_user, :jira_jql, :api_token, :auto_worklog, :status_mapping) "
+        ":add_creation_dates, :reminder_time, :custom_schedule, :jira_url, :jira_user, :jira_jql, :api_token, :auto_worklog, :status_mapping, :priority_mapping) "
         "ON CONFLICT(id) DO UPDATE SET "
         "  name = excluded.name,"
         "  provider = excluded.provider,"
@@ -369,7 +386,8 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
         "  jira_jql = excluded.jira_jql,"
         "  api_token = excluded.api_token,"
         "  auto_worklog = excluded.auto_worklog,"
-        "  status_mapping = excluded.status_mapping"
+        "  status_mapping = excluded.status_mapping,"
+        "  priority_mapping = excluded.priority_mapping"
     ));
     q.bindValue(QStringLiteral(":id"), nonNullString(entry.id));
     q.bindValue(QStringLiteral(":name"), nonNullString(entry.name));
@@ -385,6 +403,7 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
     q.bindValue(QStringLiteral(":api_token"), nonNullString(entry.apiToken));
     q.bindValue(QStringLiteral(":auto_worklog"), entry.autoWorklog ? 1 : 0);
     q.bindValue(QStringLiteral(":status_mapping"), nonNullString(serializeStatusMapping(entry.statusMapping)));
+    q.bindValue(QStringLiteral(":priority_mapping"), nonNullString(serializePriorityMapping(entry.priorityMapping)));
     return q.exec();
 }
 

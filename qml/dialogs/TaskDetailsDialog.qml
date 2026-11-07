@@ -16,17 +16,21 @@ Dialog {
     property int taskRow: -1
     property string taskTitle: ""
     property string taskStatus: "todo"
+    property string taskPriority: ""
+    property string taskDueDate: ""
     property string taskDetails: ""
     property var taskComments: []
     property bool editMode: false
     property string loadedFilePath: ""
     property string taskWebUrl: ""
 
-    function openForTask(isDoneList, rowIdx, titleStr, statusStr, detailsStr, commentsList, webUrl) {
+    function openForTask(isDoneList, rowIdx, titleStr, statusStr, detailsStr, commentsList, webUrl, prioStr, dueStr) {
         fromDoneList = isDoneList
         taskRow = rowIdx
         taskTitle = titleStr
         taskStatus = statusStr || "todo"
+        taskPriority = prioStr || ""
+        taskDueDate = dueStr || ""
         taskDetails = detailsStr || ""
         taskComments = commentsList || []
         taskWebUrl = webUrl || ""
@@ -34,6 +38,7 @@ Dialog {
         loadedFilePath = ""
         editMode = (taskDetails.trim() === "")
         detailsTabBar.currentIndex = 0
+        prioCombo.syncPrio()
         open()
     }
 
@@ -58,6 +63,52 @@ Dialog {
     ColumnLayout {
         anchors.fill: parent
         spacing: 8
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                text: qsTr("Priority:")
+                font.bold: true
+                font.pixelSize: 11
+                opacity: 0.8
+            }
+            ComboBox {
+                id: prioCombo
+                implicitWidth: 160
+                model: [
+                    { id: "A", label: qsTr("(A) - Highest") },
+                    { id: "B", label: qsTr("(B) - High") },
+                    { id: "C", label: qsTr("(C) - Medium") },
+                    { id: "D", label: qsTr("(D) - Low") },
+                    { id: "E", label: qsTr("(E) - Lowest") },
+                    { id: "none", label: qsTr("None (No priority)") }
+                ]
+                textRole: "label"
+                valueRole: "id"
+                function syncPrio() {
+                    const p = (detailsDialog.taskPriority || "").replace("(", "").replace(")", "").trim().toUpperCase()
+                    for (let i = 0; i < model.length; ++i) {
+                        if (model[i].id === p) {
+                            currentIndex = i
+                            return
+                        }
+                    }
+                    currentIndex = model.length - 1
+                }
+                onActivated: function(idx) {
+                    app.changeTaskPriority(detailsDialog.fromDoneList, detailsDialog.taskRow, model[idx].id)
+                }
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                visible: detailsDialog.taskDueDate !== ""
+                text: "📅 " + qsTr("Due: %1").arg(detailsDialog.taskDueDate)
+                font.bold: true
+                font.pixelSize: 11
+                opacity: 0.85
+            }
+        }
 
         RowLayout {
             Layout.fillWidth: true

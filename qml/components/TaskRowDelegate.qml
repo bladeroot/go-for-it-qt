@@ -128,7 +128,32 @@ ItemDelegate {
             visible: !rowDelegate.editing && rowDelegate.priorityString !== ""
             text: rowDelegate.priorityString
             font.bold: true
-            color: palette.highlight
+            color: {
+                if (rowDelegate.priorityString === "(A)") return "#e74c3c"
+                if (rowDelegate.priorityString === "(B)") return "#e67e22"
+                if (rowDelegate.priorityString === "(C)") return "#f1c40f"
+                return palette.highlight
+            }
+            ToolTip.visible: prioMa.containsMouse
+            ToolTip.text: qsTr("Priority %1 (click to change)").arg(rowDelegate.priorityString)
+
+            MouseArea {
+                id: prioMa
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: prioMenu.open()
+
+                Menu {
+                    id: prioMenu
+                    MenuItem { text: qsTr("(A) - Highest"); onTriggered: app.changeTaskPriority(rowDelegate.isDoneList, rowDelegate.index, "A") }
+                    MenuItem { text: qsTr("(B) - High"); onTriggered: app.changeTaskPriority(rowDelegate.isDoneList, rowDelegate.index, "B") }
+                    MenuItem { text: qsTr("(C) - Medium"); onTriggered: app.changeTaskPriority(rowDelegate.isDoneList, rowDelegate.index, "C") }
+                    MenuItem { text: qsTr("(D) - Low"); onTriggered: app.changeTaskPriority(rowDelegate.isDoneList, rowDelegate.index, "D") }
+                    MenuItem { text: qsTr("(E) - Lowest"); onTriggered: app.changeTaskPriority(rowDelegate.isDoneList, rowDelegate.index, "E") }
+                    MenuItem { text: qsTr("None (Clear priority)"); onTriggered: app.changeTaskPriority(rowDelegate.isDoneList, rowDelegate.index, "none") }
+                }
+            }
         }
 
         Rectangle {

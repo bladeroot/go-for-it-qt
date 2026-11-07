@@ -481,6 +481,26 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         return;
     }
 
+    // Cycle priority: P (Shift+P: None -> A -> B -> C -> D -> E -> None)
+    if (seq == "P") {
+        if (count > 0 && m_selectedRow < count) {
+            const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
+            const quint8 curPrio = static_cast<quint8>(currentProxy()->data(idx, TaskStoreModel::PriorityRole).toUInt());
+            quint8 nextPrio = 0;
+            if (curPrio == 0) nextPrio = 1;      // B
+            else if (curPrio == 1) nextPrio = 2; // C
+            else if (curPrio == 2) nextPrio = 3; // D
+            else if (curPrio == 3) nextPrio = 4; // E
+            else if (curPrio == 4) nextPrio = TxtTask::NoPriority;
+            else nextPrio = 0; // A
+
+            const QString prioStr = (nextPrio < 26) ? QString(QChar('A' + nextPrio)) : QStringLiteral("none");
+            m_app->changeTaskPriority(isClosedTab(), m_selectedRow, prioStr);
+            m_statusMessage = tr("Task priority set to: %1").arg(prioStr.toUpper());
+        }
+        return;
+    }
+
     // Switch lists: L (picker) or [ / ]
     if (seq == "L") {
         openListPicker();
@@ -1527,6 +1547,14 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         m_app->todoProxyModel()->setDueFilter(QString());
         clampSelection();
         m_statusMessage = tr("Showing all tasks.");
+        return;
+    }
+    if (cmdLine.startsWith(QStringLiteral("p ")) || cmdLine.startsWith(QStringLiteral("prio ")) || cmdLine.startsWith(QStringLiteral("priority "))) {
+        const QString prioArg = cmdLine.section(QLatin1Char(' '), 1).trimmed();
+        if (currentProxy()->rowCount() > 0 && m_selectedRow >= 0) {
+            m_app->changeTaskPriority(isClosedTab(), m_selectedRow, prioArg);
+            m_statusMessage = tr("Priority set to %1").arg(prioArg.toUpper());
+        }
         return;
     }
     m_statusMessage = tr("Unknown command: :%1 (try :help, :sync, :sort, :clear, :list, :q)").arg(cmdLine);

@@ -110,7 +110,8 @@ QVariantMap ListManagerModel::getListConfig(const QString& listId) const {
             {QStringLiteral("jiraJql"), QString()},
             {QStringLiteral("apiToken"), QString()},
             {QStringLiteral("autoWorklog"), true},
-            {QStringLiteral("statusMapping"), QVariantMap()}
+            {QStringLiteral("statusMapping"), QVariantMap()},
+            {QStringLiteral("priorityMapping"), QVariantMap()}
         };
     }
     const TodoListEntry& e = m_entries.at(idx);
@@ -127,7 +128,8 @@ QVariantMap ListManagerModel::getListConfig(const QString& listId) const {
         {QStringLiteral("jiraJql"), e.jiraJql},
         {QStringLiteral("apiToken"), e.apiToken},
         {QStringLiteral("autoWorklog"), e.autoWorklog},
-        {QStringLiteral("statusMapping"), e.statusMapping}
+        {QStringLiteral("statusMapping"), e.statusMapping},
+        {QStringLiteral("priorityMapping"), e.priorityMapping}
     };
 }
 
@@ -190,6 +192,7 @@ QString ListManagerModel::saveListConfig(const QVariantMap& config, const QStrin
     entry.apiToken = config.value(QStringLiteral("apiToken")).toString().trimmed();
     entry.autoWorklog = config.value(QStringLiteral("autoWorklog"), true).toBool();
     entry.statusMapping = config.value(QStringLiteral("statusMapping")).toMap();
+    entry.priorityMapping = config.value(QStringLiteral("priorityMapping")).toMap();
 
     const int idx = indexOfId(existingId);
     if (idx >= 0) {

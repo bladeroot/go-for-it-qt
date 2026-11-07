@@ -335,6 +335,25 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     }
 }
 
+void AppController::changeTaskPriority(bool fromDoneList, int proxyRow, const QString& priorityLetter) {
+    TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0) return;
+
+    quint8 prio = TxtTask::NoPriority;
+    const QString p = priorityLetter.trimmed().toUpper();
+    if (!p.isEmpty() && p != QStringLiteral("NONE") && p != QStringLiteral("CLEAR")) {
+        const QChar ch = p.at(0);
+        if (ch >= QLatin1Char('A') && ch <= QLatin1Char('Z')) {
+            prio = static_cast<quint8>(ch.unicode() - 'A');
+        }
+    }
+
+    const QModelIndex idx = store->index(sourceRow, 0);
+    store->setData(idx, prio, TaskStoreModel::PriorityRole);
+}
+
 void AppController::updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();

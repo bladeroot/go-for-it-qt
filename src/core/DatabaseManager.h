@@ -28,6 +28,7 @@ struct TodoListEntry {
     QString apiToken;
     bool autoWorklog = true;
     QVariantMap statusMapping; // remoteStatusName -> "todo" | "in_progress" | "paused" | "done" | "canceled"
+    QVariantMap priorityMapping; // remotePriorityName -> "A" | "B" | "C" | "D" | "E" | "none"
 };
 
 struct ActivityRecord {

@@ -710,6 +710,117 @@ private slots:
         QFile::remove(rainPath);
         QFile::remove(clockPath);
     }
+
+    void testIntegrationPriorityMapping() {
+        IssueTrackerService service;
+
+        // 1. Default presets for different providers
+        const QVariantList jiraDefaults = service.defaultPrioritiesForProvider(QStringLiteral("Jira"));
+        QVERIFY(!jiraDefaults.isEmpty());
+        bool foundHighest = false;
+        for (const QVariant& item : jiraDefaults) {
+            const QVariantMap m = item.toMap();
+            if (m.value(QStringLiteral("remoteName")).toString() == QStringLiteral("Highest")) {
+                QCOMPARE(m.value(QStringLiteral("localPriority")).toString(), QStringLiteral("A"));
+                foundHighest = true;
+            }
+        }
+        QVERIFY(foundHighest);
+
+        const QVariantList ytDefaults = service.defaultPrioritiesForProvider(QStringLiteral("YouTrack"));
+        QVERIFY(!ytDefaults.isEmpty());
+        bool foundShowStopper = false;
+        for (const QVariant& item : ytDefaults) {
+            const QVariantMap m = item.toMap();
+            if (m.value(QStringLiteral("remoteName")).toString() == QStringLiteral("Show-stopper")) {
+                QCOMPARE(m.value(QStringLiteral("localPriority")).toString(), QStringLiteral("A"));
+                foundShowStopper = true;
+            }
+        }
+        QVERIFY(foundShowStopper);
+
+        const QVariantList ghDefaults = service.defaultPrioritiesForProvider(QStringLiteral("GitHub"));
+        QVERIFY(!ghDefaults.isEmpty());
+
+        const QVariantList todoistDefaults = service.defaultPrioritiesForProvider(QStringLiteral("Todoist"));
+        QVERIFY(!todoistDefaults.isEmpty());
+
+        const QVariantList ncDefaults = service.defaultPrioritiesForProvider(QStringLiteral("Nextcloud"));
+        QVERIFY(!ncDefaults.isEmpty());
+
+        // 2. Custom priority mapping logic
+        QVariantMap customJiraMapping;
+        customJiraMapping[QStringLiteral("Blocker")] = QStringLiteral("A");
+        customJiraMapping[QStringLiteral("Critical")] = QStringLiteral("A");
+        customJiraMapping[QStringLiteral("Minor")] = QStringLiteral("D");
+        customJiraMapping[QStringLiteral("Trivial")] = QStringLiteral("none");
+
+        // Custom mapping takes precedence
+        QCOMPARE(IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("Blocker"), customJiraMapping), static_cast<quint8>(0));
+        QCOMPARE(IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("blocker"), customJiraMapping), static_cast<quint8>(0)); // Case-insensitive
+        QCOMPARE(IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("Minor"), customJiraMapping), static_cast<quint8>(3));
+        QCOMPARE(IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("Trivial"), customJiraMapping), TxtTask::NoPriority);
+
+        // Fallback to default heuristic if not in custom mapping
+        QCOMPARE(IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("High"), customJiraMapping), static_cast<quint8>(1));
+
+        // 3. Database persistence of priorityMapping in TodoListEntry
+        const QString testDb = QStringLiteral("/tmp/gofi_prio_mapping_test.db");
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        db.initialize(testDb);
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("jira-custom-prio");
+        entry.name = QStringLiteral("Jira Integration");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("https://jira.example.com");
+        entry.priorityMapping = customJiraMapping;
+
+        QVERIFY(db.saveList(entry, 0));
+
+        const QVector<TodoListEntry> loadedLists = db.loadLists();
+        QCOMPARE(loadedLists.size(), 1);
+        QCOMPARE(loadedLists.first().id, QStringLiteral("jira-custom-prio"));
+        QCOMPARE(loadedLists.first().priorityMapping.size(), customJiraMapping.size());
+        QCOMPARE(loadedLists.first().priorityMapping.value(QStringLiteral("Blocker")).toString(), QStringLiteral("A"));
+        QCOMPARE(loadedLists.first().priorityMapping.value(QStringLiteral("Trivial")).toString(), QStringLiteral("none"));
+
+        // 4. Remote issue sync priority assignment
+        QByteArray sampleJiraJson = R"({
+            "issues": [
+                {
+                    "key": "PROJ-1",
+                    "fields": {
+                        "summary": "Blocker bug in login",
+                        "status": {"name": "In Progress"},
+                        "priority": {"name": "Blocker"}
+                    }
+                },
+                {
+                    "key": "PROJ-2",
+                    "fields": {
+                        "summary": "Trivial typo",
+                        "status": {"name": "Open"},
+                        "priority": {"name": "Trivial"}
+                    }
+                }
+            ]
+        })";
+
+        const QVector<RemoteIssueItem> parsed = IssueTrackerService::parseJiraIssuesJson(sampleJiraJson);
+        QCOMPARE(parsed.size(), 2);
+        QCOMPARE(parsed[0].remotePriority, QStringLiteral("Blocker"));
+        QCOMPARE(parsed[1].remotePriority, QStringLiteral("Trivial"));
+
+        // When upserted using the entry's custom priority mapping:
+        const quint8 prio1 = IssueTrackerService::mapRemotePriorityToLocal(parsed[0].remotePriority, entry.priorityMapping);
+        const quint8 prio2 = IssueTrackerService::mapRemotePriorityToLocal(parsed[1].remotePriority, entry.priorityMapping);
+        QCOMPARE(prio1, static_cast<quint8>(0)); // (A)
+        QCOMPARE(prio2, TxtTask::NoPriority);    // none
+
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

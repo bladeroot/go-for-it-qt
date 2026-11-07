@@ -35,8 +35,21 @@ Dialog {
         { id: "canceled", label: qsTr("Canceled / Rejected") }
     ]
 
+    readonly property var localPriorityOptions: [
+        { id: "A", label: qsTr("(A) - Highest") },
+        { id: "B", label: qsTr("(B) - High") },
+        { id: "C", label: qsTr("(C) - Medium") },
+        { id: "D", label: qsTr("(D) - Low") },
+        { id: "E", label: qsTr("(E) - Lowest") },
+        { id: "none", label: qsTr("None (No priority)") }
+    ]
+
     ListModel {
         id: statusMappingModel
+    }
+
+    ListModel {
+        id: priorityMappingModel
     }
 
     function rebuildStatusMappingModel(mappingObj) {
@@ -51,11 +64,47 @@ Dialog {
         }
     }
 
+    function rebuildPriorityMappingModel(mappingObj) {
+        priorityMappingModel.clear()
+        currentPriorityMapping = mappingObj || ({})
+        const keys = Object.keys(currentPriorityMapping)
+        if (keys.length > 0) {
+            for (let i = 0; i < keys.length; ++i) {
+                priorityMappingModel.append({
+                    remoteName: keys[i],
+                    localPriority: currentPriorityMapping[keys[i]]
+                })
+            }
+        } else if (selectedProvider !== "SQLite") {
+            loadDefaultPriorities()
+        }
+    }
+
+    function loadDefaultPriorities() {
+        const defaults = app.issueTracker.defaultPrioritiesForProvider(selectedProvider, currentPriorityMapping || ({}))
+        priorityMappingModel.clear()
+        for (let i = 0; i < defaults.length; ++i) {
+            priorityMappingModel.append({
+                remoteName: defaults[i].remoteName,
+                localPriority: defaults[i].localPriority
+            })
+        }
+    }
+
     function exportStatusMappingObject() {
         let out = {}
         for (let i = 0; i < statusMappingModel.count; ++i) {
             const item = statusMappingModel.get(i)
             out[item.remoteName] = item.localStatus
+        }
+        return out
+    }
+
+    function exportPriorityMappingObject() {
+        let out = {}
+        for (let i = 0; i < priorityMappingModel.count; ++i) {
+            const item = priorityMappingModel.get(i)
+            out[item.remoteName] = item.localPriority
         }
         return out
     }
@@ -75,6 +124,19 @@ Dialog {
         function onRemoteStatusesError(err) {
             statusFetchLabel.text = err
         }
+        function onRemotePrioritiesLoaded(priorities) {
+            priorityMappingModel.clear()
+            for (let i = 0; i < priorities.length; ++i) {
+                priorityMappingModel.append({
+                    remoteName: priorities[i].remoteName,
+                    localPriority: priorities[i].localPriority
+                })
+            }
+            priorityFetchLabel.text = qsTr("Loaded %1 priorities.").arg(priorities.length)
+        }
+        function onRemotePrioritiesError(err) {
+            priorityFetchLabel.text = err
+        }
     }
 
     function openForNew() {
@@ -88,7 +150,9 @@ Dialog {
         jiraJqlField.text = ""
         autoWorklogCheck.checked = true
         rebuildStatusMappingModel({})
+        rebuildPriorityMappingModel({})
         statusFetchLabel.text = ""
+        priorityFetchLabel.text = ""
         logUsageCheck.checked = false
         logFilePathField.text = ""
         addCreationDatesCheck.checked = true
@@ -119,7 +183,9 @@ Dialog {
         jiraJqlField.text = cfg.jiraJql || ""
         autoWorklogCheck.checked = cfg.autoWorklog !== undefined ? cfg.autoWorklog : true
         rebuildStatusMappingModel(cfg.statusMapping || ({}))
+        rebuildPriorityMappingModel(cfg.priorityMapping || ({}))
         statusFetchLabel.text = ""
+        priorityFetchLabel.text = ""
         logUsageCheck.checked = (cfg.activityLogPath && cfg.activityLogPath !== "")
         logFilePathField.text = cfg.activityLogPath || ""
         addCreationDatesCheck.checked = cfg.addCreationDates !== undefined ? cfg.addCreationDates : true
@@ -143,6 +209,7 @@ Dialog {
             jiraJql: jiraJqlField.text.trim(),
             autoWorklog: autoWorklogCheck.checked,
             statusMapping: exportStatusMappingObject(),
+            priorityMapping: exportPriorityMappingObject(),
             activityLogPath: logUsageCheck.checked ? logFilePathField.text.trim() : "",
             addCreationDates: addCreationDatesCheck.checked,
             reminderTime: useDefaultTimerCheck.checked ? -1 : reminderSpin.value,
@@ -160,6 +227,10 @@ Dialog {
             TabButton { text: qsTr("General & Sync") }
             TabButton {
                 text: qsTr("Statuses")
+                enabled: listEditDialog.selectedProvider !== "SQLite"
+            }
+            TabButton {
+                text: qsTr("Priorities")
                 enabled: listEditDialog.selectedProvider !== "SQLite"
             }
             TabButton { text: qsTr("Timer") }
@@ -416,7 +487,143 @@ Dialog {
                 }
             }
 
-            // Tab 3: Per-list Timer Settings
+            // Tab 3: Remote Priority Mapping (Jira / YouTrack / GitHub / GitLab / Redmine / Todoist / Nextcloud -> Local Priorities)
+            ColumnLayout {
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button {
+                        text: qsTr("Load Default Priorities for ") + listEditDialog.selectedProvider
+                        onClicked: {
+                            listEditDialog.loadDefaultPriorities()
+                            priorityFetchLabel.text = qsTr("Default %1 priorities loaded.").arg(listEditDialog.selectedProvider)
+                        }
+                    }
+                    Button {
+                        visible: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "Redmine"
+                        text: qsTr("Fetch from Server")
+                        onClicked: {
+                            priorityFetchLabel.text = qsTr("Loading priorities from server...")
+                            app.issueTracker.fetchRemotePriorities(
+                                listEditDialog.selectedProvider,
+                                jiraUrlField.text.trim(),
+                                jiraUserField.text.trim(),
+                                apiTokenField.text.trim(),
+                                exportPriorityMappingObject()
+                            )
+                        }
+                    }
+                    Label {
+                        id: priorityFetchLabel
+                        Layout.fillWidth: true
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        opacity: 0.8
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 11
+                    opacity: 0.75
+                    text: qsTr("Map remote priorities (%1) to local priorities ((A), (B), (C), (D), (E) or None). Each integration has its own independent priority mapping.").arg(listEditDialog.selectedProvider)
+                }
+
+                // Add Custom Priority row
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    TextField {
+                        id: customPrioField
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Add custom remote priority or label (e.g. 'P0', 'Urgent', 'Blocker')...")
+                    }
+                    ComboBox {
+                        id: customPrioCombo
+                        Layout.preferredWidth: 160
+                        model: listEditDialog.localPriorityOptions
+                        textRole: "label"
+                        valueRole: "id"
+                    }
+                    Button {
+                        text: qsTr("+ Add")
+                        enabled: customPrioField.text.trim() !== ""
+                        onClicked: {
+                            const name = customPrioField.text.trim()
+                            if (name !== "") {
+                                priorityMappingModel.append({
+                                    remoteName: name,
+                                    localPriority: customPrioCombo.currentValue
+                                })
+                                customPrioField.text = ""
+                            }
+                        }
+                    }
+                }
+
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    model: priorityMappingModel
+                    spacing: 4
+
+                    delegate: RowLayout {
+                        required property int index
+                        required property string remoteName
+                        required property string localPriority
+                        width: ListView.view.width
+                        spacing: 8
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: remoteName
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+
+                        Label { text: "→"; opacity: 0.6 }
+
+                        ComboBox {
+                            Layout.preferredWidth: 180
+                            model: listEditDialog.localPriorityOptions
+                            textRole: "label"
+                            valueRole: "id"
+                            Component.onCompleted: {
+                                for (let i = 0; i < listEditDialog.localPriorityOptions.length; ++i) {
+                                    if (listEditDialog.localPriorityOptions[i].id === localPriority) {
+                                        currentIndex = i
+                                        break
+                                    }
+                                }
+                            }
+                            onActivated: function(idx) {
+                                priorityMappingModel.setProperty(index, "localPriority", listEditDialog.localPriorityOptions[idx].id)
+                            }
+                        }
+
+                        ToolButton {
+                            text: "✕"
+                            implicitWidth: 24
+                            implicitHeight: 24
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Remove priority mapping")
+                            onClicked: priorityMappingModel.remove(index)
+                        }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        visible: priorityMappingModel.count === 0
+                        text: qsTr("Click 'Load Default Priorities' above or add custom priority mappings.")
+                        opacity: 0.6
+                    }
+                }
+            }
+
+            // Tab 4: Per-list Timer Settings
             ColumnLayout {
                 spacing: 10
 

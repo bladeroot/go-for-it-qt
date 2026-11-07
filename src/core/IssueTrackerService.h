@@ -19,6 +19,7 @@ struct RemoteIssueItem {
     QVariantList comments;
     QString remoteStatus;
     QString remoteStatusCategory;
+    QString remotePriority;
     quint8 priority = TxtTask::NoPriority;
     quint32 durationSeconds = 0;
 };
@@ -64,6 +65,15 @@ public:
                                          const QString& apiToken,
                                          const QVariantMap& existingMapping = {});
 
+    // Fetch / default remote priorities for mapping UI
+    Q_INVOKABLE QVariantList defaultPrioritiesForProvider(const QString& provider,
+                                                          const QVariantMap& existingMapping = {}) const;
+    Q_INVOKABLE void fetchRemotePriorities(const QString& provider,
+                                           const QString& serverUrl,
+                                           const QString& username,
+                                           const QString& apiToken,
+                                           const QVariantMap& existingMapping = {});
+
     // Pure JSON parsers & status mapper (also used by unit tests)
     static QVector<RemoteIssueItem> parseJiraIssuesJson(const QByteArray& jsonBytes);
     static QVector<RemoteIssueItem> parseYouTrackIssuesJson(const QByteArray& jsonBytes);
@@ -84,6 +94,10 @@ public:
                                           const QString& categoryHint = {},
                                           const QVariantMap& customMapping = {});
     static quint8 mapPriorityName(const QString& priorityName);
+    static quint8 mapRemotePriorityToLocal(const QString& remotePriority,
+                                           const QVariantMap& customMapping = {});
+    static QVariantList parseJiraPrioritiesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
+    static QVariantList parseRedminePrioritiesJson(const QByteArray& jsonBytes, const QVariantMap& existingMapping = {});
 
 signals:
     void syncingChanged();
@@ -94,6 +108,8 @@ signals:
     void worklogPosted(const QString& issueKey, quint32 loggedSeconds);
     void remoteStatusesLoaded(const QVariantList& statuses);
     void remoteStatusesError(const QString& error);
+    void remotePrioritiesLoaded(const QVariantList& priorities);
+    void remotePrioritiesError(const QString& error);
 
 private:
     static QString normalizeBaseUrl(const QString& rawUrl);
