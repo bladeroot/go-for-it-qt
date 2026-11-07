@@ -96,14 +96,6 @@ int main(int argc, char* argv[]) {
     );
 
     QObject::connect(&controller, &gofi::AppController::languageChanged, &engine, &QQmlApplicationEngine::retranslate);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     engine.loadFromModule("GoForIt", "Main");
-#else
-    if (QFile::exists(QStringLiteral(":/qt/qml/GoForIt/qml/Main.qml"))) {
-        engine.load(QUrl(QStringLiteral("qrc:/qt/qml/GoForIt/qml/Main.qml")));
-    } else {
-        engine.load(QUrl(QStringLiteral("qrc:/GoForIt/qml/Main.qml")));
-    }
-#endif
     return app.exec();
 }

@@ -3,6 +3,9 @@
 #include <QObject>
 #include <QProcessEnvironment>
 #include <QString>
+#include <memory>
+
+class QLockFile;
 
 namespace gofi {
 
@@ -72,6 +75,7 @@ private:
     uint m_dndCookie = 0;
     uint m_sleepCookie = 0;
     bool m_gnomeBannersDisabled = false;
+    std::unique_ptr<QLockFile> m_dndLockFile;
 };
 
 } // namespace gofi

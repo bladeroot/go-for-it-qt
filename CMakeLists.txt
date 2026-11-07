@@ -17,7 +17,7 @@ add_compile_definitions(GOFI_VERSION="${PROJECT_VERSION}")
 include(GNUInstallDirs)
 include(CTest)
 
-find_package(Qt6 REQUIRED COMPONENTS
+find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core
     Gui
     Widgets
@@ -236,8 +236,8 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Yurii Myronchuk <bladeroot@gmail.com>")
 set(CPACK_DEBIAN_PACKAGE_SECTION "universe/utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6sql6-sqlite, qml6-module-qtquick | libqt6quick6, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-window")
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qml6-module-qtquick | libqt6quick6, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, libqt6sql6-sqlite")
+option(CPACK_DEBIAN_PACKAGE_SHLIBDEPS "Enable automatic dependency detection with dpkg-shlibdeps" OFF)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libqt6sql6-sqlite, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, qml6-module-qtquick-window, libqt6multimedia6, libqt6dbus6, libqt6network6")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, libqt6sql6-sqlite")
 
 include(CPack)

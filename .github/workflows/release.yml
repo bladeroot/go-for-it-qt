@@ -15,21 +15,27 @@ permissions:
   contents: write
 
 jobs:
-  build-debian:
-    name: Build Ubuntu/Debian .deb
+  build-and-test:
+    name: Build, Test & Package (Qt 6.6)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install build tools and libraries
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build g++ dpkg-dev qt6-base-dev qt6-declarative-dev \
-            qt6-multimedia-dev libqt6sql6-sqlite qml6-module-qtquick \
-            qml6-module-qtquick-controls qml6-module-qtquick-layouts \
-            qml6-module-qtquick-dialogs qml6-module-qtquick-window
+            cmake ninja-build g++ dpkg-dev \
+            libgl1-mesa-dev libxkbcommon-dev libx11-xcb1 \
+            libpulse-dev libasound2-dev libsqlite3-dev
+
+      - name: Install Qt 6.6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.6.3'
+          modules: 'qtmultimedia'
+          cache: true
 
       - name: Configure CMake
         run: |
@@ -43,20 +49,24 @@ jobs:
           cmake --build build
           QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
-      - name: Build Debian Package (.deb)
+      - name: Build Packages (.deb & .tar.gz)
         run: |
-          cd build && cpack -G DEB
+          cd build && cpack -G "DEB;TGZ"
 
-      - name: Upload Debian Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: debian-package
-          path: build/*.deb
+          name: go-for-it-packages
+          path: |
+            build/*.deb
+            build/*.tar.gz
 
       - name: Publish to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/*.deb
+          files: |
+            build/*.deb
+            build/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

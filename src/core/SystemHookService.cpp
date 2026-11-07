@@ -12,30 +12,22 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QProcess>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 
-#if defined(Q_OS_UNIX)
-#include <cerrno>
-#include <signal.h>
-#endif
-
 namespace gofi {
 
 static bool s_systemIntegrationEnabled = true;
 
-static bool isProcessRunning(qint64 pid) {
-    if (pid <= 0) return false;
-#if defined(Q_OS_UNIX)
-    if (kill(static_cast<pid_t>(pid), 0) == 0) {
-        return true;
+static QString dndLockFilePath() {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (dir.isEmpty() || !QDir(dir).exists()) {
+        dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     }
-    return errno != ESRCH;
-#else
-    return false;
-#endif
+    return QDir(dir).filePath(QStringLiteral("go-for-it-qt-dnd.lock"));
 }
 
 void SystemHookService::setSystemIntegrationEnabled(bool enabled) {
@@ -58,28 +50,24 @@ SystemHookService::SystemHookService(AppController* controller,
     // Crash recovery: check if a previous run crashed while GNOME banners were disabled
     if (!QStandardPaths::isTestModeEnabled()) {
         QSettings crashState(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
-        const qint64 pid = crashState.value(QStringLiteral("State/gnome_banners_inhibited_pid"), 0).toLongLong();
-        const bool legacyFlag = crashState.value(QStringLiteral("State/gnome_banners_inhibited"), false).toBool();
+        const bool bannersInhibited = crashState.value(QStringLiteral("State/gnome_banners_inhibited"), false).toBool() ||
+                                      crashState.contains(QStringLiteral("State/gnome_banners_inhibited_pid"));
 
-        if (pid > 0) {
-            // Check if the owner process is still alive. If it's another active instance, leave DND intact.
-            if (pid != QCoreApplication::applicationPid() && !isProcessRunning(pid)) {
+        if (bannersInhibited) {
+            QLockFile probeLock(dndLockFilePath());
+            probeLock.setStaleLockTime(0);
+            if (probeLock.tryLock()) {
+                // No alive go-for-it process is holding DND lock. Restore GNOME banners.
                 QProcess::execute(QStringLiteral("gsettings"),
                                  {QStringLiteral("set"),
                                   QStringLiteral("org.gnome.desktop.notifications"),
                                   QStringLiteral("show-banners"),
                                   QStringLiteral("true")});
-                crashState.remove(QStringLiteral("State/gnome_banners_inhibited_pid"));
                 crashState.remove(QStringLiteral("State/gnome_banners_inhibited"));
+                crashState.remove(QStringLiteral("State/gnome_banners_inhibited_pid"));
+                probeLock.unlock();
             }
-        } else if (legacyFlag) {
-            // Upgrade legacy flag: no PID was recorded, restore banners once and clear
-            QProcess::execute(QStringLiteral("gsettings"),
-                             {QStringLiteral("set"),
-                              QStringLiteral("org.gnome.desktop.notifications"),
-                              QStringLiteral("show-banners"),
-                              QStringLiteral("true")});
-            crashState.remove(QStringLiteral("State/gnome_banners_inhibited"));
+            // If tryLock() returned false, another active instance is running DND. Do not interfere!
         }
     }
 
@@ -140,10 +128,28 @@ void SystemHookService::setCustomHooksDirectory(const QString& path) {
 
 void SystemHookService::ensureHooksDirectory() {
     const QString dirPath = hooksDirectory();
+    const bool wasNonExistent = !QDir(dirPath).exists();
     QDir().mkpath(dirPath);
     QDir dir(dirPath);
     if (!dir.exists()) {
         return;
+    }
+
+    // One-time migration: if target was just created, import scripts from legacy ~/.config/go-for-it/hooks
+    if (wasNonExistent && m_customHooksDirectory.isEmpty() && !QStandardPaths::isTestModeEnabled()) {
+        const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+        const QString legacyPath = base + QStringLiteral("/go-for-it/hooks");
+        QDir legacyDir(legacyPath);
+        if (legacyDir.exists()) {
+            const QFileInfoList entries = legacyDir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot);
+            for (const QFileInfo& fi : entries) {
+                const QString dest = dir.filePath(fi.fileName());
+                if (!QFile::exists(dest)) {
+                    QFile::copy(fi.filePath(), dest);
+                    QFile::setPermissions(dest, fi.permissions());
+                }
+            }
+        }
     }
 
     const QString sampleScript = dir.filePath(QStringLiteral("sample_hook.sh"));
@@ -242,8 +248,11 @@ void SystemHookService::applyDnd(bool enable) {
                                       QStringLiteral("show-banners"),
                                       QStringLiteral("false")});
                     m_gnomeBannersDisabled = true;
+                    m_dndLockFile = std::make_unique<QLockFile>(dndLockFilePath());
+                    m_dndLockFile->setStaleLockTime(0);
+                    m_dndLockFile->tryLock();
+
                     QSettings crashSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
-                    crashSettings.setValue(QStringLiteral("State/gnome_banners_inhibited_pid"), QCoreApplication::applicationPid());
                     crashSettings.setValue(QStringLiteral("State/gnome_banners_inhibited"), true);
                 }
             }
@@ -272,8 +281,13 @@ void SystemHookService::applyDnd(bool enable) {
                               QStringLiteral("true")});
             m_gnomeBannersDisabled = false;
             QSettings crashSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
-            crashSettings.remove(QStringLiteral("State/gnome_banners_inhibited_pid"));
             crashSettings.remove(QStringLiteral("State/gnome_banners_inhibited"));
+            crashSettings.remove(QStringLiteral("State/gnome_banners_inhibited_pid"));
+        }
+
+        if (m_dndLockFile) {
+            m_dndLockFile->unlock();
+            m_dndLockFile.reset();
         }
 
         m_dndActive = false;
