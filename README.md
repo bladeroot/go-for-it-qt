@@ -164,7 +164,9 @@ sudo cmake --install build --prefix /usr/local
 ## 📦 Packages
 
 ### Debian / Ubuntu (`.deb`)
-Download pre-built `.deb` binaries from the [GitHub Releases](https://github.com/bladeroot/go-for-it-qt/releases) page, or build locally:
+Pre-built `.deb` binaries on the [GitHub Releases](https://github.com/bladeroot/go-for-it-qt/releases) page are packaged for modern distributions with Qt `>= 6.8` (**Debian 13 Trixie / Sid** and **Ubuntu 25.04+**).
+
+To build a `.deb` locally on your system:
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
 cmake --build build -j$(nproc)
