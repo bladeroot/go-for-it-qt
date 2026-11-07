@@ -19,6 +19,42 @@ QString sanitizeTagToken(const QString& raw) {
     return out;
 }
 
+QString unescapeIcsText(const QString& str) {
+    QString out;
+    out.reserve(str.size());
+    for (int i = 0; i < str.size(); ++i) {
+        if (str[i] == QLatin1Char('\\') && i + 1 < str.size()) {
+            const QChar next = str[i + 1];
+            if (next == QLatin1Char('n') || next == QLatin1Char('N')) {
+                out.append(QLatin1Char('\n'));
+                ++i;
+            } else if (next == QLatin1Char(',') || next == QLatin1Char(';') || next == QLatin1Char('\\')) {
+                out.append(next);
+                ++i;
+            } else {
+                out.append(str[i]);
+            }
+        } else {
+            out.append(str[i]);
+        }
+    }
+    return out;
+}
+
+QString escapeIcsText(const QString& str) {
+    QString out;
+    out.reserve(str.size() + 10);
+    for (const QChar& c : str) {
+        if (c == QLatin1Char('\\')) out += QStringLiteral("\\\\");
+        else if (c == QLatin1Char(';')) out += QStringLiteral("\\;");
+        else if (c == QLatin1Char(',')) out += QStringLiteral("\\,");
+        else if (c == QLatin1Char('\n')) out += QStringLiteral("\\n");
+        else if (c == QLatin1Char('\r')) {}
+        else out += c;
+    }
+    return out;
+}
+
 // Extracts Markdown from either a Jira v2 string or Jira v3 Atlassian Document Format (ADF) JSON object
 QString extractJiraRichText(const QJsonValue& val) {
     if (val.isString()) {
@@ -186,6 +222,13 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
         }
     } else if (entry.provider == QStringLiteral("Todoist")) {
         if (!token.isEmpty()) {
+            req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
+        }
+    } else if (entry.provider == QStringLiteral("Nextcloud")) {
+        if (!user.isEmpty() && !token.isEmpty()) {
+            const QByteArray credentials = (user + QLatin1Char(':') + token).toUtf8().toBase64();
+            req.setRawHeader("Authorization", QByteArray("Basic ") + credentials);
+        } else if (!token.isEmpty()) {
             req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
         }
     } else if (!forceBearerAuth && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
@@ -835,6 +878,120 @@ QVector<RemoteIssueItem> IssueTrackerService::parseTodoistTasksJson(const QByteA
     return result;
 }
 
+QVector<RemoteIssueItem> IssueTrackerService::parseNextcloudTasksIcs(const QByteArray& rawBytes) {
+    QVector<RemoteIssueItem> result;
+    if (rawBytes.isEmpty()) return result;
+
+    QString text = QString::fromUtf8(rawBytes);
+
+    // Unfold iCalendar text (RFC 5545 section 3.1: CRLF followed by space or tab)
+    static const QRegularExpression unfoldRe(QStringLiteral("(\\r?\\n[ \\t])"));
+    text.replace(unfoldRe, QString());
+
+    // Search for all BEGIN:VTODO ... END:VTODO blocks
+    static const QRegularExpression vtodoRe(
+        QStringLiteral("BEGIN:VTODO\\b([\\s\\S]*?)END:VTODO\\b"),
+        QRegularExpression::CaseInsensitiveOption
+    );
+
+    auto it = vtodoRe.globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch match = it.next();
+        const QString block = match.captured(1);
+
+        QString uid;
+        QString summary;
+        QString description;
+        QString statusStr;
+        int priorityNum = 0;
+        QStringList categories;
+        quint32 durationSeconds = 0;
+        QVariantList comments;
+
+        const QStringList lines = block.split(QLatin1Char('\n'));
+        for (QString line : lines) {
+            line = line.trimmed();
+            if (line.isEmpty()) continue;
+
+            const int colonIdx = line.indexOf(QLatin1Char(':'));
+            if (colonIdx <= 0) continue;
+
+            const QString rawProp = line.left(colonIdx);
+            const QString val = line.mid(colonIdx + 1);
+
+            const int semiIdx = rawProp.indexOf(QLatin1Char(';'));
+            const QString propName = (semiIdx >= 0 ? rawProp.left(semiIdx) : rawProp).toUpper().trimmed();
+
+            if (propName == QStringLiteral("UID")) {
+                uid = val.trimmed();
+            } else if (propName == QStringLiteral("SUMMARY")) {
+                summary = unescapeIcsText(val.trimmed());
+            } else if (propName == QStringLiteral("DESCRIPTION")) {
+                description = unescapeIcsText(val.trimmed());
+            } else if (propName == QStringLiteral("STATUS")) {
+                statusStr = val.trimmed().toLower();
+            } else if (propName == QStringLiteral("PRIORITY")) {
+                priorityNum = val.trimmed().toInt();
+            } else if (propName == QStringLiteral("CATEGORIES")) {
+                const QStringList cats = val.split(QLatin1Char(','));
+                for (const QString& c : cats) {
+                    const QString trimmedCat = c.trimmed();
+                    if (!trimmedCat.isEmpty()) {
+                        categories.append(sanitizeTagToken(trimmedCat));
+                    }
+                }
+            } else if (propName == QStringLiteral("COMMENT")) {
+                const QString cmt = unescapeIcsText(val.trimmed());
+                if (!cmt.isEmpty()) {
+                    comments.append(QJsonObject{
+                        {QStringLiteral("author"), QStringLiteral("Nextcloud")},
+                        {QStringLiteral("body"), cmt}
+                    });
+                }
+            } else if (propName == QStringLiteral("DURATION") || propName == QStringLiteral("ESTIMATED-DURATION")) {
+                static const QRegularExpression durRe(QStringLiteral("PT(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?"), QRegularExpression::CaseInsensitiveOption);
+                const auto dm = durRe.match(val);
+                if (dm.hasMatch()) {
+                    const quint32 h = dm.captured(1).toUInt();
+                    const quint32 m = dm.captured(2).toUInt();
+                    const quint32 s = dm.captured(3).toUInt();
+                    durationSeconds = h * 3600U + m * 60U + s;
+                }
+            }
+        }
+
+        if (uid.isEmpty()) continue;
+
+        quint8 prio = TxtTask::NoPriority;
+        if (priorityNum >= 1 && priorityNum <= 4) prio = 0;      // (A)
+        else if (priorityNum == 5) prio = 1;                     // (B)
+        else if (priorityNum >= 6 && priorityNum <= 9) prio = 2; // (C)
+
+        const QString shortUid = uid.contains(QLatin1Char('-')) ? uid.left(8) : uid;
+        const QString displayKey = QStringLiteral("NC#%1").arg(shortUid);
+        const QString key = QStringLiteral("NC#%1").arg(uid);
+
+        QString desc = displayKey + QLatin1Char(' ') + (summary.isEmpty() ? displayKey : summary);
+        for (const QString& cat : categories) {
+            desc += QStringLiteral(" +") + cat;
+        }
+        if (!statusStr.isEmpty()) {
+            desc += QStringLiteral(" @") + sanitizeTagToken(statusStr);
+        }
+
+        RemoteIssueItem item;
+        item.key = key;
+        item.description = desc;
+        item.details = description;
+        item.comments = comments;
+        item.remoteStatus = statusStr.isEmpty() ? QStringLiteral("needs-action") : statusStr;
+        item.priority = prio;
+        item.durationSeconds = durationSeconds;
+        result.append(std::move(item));
+    }
+    return result;
+}
+
 QVariantList IssueTrackerService::parseGitHubStatuses(const QVariantMap& existingMapping) {
     const QStringList statuses = {
         QStringLiteral("open"),
@@ -900,6 +1057,23 @@ QVariantList IssueTrackerService::parseTodoistStatuses(const QVariantMap& existi
     const QStringList standard = {
         QStringLiteral("open"),
         QStringLiteral("completed")
+    };
+    for (const QString& s : standard) {
+        QVariantMap entry;
+        entry[QStringLiteral("remoteName")] = s;
+        entry[QStringLiteral("localStatus")] = mapRemoteStatusToLocal(s, {}, existingMapping);
+        list.append(entry);
+    }
+    return list;
+}
+
+QVariantList IssueTrackerService::parseNextcloudStatuses(const QVariantMap& existingMapping) {
+    QVariantList list;
+    const QStringList standard = {
+        QStringLiteral("needs-action"),
+        QStringLiteral("in-process"),
+        QStringLiteral("completed"),
+        QStringLiteral("cancelled")
     };
     for (const QString& s : standard) {
         QVariantMap entry;
@@ -988,6 +1162,10 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
     }
     if (provider == QStringLiteral("Todoist")) {
         emit remoteStatusesLoaded(parseTodoistStatuses(existingMapping));
+        return;
+    }
+    if (provider == QStringLiteral("Nextcloud")) {
+        emit remoteStatusesLoaded(parseNextcloudStatuses(existingMapping));
         return;
     }
 
@@ -1103,6 +1281,8 @@ void IssueTrackerService::syncListIssues(const TodoListEntry& listEntry) {
         fetchRedmineIssues(listEntry);
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
         fetchTodoistTasks(listEntry);
+    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
+        fetchNextcloudTasks(listEntry);
     }
 }
 
@@ -1474,6 +1654,109 @@ void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
     });
 }
 
+void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
+    QString urlStr = entry.jiraUrl.trimmed();
+    if (urlStr.isEmpty()) {
+        const QString msg = tr("Nextcloud CalDAV URL is empty.");
+        setStatusMessage(msg);
+        emit syncFailed(entry.id, msg);
+        return;
+    }
+
+    setSyncing(true);
+    setStatusMessage(tr("Syncing tasks from Nextcloud (CalDAV)..."));
+
+    if (!urlStr.contains(QStringLiteral("/dav/calendars/")) && !urlStr.endsWith(QStringLiteral(".ics"))) {
+        QString base = normalizeBaseUrl(urlStr);
+        const QString user = entry.jiraUser.trimmed();
+        const QString cal = entry.jiraJql.trimmed().isEmpty() ? QStringLiteral("tasks") : entry.jiraJql.trimmed();
+        if (!user.isEmpty()) {
+            urlStr = base + QStringLiteral("/remote.php/dav/calendars/%1/%2/").arg(user, cal);
+        }
+    }
+    if (!urlStr.endsWith(QLatin1Char('/')) && !urlStr.endsWith(QStringLiteral(".ics"))) {
+        urlStr += QLatin1Char('/');
+    }
+
+    QUrl url(urlStr);
+    QNetworkRequest req(url);
+    applyAuthHeader(req, entry);
+
+    if (urlStr.endsWith(QStringLiteral(".ics"))) {
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                setSyncing(false);
+                const QString errMsg = tr("Nextcloud sync error: %1").arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(entry.id, errMsg);
+                return;
+            }
+            const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(reply->readAll());
+            processSyncedItems(entry, items, QStringLiteral("Nextcloud"));
+        });
+        return;
+    }
+
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/xml; charset=utf-8"));
+    req.setRawHeader("Depth", "1");
+
+    const QByteArray reportXml = QByteArray(
+        "<c:calendar-query xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">\n"
+        "  <d:prop>\n"
+        "    <d:getetag />\n"
+        "    <c:calendar-data />\n"
+        "  </d:prop>\n"
+        "  <c:filter>\n"
+        "    <c:comp-filter name=\"VCALENDAR\">\n"
+        "      <c:comp-filter name=\"VTODO\" />\n"
+        "    </c:comp-filter>\n"
+        "  </c:filter>\n"
+        "</c:calendar-query>\n"
+    );
+
+    QNetworkReply* reply = m_nam.sendCustomRequest(req, "REPORT", reportXml);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, entry, req]() {
+        reply->deleteLater();
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError) {
+            if (statusCode == 405 || statusCode == 501) {
+                QNetworkRequest propReq = req;
+                propReq.setRawHeader("Depth", "1");
+                const QByteArray propXml = QByteArray(
+                    "<d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">\n"
+                    "  <d:prop><c:calendar-data /></d:prop>\n"
+                    "</d:propfind>\n"
+                );
+                QNetworkReply* propReply = m_nam.sendCustomRequest(propReq, "PROPFIND", propXml);
+                connect(propReply, &QNetworkReply::finished, this, [this, propReply, entry]() {
+                    propReply->deleteLater();
+                    if (propReply->error() != QNetworkReply::NoError) {
+                        setSyncing(false);
+                        const QString errMsg = tr("Nextcloud CalDAV error: %1").arg(propReply->errorString());
+                        setStatusMessage(errMsg);
+                        emit syncFailed(entry.id, errMsg);
+                        return;
+                    }
+                    const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(propReply->readAll());
+                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"));
+                });
+                return;
+            }
+
+            setSyncing(false);
+            const QString errMsg = tr("Nextcloud CalDAV sync error (%1): %2").arg(statusCode).arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
+        }
+
+        const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(reply->readAll());
+        processSyncedItems(entry, items, QStringLiteral("Nextcloud"));
+    });
+}
+
 void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                                       qint64 taskId,
                                       qint64 activityLogId,
@@ -1695,6 +1978,43 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                 DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
                 setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
                 emit worklogPosted(issueKey, minutes * 60U);
+            }
+        });
+    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
+        QString uid = issueKey;
+        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
+        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
+        if (uid.isEmpty()) return;
+
+        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+        QString calUrl = listEntry.jiraUrl.trimmed();
+        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
+        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
+
+        QUrl url(itemUrl);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QNetworkReply* getReply = m_nam.get(req);
+        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, listEntry, activityLogId, issueKey, minutes]() {
+            getReply->deleteLater();
+            if (getReply->error() != QNetworkReply::NoError) return;
+            QString ics = QString::fromUtf8(getReply->readAll());
+            const QString commentLine = QStringLiteral("COMMENT:⏱️ Logged %1m via Go for It Qt Pomodoro timer\r\n").arg(minutes);
+            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
+            if (vtodoEnd > 0) {
+                ics.insert(vtodoEnd, commentLine);
+                QNetworkRequest putReq = req;
+                putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
+                QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
+                connect(putReply, &QNetworkReply::finished, this, [this, putReply, activityLogId, issueKey, minutes]() {
+                    putReply->deleteLater();
+                    if (putReply->error() == QNetworkReply::NoError) {
+                        DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
+                        setStatusMessage(tr("Logged %1m to Nextcloud task %2").arg(minutes).arg(issueKey));
+                        emit worklogPosted(issueKey, minutes * 60U);
+                    }
+                });
             }
         });
     }
@@ -2084,6 +2404,45 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             }
             setStatusMessage(tr("Updated description on Todoist task %1.").arg(issueKey));
         });
+    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
+        QString uid = issueKey;
+        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
+        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
+        if (uid.isEmpty()) return;
+
+        QString calUrl = listEntry.jiraUrl.trimmed();
+        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
+        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
+
+        QUrl url(itemUrl);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QNetworkReply* getReply = m_nam.get(req);
+        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, markdownDetails]() {
+            getReply->deleteLater();
+            if (getReply->error() != QNetworkReply::NoError) return;
+            QString ics = QString::fromUtf8(getReply->readAll());
+            static const QRegularExpression descRe(QStringLiteral("DESCRIPTION:.*(?=\\r?\\n[A-Z-]+:)"), QRegularExpression::DotMatchesEverythingOption);
+            const QString escaped = QStringLiteral("DESCRIPTION:") + escapeIcsText(markdownDetails);
+            if (ics.contains(descRe)) {
+                ics.replace(descRe, escaped);
+            } else {
+                const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
+                if (vtodoEnd > 0) {
+                    ics.insert(vtodoEnd, escaped + QStringLiteral("\r\n"));
+                }
+            }
+            QNetworkRequest putReq = req;
+            putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
+            QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
+            connect(putReply, &QNetworkReply::finished, this, [this, putReply, issueKey]() {
+                putReply->deleteLater();
+                if (putReply->error() == QNetworkReply::NoError) {
+                    setStatusMessage(tr("Updated description on Nextcloud task %1.").arg(issueKey));
+                }
+            });
+        });
     }
 }
 
@@ -2298,6 +2657,41 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                 return;
             }
             setStatusMessage(tr("Posted comment to Todoist task %1.").arg(issueKey));
+        });
+    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
+        QString uid = issueKey;
+        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
+        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
+        if (uid.isEmpty()) return;
+
+        QString calUrl = listEntry.jiraUrl.trimmed();
+        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
+        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
+
+        QUrl url(itemUrl);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QNetworkReply* getReply = m_nam.get(req);
+        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, markdownComment]() {
+            getReply->deleteLater();
+            if (getReply->error() != QNetworkReply::NoError) return;
+            QString ics = QString::fromUtf8(getReply->readAll());
+            const QString escapedComment = escapeIcsText(markdownComment);
+            const QString commentLine = QStringLiteral("COMMENT:%1\r\n").arg(escapedComment);
+            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
+            if (vtodoEnd > 0) {
+                ics.insert(vtodoEnd, commentLine);
+                QNetworkRequest putReq = req;
+                putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
+                QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
+                connect(putReply, &QNetworkReply::finished, this, [this, putReply, issueKey]() {
+                    putReply->deleteLater();
+                    if (putReply->error() == QNetworkReply::NoError) {
+                        setStatusMessage(tr("Posted comment to Nextcloud task %1.").arg(issueKey));
+                    }
+                });
+            }
         });
     }
 }

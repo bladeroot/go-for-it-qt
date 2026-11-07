@@ -153,6 +153,7 @@ Item {
                                     if (listRowDelegate.provider === "YouTrack") return "#e02f5c"
                                     if (listRowDelegate.provider === "Redmine") return "#d32f2f"
                                     if (listRowDelegate.provider === "Todoist") return "#e44332"
+                                    if (listRowDelegate.provider === "Nextcloud") return "#0082c9"
                                     return "#5c6b73"
                                 }
                                 opacity: 0.85

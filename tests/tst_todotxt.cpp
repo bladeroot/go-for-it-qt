@@ -340,6 +340,39 @@ private slots:
         QCOMPARE(items[0].remoteStatus, QStringLiteral("open"));
     }
 
+    void testNextcloudCalDavTasksParser() {
+        const QByteArray icsData = QByteArray(
+            "BEGIN:VCALENDAR\r\n"
+            "VERSION:2.0\r\n"
+            "PRODID:-//Nextcloud Tasks v0.15.0//EN\r\n"
+            "BEGIN:VTODO\r\n"
+            "UID:9c3f2b1a-8e4d-4c7a-b912-3f8d1e2a3b4c\r\n"
+            "CREATED:20261101T100000Z\r\n"
+            "SUMMARY:Review Nextcloud server backup logs\r\n"
+            "DESCRIPTION:Check restic snapshots on backup NAS\r\n"
+            "PRIORITY:1\r\n"
+            "STATUS:NEEDS-ACTION\r\n"
+            "CATEGORIES:sysadmin,backups\r\n"
+            "DURATION:PT1H30M\r\n"
+            "COMMENT:Verified disk space is at 45%\r\n"
+            "END:VTODO\r\n"
+            "END:VCALENDAR\r\n"
+        );
+
+        const QVector<RemoteIssueItem> items = IssueTrackerService::parseNextcloudTasksIcs(icsData);
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items[0].key, QStringLiteral("NC#9c3f2b1a-8e4d-4c7a-b912-3f8d1e2a3b4c"));
+        QVERIFY(items[0].description.contains(QStringLiteral("NC#9c3f2b1a Review Nextcloud server backup logs")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+sysadmin")));
+        QVERIFY(items[0].description.contains(QStringLiteral("+backups")));
+        QVERIFY(items[0].description.contains(QStringLiteral("@needs-action")));
+        QCOMPARE(items[0].priority, 0);
+        QCOMPARE(items[0].details, QStringLiteral("Check restic snapshots on backup NAS"));
+        QCOMPARE(items[0].remoteStatus, QStringLiteral("needs-action"));
+        QCOMPARE(items[0].durationSeconds, 5400U);
+        QCOMPARE(items[0].comments.size(), 1);
+    }
+
     void testMultiListDatabaseLoading() {
         DatabaseManager& db = DatabaseManager::instance();
         db.initialize(QStringLiteral(":memory:"));

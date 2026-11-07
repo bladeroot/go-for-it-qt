@@ -23,6 +23,7 @@ Dialog {
         if (providerCombo.currentIndex === 4) return "GitLab"
         if (providerCombo.currentIndex === 5) return "Redmine"
         if (providerCombo.currentIndex === 6) return "Todoist"
+        if (providerCombo.currentIndex === 7) return "Nextcloud"
         return "SQLite"
     }
 
@@ -108,6 +109,7 @@ Dialog {
         else if (cfg.provider === "GitLab") providerCombo.currentIndex = 4
         else if (cfg.provider === "Redmine") providerCombo.currentIndex = 5
         else if (cfg.provider === "Todoist") providerCombo.currentIndex = 6
+        else if (cfg.provider === "Nextcloud") providerCombo.currentIndex = 7
         else providerCombo.currentIndex = 0
 
         nameField.text = cfg.name || ""
@@ -186,7 +188,8 @@ Dialog {
                             qsTr("GitHub (Issues & Pull Requests)"),
                             qsTr("GitLab (Issues & Merge Requests)"),
                             qsTr("Redmine (Issues)"),
-                            qsTr("Todoist (Tasks)")
+                            qsTr("Todoist (Tasks)"),
+                            qsTr("Nextcloud Tasks (CalDAV / VTODO)")
                         ]
                     }
 
@@ -213,6 +216,7 @@ Dialog {
                                 if (listEditDialog.selectedProvider === "GitHub") return qsTr("Server URL (leave empty for https://api.github.com):")
                                 if (listEditDialog.selectedProvider === "GitLab") return qsTr("Server URL (leave empty for https://gitlab.com):")
                                 if (listEditDialog.selectedProvider === "Todoist") return qsTr("Server URL (default: https://api.todoist.com):")
+                                if (listEditDialog.selectedProvider === "Nextcloud") return qsTr("CalDAV URL (e.g. https://cloud.example.com/remote.php/dav/calendars/user/tasks/):")
                                 return qsTr("Server URL:")
                             }
                         }
@@ -223,6 +227,7 @@ Dialog {
                                 if (listEditDialog.selectedProvider === "GitHub") return "https://api.github.com"
                                 if (listEditDialog.selectedProvider === "GitLab") return "https://gitlab.com"
                                 if (listEditDialog.selectedProvider === "Todoist") return "https://api.todoist.com"
+                                if (listEditDialog.selectedProvider === "Nextcloud") return "https://cloud.example.com/remote.php/dav/calendars/username/tasks/"
                                 if (listEditDialog.selectedProvider === "Redmine") return "https://redmine.example.com"
                                 if (listEditDialog.selectedProvider === "Jira") return "https://your-domain.atlassian.net"
                                 return "https://youtrack.example.com"
@@ -230,16 +235,18 @@ Dialog {
                         }
 
                         Label {
-                            visible: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "Redmine"
-                            text: listEditDialog.selectedProvider === "Redmine"
-                                ? qsTr("Username (optional if using API key):")
-                                : qsTr("Email / Username (leave empty for Bearer PAT):")
+                            visible: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "Redmine" || listEditDialog.selectedProvider === "Nextcloud"
+                            text: {
+                                if (listEditDialog.selectedProvider === "Redmine") return qsTr("Username (optional if using API key):")
+                                if (listEditDialog.selectedProvider === "Nextcloud") return qsTr("Nextcloud Username:")
+                                return qsTr("Email / Username (leave empty for Bearer PAT):")
+                            }
                         }
                         TextField {
                             id: jiraUserField
-                            visible: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "Redmine"
+                            visible: listEditDialog.selectedProvider === "Jira" || listEditDialog.selectedProvider === "Redmine" || listEditDialog.selectedProvider === "Nextcloud"
                             Layout.fillWidth: true
-                            placeholderText: "user@example.com"
+                            placeholderText: listEditDialog.selectedProvider === "Nextcloud" ? "username" : "user@example.com"
                         }
 
                         Label {
@@ -248,6 +255,7 @@ Dialog {
                                 if (listEditDialog.selectedProvider === "GitLab") return qsTr("Personal Access Token (glpat-...):")
                                 if (listEditDialog.selectedProvider === "Redmine") return qsTr("API Access Key (from /my/account):")
                                 if (listEditDialog.selectedProvider === "Todoist") return qsTr("Todoist API Token (Settings -> Integrations):")
+                                if (listEditDialog.selectedProvider === "Nextcloud") return qsTr("App Password (Settings -> Security -> App passwords):")
                                 if (listEditDialog.selectedProvider === "Jira") return qsTr("API Token / Personal Access Token:")
                                 return qsTr("Permanent Token (perm:...):")
                             }
@@ -265,6 +273,7 @@ Dialog {
                                 if (listEditDialog.selectedProvider === "GitLab") return qsTr("Project Path or ID (e.g. group/project, or empty for all):")
                                 if (listEditDialog.selectedProvider === "Redmine") return qsTr("Query Filter (e.g. assigned_to_id=me, project_id=123, or empty):")
                                 if (listEditDialog.selectedProvider === "Todoist") return qsTr("Filter (e.g. filter=today | overdue or project_id=123):")
+                                if (listEditDialog.selectedProvider === "Nextcloud") return qsTr("Calendar name / slug (default: tasks):")
                                 if (listEditDialog.selectedProvider === "Jira") return qsTr("JQL Filter (optional):")
                                 return qsTr("YouTrack Search Query (optional):")
                             }
@@ -277,6 +286,7 @@ Dialog {
                                 if (listEditDialog.selectedProvider === "GitLab") return "group/project"
                                 if (listEditDialog.selectedProvider === "Redmine") return "assigned_to_id=me&status_id=open"
                                 if (listEditDialog.selectedProvider === "Todoist") return "filter=today | overdue"
+                                if (listEditDialog.selectedProvider === "Nextcloud") return "tasks"
                                 if (listEditDialog.selectedProvider === "Jira") return "assignee = currentUser() ORDER BY updated DESC"
                                 return "for: me sort by: updated desc"
                             }
