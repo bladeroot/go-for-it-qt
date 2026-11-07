@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-The project is a C++20/Qt 6 productivity application with two front ends. Core services and models live in `src/core/`; Todo.txt parsing and storage are in `src/todotxt/`; the terminal UI is in `src/tui/`. Entry points are `src/main.cpp` for the Qt Quick GUI and `src/main_tui.cpp` for the TUI. QML views are grouped under `qml/components/`, `qml/dialogs/`, and `qml/pages/`. Runtime icons, sounds, desktop metadata, and AppStream metadata belong in `data/`. Tests live in `tests/`, while distribution files are under `packaging/`, `debian/`, and `PKGBUILD`.
+The project is a C++20/Qt 6 productivity application with two front ends. Core services, SQLite persistence, and models live in `src/core/`; `src/todotxt/` handles the Todo.txt line format; the terminal UI is in `src/tui/`. Entry points are `src/main.cpp` for the Qt Quick GUI and `src/main_tui.cpp` for the TUI. QML views are grouped under `qml/components/`, `qml/dialogs/`, and `qml/pages/`. Runtime icons, sounds, desktop metadata, man pages, and AppStream metadata belong in `data/`. Tests live in `tests/`, while distribution files are under `packaging/`, `debian/`, and `PKGBUILD`.
 
 ## Build, Test, and Development Commands
 
@@ -14,7 +14,7 @@ cmake --build build -j$(nproc)
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
-Run `build/go-for-it-qt` for the GUI or `build/go-for-it-tui` for the terminal interface. Configure with `-DCMAKE_BUILD_TYPE=Release` for production builds. Install locally with `cmake --install build --prefix /usr/local`; avoid committing generated `build/` contents.
+Run `build/go-for-it-qt` for the GUI or `build/go-for-it-tui` for the terminal interface. Configure with `-DCMAKE_BUILD_TYPE=Release` for production builds. Install locally with `cmake --install build --prefix /usr/local`; avoid committing generated `build/` contents. Register new C++ files in `GOFI_CORE_SOURCES` and new QML files in the `QML_FILES` list in `CMakeLists.txt`.
 
 ## Coding Style & Naming Conventions
 
@@ -22,7 +22,11 @@ Match existing Qt/C++ style: four-space indentation, braces on the same line, `P
 
 ## Testing Guidelines
 
-Tests use Qt Test and are registered through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, naming them `testBehaviorOrFeature`. Exercise model state, persistence, and parsing with deterministic temporary data (`QTemporaryDir` where appropriate). Always run the offscreen CTest command above before submitting; add regression coverage for bug fixes.
+Tests use Qt Test and are registered through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, naming them `testBehaviorOrFeature`. Exercise model state, persistence, and parsing with deterministic data inside the existing test sandbox. Run one slot with `QT_QPA_PLATFORM=offscreen build/tst_todotxt testBehaviorOrFeature`. Always run the full offscreen CTest command before submitting; add regression coverage for bug fixes.
+
+## Configuration & Safety
+
+Manual runs use persistent user settings and SQLite data. Pass `--db /tmp/goforit-test.db` while experimenting to avoid modifying the user's normal database. Guard new audio, D-Bus, process, or desktop integrations in test mode, following the existing service patterns.
 
 ## Commit & Pull Request Guidelines
 
