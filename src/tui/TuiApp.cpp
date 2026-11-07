@@ -511,7 +511,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         if (nLists > 0) {
             const int cur = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
             const int prev = (cur + nLists - 1) % nLists;
-            m_app->selectListById(m_app->listManager()->entryAt(prev).id);
+            m_app->selectListById(m_app->listManager()->entry(prev).id);
         }
         return;
     }
@@ -520,7 +520,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         if (nLists > 0) {
             const int cur = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
             const int next = (cur + 1) % nLists;
-            m_app->selectListById(m_app->listManager()->entryAt(next).id);
+            m_app->selectListById(m_app->listManager()->entry(next).id);
         }
         return;
     }
@@ -760,7 +760,7 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
     // Toggle multi-selection checkbox with Space
     if (seq == " ") {
         if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-            const QString id = m_app->listManager()->entryAt(m_listPickerRow).id;
+            const QString id = m_app->listManager()->entry(m_listPickerRow).id;
             if (m_selectedListIds.contains(id)) {
                 m_selectedListIds.remove(id);
             } else {
@@ -787,7 +787,7 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
     if (seq == "t" || seq == "T") {
         QStringList trackerIds;
         for (int i = 0; i < nLists; ++i) {
-            const auto entry = m_app->listManager()->entryAt(i);
+            const auto entry = m_app->listManager()->entry(i);
             if (entry.provider != QStringLiteral("SQLite")) {
                 trackerIds.append(entry.id);
             }
@@ -810,7 +810,7 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
     }
     // Edit list: e, i
     if ((seq == "e" || seq == "i") && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-        const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
+        const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
         m_editingListCfg = m_app->listManager()->getListConfig(entry.id);
         m_listEditRow = 0;
         m_mode = Mode::ListEdit;
@@ -818,7 +818,7 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
     }
     // Delete list: d
     if (seq == "d" && nLists > 1 && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-        const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
+        const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
         m_selectedListIds.remove(entry.id);
         m_app->listManager()->removeListById(entry.id);
         m_listPickerRow = qBound(0, m_listPickerRow, m_app->listManager()->rowCount() - 1);
@@ -837,7 +837,7 @@ void TuiApp::handleListPickerKey(const QByteArray& seq) {
             m_app->selectListById(selId);
             m_statusMessage = tr("Switched to list '%1'.").arg(m_app->currentListName());
         } else if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-            const TodoListEntry entry = m_app->listManager()->entryAt(m_listPickerRow);
+            const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
             m_app->selectListById(entry.id);
             m_statusMessage = tr("Switched to list '%1' (%2).").arg(entry.name, entry.provider);
         }
@@ -1916,7 +1916,7 @@ void TuiApp::render() {
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
             if (idx < nLists) {
-                const TodoListEntry e = m_app->listManager()->entryAt(idx);
+                const TodoListEntry e = m_app->listManager()->entry(idx);
                 const bool isSel = (idx == m_listPickerRow);
                 const bool isChecked = m_selectedListIds.contains(e.id);
                 const QString cursor = isSel ? QStringLiteral(" > ") : QStringLiteral("   ");

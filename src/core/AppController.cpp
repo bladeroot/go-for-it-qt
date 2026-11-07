@@ -113,7 +113,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     if (!lastId.isEmpty() && m_listManager.indexOfId(lastId) >= 0) {
         selectListById(lastId);
     } else if (m_listManager.rowCount() > 0) {
-        selectListById(m_listManager.entryAt(0).id);
+        selectListById(m_listManager.entry(0).id);
     } else {
         m_showingOverview = true;
     }
@@ -140,7 +140,7 @@ void AppController::setActiveTodoRow(int sourceRow) {
 bool AppController::isCurrentListRemote() const {
     if (m_isMultiListView) {
         for (int i = 0; i < m_listManager.rowCount(); ++i) {
-            const TodoListEntry e = m_listManager.entryAt(i);
+            const TodoListEntry e = m_listManager.entry(i);
             if (m_activeFilterListIds.isEmpty() || m_activeFilterListIds.contains(e.id)) {
                 if (e.provider != QStringLiteral("SQLite") && e.provider != QStringLiteral("Todo.txt")) {
                     return true;
@@ -166,7 +166,7 @@ void AppController::selectListById(const QString& listId) {
     const int row = m_listManager.indexOfId(listId);
     if (row < 0) return;
 
-    const TodoListEntry entry = m_listManager.entryAt(row);
+    const TodoListEntry entry = m_listManager.entry(row);
     m_currentListId = entry.id;
     m_currentListName = entry.name;
     m_currentListProvider = entry.provider;
@@ -209,7 +209,7 @@ void AppController::showAllLists() {
 void AppController::showProviderLists(const QString& provider) {
     QStringList matchingIds;
     for (int i = 0; i < m_listManager.rowCount(); ++i) {
-        const TodoListEntry e = m_listManager.entryAt(i);
+        const TodoListEntry e = m_listManager.entry(i);
         if (e.provider.compare(provider, Qt::CaseInsensitive) == 0) {
             matchingIds.append(e.id);
         }
@@ -235,7 +235,7 @@ void AppController::showProviderLists(const QString& provider) {
     for (const QString& id : matchingIds) {
         const int idx = m_listManager.indexOfId(id);
         if (idx >= 0) {
-            const TodoListEntry e = m_listManager.entryAt(idx);
+            const TodoListEntry e = m_listManager.entry(idx);
             if (e.provider != QStringLiteral("SQLite") && e.provider != QStringLiteral("Todo.txt")) {
                 m_issueTracker.syncListIssues(e);
             }
@@ -271,7 +271,7 @@ void AppController::syncCurrentList() {
     }
     const int row = m_listManager.indexOfId(m_currentListId);
     if (row < 0) return;
-    const TodoListEntry entry = m_listManager.entryAt(row);
+    const TodoListEntry entry = m_listManager.entry(row);
     if (entry.provider != QStringLiteral("SQLite") && entry.provider != QStringLiteral("Todo.txt")) {
         m_issueTracker.syncListIssues(entry);
     } else {
@@ -282,7 +282,7 @@ void AppController::syncCurrentList() {
 void AppController::syncAllRemoteLists() {
     if (m_issueTracker.isSyncing()) return;
     for (int i = 0; i < m_listManager.rowCount(); ++i) {
-        const TodoListEntry entry = m_listManager.entryAt(i);
+        const TodoListEntry entry = m_listManager.entry(i);
         if (m_isMultiListView && !m_activeFilterListIds.isEmpty() && !m_activeFilterListIds.contains(entry.id)) {
             continue;
         }
@@ -390,7 +390,7 @@ void AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QSt
     const QString targetListId = task.listId().isEmpty() ? m_currentListId : task.listId();
     const int listIdx = m_listManager.indexOfId(targetListId);
     if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
-        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        const TodoListEntry listEntry = m_listManager.entry(listIdx);
         if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")) {
             m_issueTracker.updateIssueDescription(listEntry, task.jiraKey(), details);
         }
@@ -409,7 +409,7 @@ void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QStrin
     const int listIdx = m_listManager.indexOfId(targetListId);
     QString author = QStringLiteral("Me");
     if (listIdx >= 0) {
-        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        const TodoListEntry listEntry = m_listManager.entry(listIdx);
         if (!listEntry.jiraUser.trimmed().isEmpty()) {
             author = listEntry.jiraUser.trimmed();
         }
@@ -417,7 +417,7 @@ void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QStrin
     store->appendTaskComment(sourceRow, author, commentText);
 
     if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
-        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        const TodoListEntry listEntry = m_listManager.entry(listIdx);
         if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")) {
             m_issueTracker.postIssueComment(listEntry, task.jiraKey(), commentText);
         }
@@ -524,7 +524,7 @@ bool AppController::changeDatabasePath(const QString& newDbPath, bool copyExisti
     }
     m_listManager.reloadFromDatabase();
     if (m_listManager.rowCount() > 0) {
-        selectListById(m_listManager.entryAt(0).id);
+        selectListById(m_listManager.entry(0).id);
     }
     emit storagePathChanged();
     return true;
@@ -552,7 +552,7 @@ bool AppController::importBackup(const QString& sourceFilePath) {
     }
     m_listManager.reloadFromDatabase();
     if (m_listManager.rowCount() > 0) {
-        selectListById(m_listManager.entryAt(0).id);
+        selectListById(m_listManager.entry(0).id);
     }
     emit storagePathChanged();
     return true;
@@ -603,7 +603,7 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
 
     const int listIdx = m_listManager.indexOfId(targetListId);
     if (listIdx >= 0 && !jiraKey.isEmpty()) {
-        const TodoListEntry listEntry = m_listManager.entryAt(listIdx);
+        const TodoListEntry listEntry = m_listManager.entry(listIdx);
         if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")
             && listEntry.autoWorklog) {
             m_issueTracker.postWorklog(listEntry, activeTaskId, logId, jiraKey, startTimeUtc, runtimeSeconds);
@@ -665,7 +665,7 @@ QUrl AppController::getTaskBrowserUrl(const QString& listId, const QString& jira
     TodoListEntry listEntry;
     const int listIdx = m_listManager.indexOfId(listId);
     if (listIdx >= 0) {
-        listEntry = m_listManager.entryAt(listIdx);
+        listEntry = m_listManager.entry(listIdx);
     }
     return IssueTrackerService::buildIssueBrowserUrl(listEntry, jiraKey, description);
 }

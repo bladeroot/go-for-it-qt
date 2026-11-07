@@ -250,9 +250,38 @@ int ListManagerModel::indexOfId(const QString& id) const {
     return -1;
 }
 
-TodoListEntry ListManagerModel::entryAt(int row) const {
+TodoListEntry ListManagerModel::entry(int row) const {
     if (row < 0 || row >= m_entries.size()) return {};
     return m_entries.at(row);
+}
+
+QVariantMap ListManagerModel::entryAt(int row) const {
+    if (row < 0 || row >= m_entries.size()) return {};
+    const TodoListEntry& e = m_entries.at(row);
+    return {
+        {QStringLiteral("id"), e.id},
+        {QStringLiteral("name"), e.name},
+        {QStringLiteral("provider"), e.provider},
+        {QStringLiteral("directoryPath"), e.directoryPath},
+        {QStringLiteral("todoFilePath"), e.todoFilePath},
+        {QStringLiteral("doneFilePath"), e.doneFilePath},
+        {QStringLiteral("activityLogPath"), e.activityLogPath},
+        {QStringLiteral("logTimerInTxt"), e.logTimerInTxt},
+        {QStringLiteral("addCreationDates"), e.addCreationDates},
+        {QStringLiteral("reminderTime"), e.reminderTime},
+        {QStringLiteral("customSchedule"), e.customSchedule.toVariantList()},
+        {QStringLiteral("jiraUrl"), e.jiraUrl},
+        {QStringLiteral("jiraUser"), e.jiraUser},
+        {QStringLiteral("jiraJql"), e.jiraJql},
+        {QStringLiteral("apiToken"), e.apiToken},
+        {QStringLiteral("autoWorklog"), e.autoWorklog},
+        {QStringLiteral("statusMapping"), e.statusMapping},
+        {QStringLiteral("priorityMapping"), e.priorityMapping}
+    };
+}
+
+QVariantMap ListManagerModel::get(int row) const {
+    return entryAt(row);
 }
 
 } // namespace gofi

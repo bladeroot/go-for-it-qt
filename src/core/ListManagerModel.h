@@ -37,12 +37,14 @@ public:
                                        const QString& conflictResolution = QStringLiteral("keep"));
     Q_INVOKABLE QVariantMap getListConfig(const QString& listId) const;
     Q_INVOKABLE QVariantMap validateAndCheckConflicts(const QVariantMap& config) const;
+    Q_INVOKABLE [[nodiscard]] QVariantMap entryAt(int row) const;
+    Q_INVOKABLE [[nodiscard]] QVariantMap get(int row) const;
     Q_INVOKABLE void removeListById(const QString& id);
     Q_INVOKABLE void moveItem(int fromRow, int toRow);
     void reloadFromDatabase();
 
     [[nodiscard]] int indexOfId(const QString& id) const;
-    [[nodiscard]] TodoListEntry entryAt(int row) const;
+    [[nodiscard]] TodoListEntry entry(int row) const;
     [[nodiscard]] const QVector<TodoListEntry>& entries() const noexcept { return m_entries; }
 
 signals:

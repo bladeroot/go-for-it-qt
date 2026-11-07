@@ -884,6 +884,38 @@ private slots:
         QFile::remove(testDb);
         QDir(hooksDir).removeRecursively();
     }
+
+    void testListManagerModelEntryAtAndGet() {
+        const QString testDb = QStringLiteral("/tmp/test_list_mgr.db");
+        QFile::remove(testDb);
+        DatabaseManager::instance().initialize(testDb);
+
+        AppController controller;
+        ListManagerModel* mgr = controller.listManager();
+        QVERIFY(mgr != nullptr);
+        QVERIFY(mgr->rowCount() > 0);
+
+        // Test Q_INVOKABLE entryAt and get returning QVariantMap for QML
+        const QVariantMap entry0 = mgr->entryAt(0);
+        QVERIFY(!entry0.isEmpty());
+        QVERIFY(entry0.contains(QStringLiteral("id")));
+        QVERIFY(entry0.contains(QStringLiteral("name")));
+        QVERIFY(entry0.contains(QStringLiteral("provider")));
+        QCOMPARE(entry0.value(QStringLiteral("provider")).toString(), QStringLiteral("SQLite"));
+
+        const QVariantMap get0 = mgr->get(0);
+        QCOMPARE(get0.value(QStringLiteral("id")).toString(), entry0.value(QStringLiteral("id")).toString());
+
+        // Out of bounds check
+        const QVariantMap outOfBounds = mgr->entryAt(999);
+        QVERIFY(outOfBounds.isEmpty());
+
+        // C++ entry() method check
+        const TodoListEntry cppEntry = mgr->entry(0);
+        QCOMPARE(cppEntry.id, entry0.value(QStringLiteral("id")).toString());
+
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
