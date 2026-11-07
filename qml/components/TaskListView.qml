@@ -141,13 +141,15 @@ Item {
                 }
                 onDetailsRequested: {
                     app.markTaskViewed(listRoot.isDoneList, index)
+                    const webUrl = app.getTaskBrowserUrl(listId, jiraKey, description).toString()
                     taskDetailsDialog.openForTask(
                         listRoot.isDoneList,
                         index,
                         jiraKey,
                         description,
                         details,
-                        comments
+                        comments,
+                        webUrl
                     )
                 }
             }

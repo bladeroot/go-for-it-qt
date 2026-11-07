@@ -98,6 +98,10 @@ public:
     Q_INVOKABLE bool exportBackup(const QString& targetFilePath);
     Q_INVOKABLE bool importBackup(const QString& sourceFilePath);
     Q_INVOKABLE QString readMarkdownFile(const QString& filePath) const;
+    Q_INVOKABLE QUrl getTaskBrowserUrl(const QString& listId, const QString& jiraKey, const QString& description) const;
+    Q_INVOKABLE QUrl taskBrowserUrl(bool fromDoneList, int proxyRow) const;
+    Q_INVOKABLE void openTaskInBrowser(bool fromDoneList, int proxyRow);
+    Q_INVOKABLE void openUrlExternally(const QUrl& url);
 
 signals:
     void showingOverviewChanged();

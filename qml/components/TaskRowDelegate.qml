@@ -18,8 +18,11 @@ ItemDelegate {
     required property string details
     required property var comments
     required property bool isViewed
+    required property string listId
     required property string listName
     required property string listProvider
+
+    readonly property url browserUrl: app.getTaskBrowserUrl(rowDelegate.listId, rowDelegate.jiraKey, rowDelegate.description)
 
     property int totalCount: 0
     property bool isDoneList: false
@@ -252,6 +255,19 @@ ItemDelegate {
                     onTriggered: Qt.callLater(function() { app.changeTaskStatus(rowDelegate.isDoneList, rowDelegate.index, "canceled") })
                 }
             }
+        }
+
+        ToolButton {
+            visible: !rowDelegate.editing && rowDelegate.browserUrl != ""
+            opacity: rowDelegate.hovered ? 1.0 : 0.75
+            implicitWidth: 26
+            implicitHeight: 24
+            padding: 0
+            text: "🌐"
+            font.pixelSize: 12
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Open task in browser (%1)").arg(rowDelegate.browserUrl)
+            onClicked: app.openUrlExternally(rowDelegate.browserUrl)
         }
 
         ToolButton {

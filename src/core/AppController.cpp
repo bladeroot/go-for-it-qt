@@ -1,10 +1,13 @@
 #include "AppController.h"
 #include "DatabaseManager.h"
+#include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QCoreApplication>
+#include <QProcess>
 #include <QSettings>
+#include <QUrl>
 
 namespace gofi {
 
@@ -610,6 +613,45 @@ void AppController::syncActiveTaskToTimer() {
     }
     const TxtTask task = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
     m_timer.setActiveTask(task.description(), task.timerValue(), task.duration());
+}
+
+QUrl AppController::getTaskBrowserUrl(const QString& listId, const QString& jiraKey, const QString& description) const {
+    TodoListEntry listEntry;
+    const int listIdx = m_listManager.indexOfId(listId);
+    if (listIdx >= 0) {
+        listEntry = m_listManager.entryAt(listIdx);
+    }
+    return IssueTrackerService::buildIssueBrowserUrl(listEntry, jiraKey, description);
+}
+
+QUrl AppController::taskBrowserUrl(bool fromDoneList, int proxyRow) const {
+    const TaskFilterProxyModel* proxy = fromDoneList ? &m_doneProxy : &m_todoProxy;
+    if (proxyRow < 0 || proxyRow >= proxy->rowCount()) return QUrl();
+
+    const QModelIndex idx = proxy->index(proxyRow, 0);
+    const QString listId = proxy->data(idx, TaskStoreModel::ListIdRole).toString();
+    const QString jiraKey = proxy->data(idx, TaskStoreModel::JiraKeyRole).toString();
+    const QString description = proxy->data(idx, TaskStoreModel::DescriptionRole).toString();
+
+    return getTaskBrowserUrl(listId, jiraKey, description);
+}
+
+void AppController::openTaskInBrowser(bool fromDoneList, int proxyRow) {
+    const QUrl url = taskBrowserUrl(fromDoneList, proxyRow);
+    if (!url.isValid() || url.isEmpty()) {
+        m_notifications.notifyTaskEvent(tr("Go for It"), tr("No web URL available for this task."));
+        return;
+    }
+    openUrlExternally(url);
+}
+
+void AppController::openUrlExternally(const QUrl& url) {
+    if (!url.isValid() || url.isEmpty()) return;
+    const bool opened = QDesktopServices::openUrl(url);
+    if (!opened) {
+        QProcess::startDetached(QStringLiteral("xdg-open"), {url.toString()});
+    }
+    m_issueTracker.setStatusMessage(tr("Opening %1 in browser...").arg(url.toString()));
 }
 
 } // namespace gofi

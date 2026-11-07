@@ -1,4 +1,5 @@
 #include "core/AppController.h"
+#include "core/IssueTrackerService.h"
 #include "core/NotificationService.h"
 #include "core/Schedule.h"
 #include "core/ShortcutManager.h"
@@ -434,6 +435,82 @@ private slots:
         store.markTaskViewed(0);
         QCOMPARE(store.unviewedTodoCount(), 0);
         QCOMPARE(store.totalTodoCount(), 2);
+    }
+
+    void testBuildIssueBrowserUrl() {
+        TodoListEntry ghEntry;
+        ghEntry.provider = QStringLiteral("GitHub");
+        ghEntry.jiraUrl = QStringLiteral("https://github.com");
+
+        // GitHub PR with owner/repo in key
+        const QUrl ghPrUrl = IssueTrackerService::buildIssueBrowserUrl(ghEntry, QStringLiteral("PR#myorg/myrepo#42"));
+        QCOMPARE(ghPrUrl.toString(), QStringLiteral("https://github.com/myorg/myrepo/pull/42"));
+
+        // GitHub Issue with owner/repo in key
+        const QUrl ghIssueUrl = IssueTrackerService::buildIssueBrowserUrl(ghEntry, QStringLiteral("GH#myorg/myrepo#108"));
+        QCOMPARE(ghIssueUrl.toString(), QStringLiteral("https://github.com/myorg/myrepo/issues/108"));
+
+        // GitHub with repo in jiraJql
+        ghEntry.jiraJql = QStringLiteral("repo:myorg/customrepo");
+        const QUrl ghJqlPrUrl = IssueTrackerService::buildIssueBrowserUrl(ghEntry, QStringLiteral("PR#77"));
+        QCOMPARE(ghJqlPrUrl.toString(), QStringLiteral("https://github.com/myorg/customrepo/pull/77"));
+
+        // GitHub Enterprise self-hosted
+        ghEntry.jiraUrl = QStringLiteral("https://ghe.mycorp.internal/api/v3");
+        ghEntry.jiraJql = QStringLiteral("");
+        const QUrl gheUrl = IssueTrackerService::buildIssueBrowserUrl(ghEntry, QStringLiteral("GH#corp/secret#999"));
+        QCOMPARE(gheUrl.toString(), QStringLiteral("https://ghe.mycorp.internal/corp/secret/issues/999"));
+
+        // GitLab MR
+        TodoListEntry glEntry;
+        glEntry.provider = QStringLiteral("GitLab");
+        glEntry.jiraUrl = QStringLiteral("https://gitlab.com");
+        const QUrl glMrUrl = IssueTrackerService::buildIssueBrowserUrl(glEntry, QStringLiteral("MR!mygroup/subproj!15"));
+        QCOMPARE(glMrUrl.toString(), QStringLiteral("https://gitlab.com/mygroup/subproj/-/merge_requests/15"));
+
+        // GitLab Issue
+        const QUrl glIssueUrl = IssueTrackerService::buildIssueBrowserUrl(glEntry, QStringLiteral("GL#mygroup/subproj#25"));
+        QCOMPARE(glIssueUrl.toString(), QStringLiteral("https://gitlab.com/mygroup/subproj/-/issues/25"));
+
+        // Jira
+        TodoListEntry jiraEntry;
+        jiraEntry.provider = QStringLiteral("Jira");
+        jiraEntry.jiraUrl = QStringLiteral("https://mycompany.atlassian.net/");
+        const QUrl jiraUrl = IssueTrackerService::buildIssueBrowserUrl(jiraEntry, QStringLiteral("PROJ-456"));
+        QCOMPARE(jiraUrl.toString(), QStringLiteral("https://mycompany.atlassian.net/browse/PROJ-456"));
+
+        // YouTrack
+        TodoListEntry ytEntry;
+        ytEntry.provider = QStringLiteral("YouTrack");
+        ytEntry.jiraUrl = QStringLiteral("https://company.youtrack.cloud");
+        const QUrl ytUrl = IssueTrackerService::buildIssueBrowserUrl(ytEntry, QStringLiteral("DEV-789"));
+        QCOMPARE(ytUrl.toString(), QStringLiteral("https://company.youtrack.cloud/issue/DEV-789"));
+
+        // Redmine
+        TodoListEntry rmEntry;
+        rmEntry.provider = QStringLiteral("Redmine");
+        rmEntry.jiraUrl = QStringLiteral("https://redmine.org");
+        const QUrl rmUrl = IssueTrackerService::buildIssueBrowserUrl(rmEntry, QStringLiteral("RM#1234"));
+        QCOMPARE(rmUrl.toString(), QStringLiteral("https://redmine.org/issues/1234"));
+
+        // Todoist
+        TodoListEntry tdEntry;
+        tdEntry.provider = QStringLiteral("Todoist");
+        const QUrl tdUrl = IssueTrackerService::buildIssueBrowserUrl(tdEntry, QStringLiteral("TD#99887766"));
+        QCOMPARE(tdUrl.toString(), QStringLiteral("https://todoist.com/app/task/99887766"));
+
+        // Nextcloud
+        TodoListEntry ncEntry;
+        ncEntry.provider = QStringLiteral("Nextcloud");
+        ncEntry.jiraUrl = QStringLiteral("https://cloud.example.org");
+        const QUrl ncUrl = IssueTrackerService::buildIssueBrowserUrl(ncEntry, QStringLiteral("uid-abc"));
+        QCOMPARE(ncUrl.toString(), QStringLiteral("https://cloud.example.org/apps/tasks/"));
+
+        // Fallback: direct URL in task description
+        TodoListEntry localEntry;
+        localEntry.provider = QStringLiteral("SQLite");
+        const QUrl localUrl = IssueTrackerService::buildIssueBrowserUrl(localEntry, QString(), QStringLiteral("Fix bug https://docs.qt.io/qt-6/qurl.html +research"));
+        QCOMPARE(localUrl.toString(), QStringLiteral("https://docs.qt.io/qt-6/qurl.html"));
     }
 };
 

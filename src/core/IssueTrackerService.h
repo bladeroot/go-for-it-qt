@@ -33,6 +33,7 @@ public:
 
     [[nodiscard]] bool isSyncing() const noexcept { return m_syncing; }
     [[nodiscard]] QString lastStatusMessage() const { return m_lastStatusMessage; }
+    void setStatusMessage(const QString& msg);
 
     void syncListIssues(const TodoListEntry& listEntry);
     void postWorklog(const TodoListEntry& listEntry,
@@ -52,6 +53,9 @@ public:
                           bool forceBearerAuth = false,
                           bool useV2Fallback = false);
     static QJsonObject markdownToJiraAdf(const QString& markdown);
+    static QUrl buildIssueBrowserUrl(const TodoListEntry& listEntry,
+                                     const QString& issueKey,
+                                     const QString& taskDescription = QString());
 
     // Fetch available remote statuses for mapping UI
     Q_INVOKABLE void fetchRemoteStatuses(const QString& provider,
@@ -96,7 +100,6 @@ private:
     static QString gitHubApiBaseUrl(const QString& rawBaseUrl);
     static void applyAuthHeader(QNetworkRequest& req, const TodoListEntry& entry, bool forceBearerAuth = false);
     void setSyncing(bool value);
-    void setStatusMessage(const QString& msg);
 
     void fetchJiraIssues(const TodoListEntry& entry, int endpointStage = 0, bool forceBearerAuth = false);
     void fetchYouTrackIssues(const TodoListEntry& entry);

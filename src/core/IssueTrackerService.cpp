@@ -2696,4 +2696,177 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
     }
 }
 
+QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
+                                               const QString& issueKey,
+                                               const QString& taskDescription) {
+    const QString provider = listEntry.provider.trimmed();
+
+    if (provider == QStringLiteral("Jira")) {
+        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+        const QString key = issueKey.trimmed();
+        if (!baseUrl.isEmpty() && !key.isEmpty()) {
+            return QUrl(baseUrl + QStringLiteral("/browse/") + key);
+        }
+    } else if (provider == QStringLiteral("YouTrack")) {
+        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+        const QString key = issueKey.trimmed();
+        if (!baseUrl.isEmpty() && !key.isEmpty()) {
+            return QUrl(baseUrl + QStringLiteral("/issue/") + key);
+        }
+    } else if (provider == QStringLiteral("GitHub")) {
+        QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+        if (baseUrl.isEmpty() || baseUrl.contains(QStringLiteral("api.github.com"))) {
+            baseUrl = QStringLiteral("https://github.com");
+        } else if (baseUrl.endsWith(QStringLiteral("/api/v3"), Qt::CaseInsensitive)) {
+            baseUrl.chop(7);
+        }
+
+        const bool isPr = issueKey.startsWith(QStringLiteral("PR#"), Qt::CaseInsensitive)
+                       || issueKey.startsWith(QStringLiteral("PR!"), Qt::CaseInsensitive);
+        QString owner;
+        QString repo;
+        QString numStr;
+
+        if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                const QString repoPart = parts.at(1);
+                const int slashIdx = repoPart.indexOf(QLatin1Char('/'));
+                if (slashIdx > 0) {
+                    owner = repoPart.left(slashIdx);
+                    repo = repoPart.mid(slashIdx + 1);
+                }
+                numStr = parts.at(2);
+            } else if (parts.size() == 2) {
+                if (parts.at(0).contains(QLatin1Char('/'))) {
+                    const int slashIdx = parts.at(0).indexOf(QLatin1Char('/'));
+                    owner = parts.at(0).left(slashIdx);
+                    repo = parts.at(0).mid(slashIdx + 1);
+                }
+                numStr = parts.at(1);
+            }
+        }
+
+        if (owner.isEmpty() || repo.isEmpty()) {
+            QString spec = listEntry.jiraJql.trimmed();
+            if (spec.startsWith(QStringLiteral("repo:"), Qt::CaseInsensitive)) {
+                spec = spec.mid(5).trimmed();
+            }
+            const int slashIdx = spec.indexOf(QLatin1Char('/'));
+            if (slashIdx > 0) {
+                owner = spec.left(slashIdx);
+                repo = spec.mid(slashIdx + 1);
+                const int sp = repo.indexOf(QLatin1Char(' '));
+                if (sp > 0) repo = repo.left(sp);
+            }
+        }
+
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) {
+                if (c.isDigit()) numStr.append(c);
+            }
+        }
+
+        if (!owner.isEmpty() && !repo.isEmpty() && !numStr.isEmpty()) {
+            const QString itemType = isPr ? QStringLiteral("pull") : QStringLiteral("issues");
+            return QUrl(QStringLiteral("%1/%2/%3/%4/%5").arg(baseUrl, owner, repo, itemType, numStr));
+        }
+        if (!baseUrl.isEmpty() && !listEntry.jiraUrl.trimmed().isEmpty()) {
+            return QUrl(baseUrl);
+        }
+    } else if (provider == QStringLiteral("GitLab")) {
+        QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+        if (baseUrl.isEmpty()) {
+            baseUrl = QStringLiteral("https://gitlab.com");
+        }
+
+        const bool isMr = issueKey.startsWith(QStringLiteral("MR!"), Qt::CaseInsensitive)
+                       || issueKey.contains(QLatin1Char('!'));
+        QString project;
+        QString iid;
+
+        if (issueKey.contains(QLatin1Char('!'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('!'));
+            if (parts.size() >= 3) {
+                project = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                if (parts.at(0).contains(QLatin1Char('/'))) {
+                    project = parts.at(0);
+                }
+                iid = parts.at(1);
+            }
+        } else if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) {
+                project = parts.at(1);
+                iid = parts.at(2);
+            } else if (parts.size() == 2) {
+                if (parts.at(0).contains(QLatin1Char('/'))) {
+                    project = parts.at(0);
+                }
+                iid = parts.at(1);
+            }
+        }
+
+        if (project.isEmpty()) {
+            const QString spec = listEntry.jiraJql.trimmed();
+            if (!spec.contains(QLatin1Char('=')) && !spec.contains(QLatin1Char('&')) && spec.contains(QLatin1Char('/'))) {
+                project = spec;
+            }
+        }
+
+        if (iid.isEmpty()) {
+            for (const QChar& c : issueKey) {
+                if (c.isDigit()) iid.append(c);
+            }
+        }
+
+        if (!project.isEmpty() && !iid.isEmpty()) {
+            const QString itemType = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
+            return QUrl(QStringLiteral("%1/%2/-/%3/%4").arg(baseUrl, project, itemType, iid));
+        }
+        if (!baseUrl.isEmpty() && !listEntry.jiraUrl.trimmed().isEmpty()) {
+            return QUrl(baseUrl);
+        }
+    } else if (provider == QStringLiteral("Redmine")) {
+        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+        QString numStr;
+        for (const QChar& c : issueKey) {
+            if (c.isDigit()) numStr.append(c);
+        }
+        if (!baseUrl.isEmpty() && !numStr.isEmpty()) {
+            return QUrl(baseUrl + QStringLiteral("/issues/") + numStr);
+        }
+        if (!baseUrl.isEmpty()) {
+            return QUrl(baseUrl);
+        }
+    } else if (provider == QStringLiteral("Todoist")) {
+        QString numStr;
+        for (const QChar& c : issueKey) {
+            if (c.isDigit()) numStr.append(c);
+        }
+        if (!numStr.isEmpty()) {
+            return QUrl(QStringLiteral("https://todoist.com/app/task/") + numStr);
+        }
+        return QUrl(QStringLiteral("https://todoist.com/app/today"));
+    } else if (provider == QStringLiteral("Nextcloud")) {
+        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+        if (!baseUrl.isEmpty()) {
+            return QUrl(baseUrl + QStringLiteral("/apps/tasks/"));
+        }
+    }
+
+    // Fallback: search taskDescription for an explicit HTTP/HTTPS link
+    if (!taskDescription.isEmpty()) {
+        static const QRegularExpression urlRe(QStringLiteral("https?://[^\\s<>\"'\\]\\)]+"));
+        const auto match = urlRe.match(taskDescription);
+        if (match.hasMatch()) {
+            return QUrl(match.captured(0));
+        }
+    }
+
+    return QUrl();
+}
+
 } // namespace gofi

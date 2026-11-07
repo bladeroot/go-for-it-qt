@@ -57,6 +57,7 @@ private:
     void openTaskMarkdownView();
     void editTaskDetailsInVim();
     void addTaskCommentInVim();
+    void openSelectedTaskInBrowser();
     static QStringList renderMarkdownToAnsi(const QString& markdown, int maxWidth);
     static QString formatInlineMarkdown(const QString& text);
 

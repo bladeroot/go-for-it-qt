@@ -20,14 +20,16 @@ Dialog {
     property var taskComments: []
     property bool editMode: false
     property string loadedFilePath: ""
+    property string taskWebUrl: ""
 
-    function openForTask(isDoneList, rowIdx, titleStr, statusStr, detailsStr, commentsList) {
+    function openForTask(isDoneList, rowIdx, titleStr, statusStr, detailsStr, commentsList, webUrl) {
         fromDoneList = isDoneList
         taskRow = rowIdx
         taskTitle = titleStr
         taskStatus = statusStr || "todo"
         taskDetails = detailsStr || ""
         taskComments = commentsList || []
+        taskWebUrl = webUrl || ""
         detailsArea.text = taskDetails
         loadedFilePath = ""
         editMode = (taskDetails.trim() === "")
@@ -80,6 +82,14 @@ Dialog {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Open and view a local Markdown (.md) file")
                 onClicked: mdFileDialog.open()
+            }
+
+            Button {
+                visible: detailsDialog.taskWebUrl !== ""
+                text: qsTr("🌐 Open in Browser")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Open task in web browser (%1)").arg(detailsDialog.taskWebUrl)
+                onClicked: app.openUrlExternally(detailsDialog.taskWebUrl)
             }
         }
 

@@ -277,6 +277,12 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
             }
             return;
         }
+        if (prev == 'g' && seq == "x") {
+            if (count > 0) {
+                openSelectedTaskInBrowser();
+            }
+            return;
+        }
     }
 
     if (seq == "g" || seq == "d" || seq == "c") {
@@ -375,6 +381,14 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
     if (seq == "s") {
         if (count > 0) {
             m_mode = Mode::StatusPicker;
+        }
+        return;
+    }
+
+    // Open task / issue in web browser: w
+    if (seq == "w") {
+        if (count > 0) {
+            openSelectedTaskInBrowser();
         }
         return;
     }
@@ -1089,6 +1103,14 @@ void TuiApp::openTaskMarkdownView() {
 
     m_markdownTitle = QStringLiteral("%1 [%2]").arg(desc, statusLabel(status));
     QString fullMd = QStringLiteral("# %1\n\n").arg(desc);
+
+    const QString listId = proxy->data(idx, TaskStoreModel::ListIdRole).toString();
+    const QString jiraKey = proxy->data(idx, TaskStoreModel::JiraKeyRole).toString();
+    const QUrl taskUrl = m_app->getTaskBrowserUrl(listId, jiraKey, desc);
+    if (taskUrl.isValid() && !taskUrl.isEmpty()) {
+        fullMd += QStringLiteral("🌐 **Web URL:** [%1](%1) *(press `w` to open in browser)*\n\n").arg(taskUrl.toString());
+    }
+
     if (!details.trimmed().isEmpty()) {
         fullMd += details.trimmed() + QStringLiteral("\n\n");
     } else {
@@ -1108,6 +1130,25 @@ void TuiApp::openTaskMarkdownView() {
     m_markdownContent = fullMd;
     m_markdownScroll = 0;
     m_mode = Mode::MarkdownView;
+}
+
+void TuiApp::openSelectedTaskInBrowser() {
+    TaskFilterProxyModel* proxy = currentProxy();
+    const int count = proxy->rowCount();
+    if (count <= 0 || m_selectedRow < 0 || m_selectedRow >= count) return;
+
+    const QModelIndex idx = proxy->index(m_selectedRow, 0);
+    const QString listId = proxy->data(idx, TaskStoreModel::ListIdRole).toString();
+    const QString jiraKey = proxy->data(idx, TaskStoreModel::JiraKeyRole).toString();
+    const QString desc = proxy->data(idx, TaskStoreModel::DescriptionRole).toString();
+
+    const QUrl url = m_app->getTaskBrowserUrl(listId, jiraKey, desc);
+    if (url.isValid() && !url.isEmpty()) {
+        m_statusMessage = tr("Opening in browser: %1").arg(url.toString());
+        m_app->openUrlExternally(url);
+    } else {
+        m_statusMessage = tr("No web URL available for selected task.");
+    }
 }
 
 QString TuiApp::formatInlineMarkdown(const QString& text) {
@@ -1271,6 +1312,12 @@ void TuiApp::handleMarkdownViewKey(const QByteArray& seq) {
     if (seq == "C" || seq == "c") {
         if (currentProxy()->rowCount() > 0) {
             addTaskCommentInVim();
+        }
+        return;
+    }
+    if (seq == "w" || seq == "gx") {
+        if (currentProxy()->rowCount() > 0) {
+            openSelectedTaskInBrowser();
         }
         return;
     }
@@ -1579,6 +1626,7 @@ void TuiApp::render() {
             tr("  L (a:Add, e:Edit, d:Delete)       Open List Manager (create/edit SQLite, Jira, YouTrack lists)"),
             tr("  O or :set / :settings             Open Global Settings (Timer, Notifications, Storage/DB Backup)"),
             tr("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
+            tr("  w / gx                            Open task / issue in web browser (GitHub, GitLab, Jira, YouTrack...)"),
             tr("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
             tr("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)")
         };
@@ -1830,6 +1878,14 @@ void TuiApp::render() {
                 const QString status = proxy->data(idx, TaskStoreModel::StatusRole).toString();
 
                 previewLines.append(ESC_BOLD + FG_CYAN + QStringLiteral("  %1  [%2]").arg(desc, statusLabel(status)) + ESC_RESET);
+
+                const QString listId = proxy->data(idx, TaskStoreModel::ListIdRole).toString();
+                const QString jiraKey = proxy->data(idx, TaskStoreModel::JiraKeyRole).toString();
+                const QUrl taskUrl = m_app->getTaskBrowserUrl(listId, jiraKey, desc);
+                if (taskUrl.isValid() && !taskUrl.isEmpty()) {
+                    previewLines.append(FG_CYAN + tr("  🌐 Browser: %1 (press 'w' or 'gx' to open)").arg(taskUrl.toString()) + ESC_RESET);
+                }
+
                 if (!details.isEmpty()) {
                     previewLines.append(renderMarkdownToAnsi(details, m_cols));
                 } else {
