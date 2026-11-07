@@ -178,6 +178,10 @@ ApplicationWindow {
             Qt.quit()
         }
     }
+    Shortcut {
+        sequence: "Ctrl+M"
+        onActivated: rootWindow.toggleMiniPlayer()
+    }
 
     header: ToolBar {
         RowLayout {
@@ -358,8 +362,7 @@ ApplicationWindow {
                         onTriggered: app.clearDoneTasks()
                     }
                     MenuItem {
-                        text: "🗗 " + qsTr("Always on Top Mini-Player")
-                        shortcut: "Ctrl+M"
+                        text: "🗗 " + qsTr("Always on Top Mini-Player") + " (Ctrl+M)"
                         onTriggered: rootWindow.toggleMiniPlayer()
                     }
                     MenuSeparator {}
