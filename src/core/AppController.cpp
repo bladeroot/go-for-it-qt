@@ -405,8 +405,9 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
     const bool wasDone = (oldStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
     const bool isCompleting = (newStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
+    const bool willMoveToDone = (!fromDoneList && !wasDone && isCompleting);
 
-    if (!fromDoneList && m_timer.isRunning()) {
+    if (willMoveToDone && m_timer.isRunning()) {
         const qint64 timedTaskId = m_timer.activeTaskId();
         const qint64 targetTaskId = taskId.toLongLong();
         if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
@@ -757,6 +758,14 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         stopUtc,
         completedPomodoro
     );
+
+    if (logId < 0) {
+        const QString errMsg = tr("Failed to save activity log record to database for '%1'.").arg(taskDescription);
+        qCritical() << errMsg;
+        m_notifications.notifyTaskEvent(tr("Database Error"), errMsg);
+        emit databaseError(errMsg);
+    }
+
     const int listIdx = m_listManager.indexOfId(targetListId);
     QString logPath;
     if (listIdx >= 0) {
@@ -777,7 +786,7 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         );
     }
 
-    if (listIdx >= 0 && !jiraKey.isEmpty()) {
+    if (listIdx >= 0 && !jiraKey.isEmpty() && logId >= 0) {
         const TodoListEntry listEntry = m_listManager.entry(listIdx);
         if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")
             && listEntry.autoWorklog) {
