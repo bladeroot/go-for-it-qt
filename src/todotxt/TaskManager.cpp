@@ -8,11 +8,19 @@ TaskManager::TaskManager(QObject* parent)
     , m_todoStore(false, this)
     , m_doneStore(true, this)
 {
-    connect(&m_todoStore, &TaskStoreModel::taskDoneToggled, this, &TaskManager::onTodoTaskDoneToggled);
-    connect(&m_doneStore, &TaskStoreModel::taskDoneToggled, this, &TaskManager::onDoneTaskDoneToggled);
+    m_todoStore.setToggleDoneHandler([this](int row, const TxtTask& task) {
+        return toggleTodoTaskDone(row, task);
+    });
+    m_doneStore.setToggleDoneHandler([this](int row, const TxtTask& task) {
+        return toggleDoneTaskDone(row, task);
+    });
 
-    connect(&m_todoStore, &TaskStoreModel::taskUpdated, this, &TaskManager::onTaskUpdated);
-    connect(&m_doneStore, &TaskStoreModel::taskUpdated, this, &TaskManager::onTaskUpdated);
+    m_todoStore.setUpdateTaskHandler([this](int row, const TxtTask& task) {
+        return updateTaskInDatabase(row, task);
+    });
+    m_doneStore.setUpdateTaskHandler([this](int row, const TxtTask& task) {
+        return updateTaskInDatabase(row, task);
+    });
 
     connect(&m_todoStore, &TaskStoreModel::taskRemoved, this, &TaskManager::onTaskRemoved);
     connect(&m_doneStore, &TaskStoreModel::taskRemoved, this, &TaskManager::onTaskRemoved);
@@ -192,11 +200,8 @@ void TaskManager::refresh() {
     emit refreshed();
 }
 
-void TaskManager::onTodoTaskDoneToggled(int row, const TxtTask& task, bool* success) {
-    if (m_movingBetweenStores) {
-        if (success) *success = false;
-        return;
-    }
+bool TaskManager::toggleTodoTaskDone(int row, const TxtTask& task) {
+    if (m_movingBetweenStores) return false;
     const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
     int newOrder = 0;
     for (int i = 0; i < m_doneStore.rowCount(); ++i) {
@@ -218,23 +223,19 @@ void TaskManager::onTodoTaskDoneToggled(int row, const TxtTask& task, bool* succ
     }
 
     if (!DatabaseManager::instance().moveTaskDoneAndReorder(task, newOrder, remainingPerList, false)) {
-        if (success) *success = false;
         emit errorOccurred(tr("Failed to update task status in database."));
         loadFromDatabase(false);
-        return;
+        return false;
     }
-    if (success) *success = true;
     m_movingBetweenStores = true;
     m_todoStore.removeAt(row);
     m_doneStore.appendTask(task);
     m_movingBetweenStores = false;
+    return true;
 }
 
-void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task, bool* success) {
-    if (m_movingBetweenStores) {
-        if (success) *success = false;
-        return;
-    }
+bool TaskManager::toggleDoneTaskDone(int row, const TxtTask& task) {
+    if (m_movingBetweenStores) return false;
     const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
     int newOrder = 0;
     for (int i = 0; i < m_todoStore.rowCount(); ++i) {
@@ -256,31 +257,28 @@ void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task, bool* succ
     }
 
     if (!DatabaseManager::instance().moveTaskDoneAndReorder(task, newOrder, remainingPerList, true)) {
-        if (success) *success = false;
         emit errorOccurred(tr("Failed to update task status in database."));
         loadFromDatabase(false);
-        return;
+        return false;
     }
-    if (success) *success = true;
     m_movingBetweenStores = true;
     m_doneStore.removeAt(row);
     m_todoStore.appendTask(task);
     m_movingBetweenStores = false;
+    return true;
 }
 
-void TaskManager::onTaskUpdated(int row, const TxtTask& task, bool* success) {
+bool TaskManager::updateTaskInDatabase(int row, const TxtTask& task) {
     Q_UNUSED(row)
     if (m_suppressStoreTaskUpdated) {
-        if (success) *success = true;
-        return;
+        return true;
     }
     if (!DatabaseManager::instance().updateTask(task)) {
-        if (success) *success = false;
         emit errorOccurred(tr("Failed to update task in database."));
         loadFromDatabase(false);
-        return;
+        return false;
     }
-    if (success) *success = true;
+    return true;
 }
 
 void TaskManager::onTaskRemoved(qint64 taskId) {

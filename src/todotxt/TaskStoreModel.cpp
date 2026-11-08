@@ -90,14 +90,14 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
         if (t.isDone() == newDone) return false;
         TxtTask updatedTask = t;
         updatedTask.setDone(newDone);
-        bool ok = true;
-        emit taskDoneToggled(index.row(), updatedTask, &ok);
-        if (!ok) {
-            return false;
+        if (m_toggleDoneHandler) {
+            if (!m_toggleDoneHandler(index.row(), updatedTask)) {
+                return false;
+            }
+        } else {
+            t.setDone(newDone);
         }
-        if (index.row() < m_tasks.size() && m_tasks[index.row()].id() == updatedTask.id()) {
-            m_tasks[index.row()].setDone(newDone);
-        }
+        emit taskDoneToggled(index.row(), updatedTask);
         return true;
     }
     case StatusRole: {
@@ -108,25 +108,24 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
         if (oldDone != willBeDone) {
             TxtTask updatedTask = t;
             updatedTask.setStatus(newStatus);
-            bool ok = true;
-            emit taskDoneToggled(index.row(), updatedTask, &ok);
-            if (!ok) {
-                return false;
+            if (m_toggleDoneHandler) {
+                if (!m_toggleDoneHandler(index.row(), updatedTask)) {
+                    return false;
+                }
+            } else {
+                t.setStatus(newStatus);
             }
-            if (index.row() < m_tasks.size() && m_tasks[index.row()].id() == updatedTask.id()) {
-                m_tasks[index.row()].setStatus(newStatus);
-            }
+            emit taskDoneToggled(index.row(), updatedTask);
             return true;
         } else {
-            TxtTask backup = t;
-            t.setStatus(newStatus);
-            bool ok = true;
-            emit taskUpdated(index.row(), t, &ok);
-            if (!ok) {
-                t = backup;
+            TxtTask updatedTask = t;
+            updatedTask.setStatus(newStatus);
+            if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updatedTask)) {
                 return false;
             }
+            t.setStatus(newStatus);
             emit dataChanged(index, index, {DoneRole, StatusRole, CompletionDateRole});
+            emit taskUpdated(index.row(), t);
             emit taskDataChanged();
             emit unviewedTodoCountChanged();
             emit totalTodoCountChanged();
@@ -136,79 +135,74 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
     case IsViewedRole: {
         const bool v = value.toBool();
         if (t.isViewed() == v) return false;
-        const bool oldViewed = t.isViewed();
-        t.setViewed(v);
-        bool ok = true;
-        emit taskUpdated(index.row(), t, &ok);
-        if (!ok) {
-            t.setViewed(oldViewed);
+        TxtTask updated = t;
+        updated.setViewed(v);
+        if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
             return false;
         }
+        t.setViewed(v);
         emit dataChanged(index, index, {IsViewedRole});
+        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         emit unviewedTodoCountChanged();
         return true;
     }
     case SimpleTextRole:
     case DescriptionRole: {
-        TxtTask backup = t;
-        t.updateFromSimpleTxt(value.toString());
-        if (!t.isValid()) {
+        TxtTask updated = t;
+        updated.updateFromSimpleTxt(value.toString());
+        if (!updated.isValid()) {
             emit taskBecameInvalid(index.row());
             return true;
         }
-        bool ok = true;
-        emit taskUpdated(index.row(), t, &ok);
-        if (!ok) {
-            t = backup;
+        if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
             return false;
         }
+        t = updated;
         emit dataChanged(index, index, {DescriptionRole, SimpleTextRole, PriorityRole, PriorityStringRole, DurationRole, TokensRole, RichTextRole, DueDateRole, DueDateStringRole, IsOverdueRole, IsDueTodayRole, IsDueThisWeekRole});
+        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
     case TimerValueRole: {
         const quint32 sec = value.toUInt();
         if (t.timerValue() == sec) return false;
-        const quint32 oldSec = t.timerValue();
-        t.setTimerValue(sec);
-        bool ok = true;
-        emit taskUpdated(index.row(), t, &ok);
-        if (!ok) {
-            t.setTimerValue(oldSec);
+        TxtTask updated = t;
+        updated.setTimerValue(sec);
+        if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
             return false;
         }
+        t.setTimerValue(sec);
         emit dataChanged(index, index, {TimerValueRole});
+        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
     case DetailsRole: {
         const QString d = value.toString();
         if (t.details() == d) return false;
-        const QString oldDetails = t.details();
-        t.setDetails(d);
-        bool ok = true;
-        emit taskUpdated(index.row(), t, &ok);
-        if (!ok) {
-            t.setDetails(oldDetails);
+        TxtTask updated = t;
+        updated.setDetails(d);
+        if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
             return false;
         }
+        t.setDetails(d);
         emit dataChanged(index, index, {DetailsRole});
+        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
     case PriorityRole: {
         const quint8 prio = static_cast<quint8>(value.toUInt());
         if (t.priority() == prio) return false;
-        const quint8 oldPrio = t.priority();
-        t.setPriority(prio);
-        bool ok = true;
-        emit taskUpdated(index.row(), t, &ok);
-        if (!ok) {
-            t.setPriority(oldPrio);
+        TxtTask updated = t;
+        updated.setPriority(prio);
+        if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
             return false;
         }
+        t.setPriority(prio);
         emit dataChanged(index, index, {PriorityRole, PriorityStringRole, SimpleTextRole});
+        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
@@ -328,34 +322,41 @@ void TaskStoreModel::moveItem(int fromRow, int toRow) {
     emit taskDataChanged();
 }
 
-void TaskStoreModel::updateTaskText(int row, const QString& simpleText) {
-    setData(index(row, 0), simpleText, SimpleTextRole);
+bool TaskStoreModel::updateTaskText(int row, const QString& simpleText) {
+    return setData(index(row, 0), simpleText, SimpleTextRole);
 }
 
-void TaskStoreModel::setTaskStatus(int row, const QString& newStatus) {
-    setData(index(row, 0), newStatus, StatusRole);
+bool TaskStoreModel::setTaskStatus(int row, const QString& newStatus) {
+    return setData(index(row, 0), newStatus, StatusRole);
 }
 
-void TaskStoreModel::updateTaskDetails(int row, const QString& details) {
-    setData(index(row, 0), details, DetailsRole);
+bool TaskStoreModel::updateTaskDetails(int row, const QString& details) {
+    return setData(index(row, 0), details, DetailsRole);
 }
 
-void TaskStoreModel::appendTaskComment(int row, const QString& author, const QString& commentBody) {
+bool TaskStoreModel::appendTaskComment(int row, const QString& author, const QString& commentBody) {
     if (row < 0 || row >= m_tasks.size() || commentBody.trimmed().isEmpty()) {
-        return;
+        return false;
     }
-    TxtTask& t = m_tasks[row];
-    QVariantList comments = t.comments();
+    TxtTask updated = m_tasks[row];
+    QVariantList comments = updated.comments();
     comments.append(QVariantMap{
         {QStringLiteral("author"), author.trimmed().isEmpty() ? QStringLiteral("Me") : author.trimmed()},
         {QStringLiteral("created"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"))},
         {QStringLiteral("body"), commentBody.trimmed()}
     });
-    t.setComments(comments);
+    updated.setComments(comments);
+
+    if (m_updateTaskHandler && !m_updateTaskHandler(row, updated)) {
+        return false;
+    }
+
+    m_tasks[row] = updated;
     const QModelIndex idx = index(row, 0);
     emit dataChanged(idx, idx, {CommentsRole});
-    emit taskUpdated(row, t);
+    emit taskUpdated(row, m_tasks[row]);
     emit taskDataChanged();
+    return true;
 }
 
 TxtTask TaskStoreModel::taskAt(int row) const {
@@ -365,8 +366,8 @@ TxtTask TaskStoreModel::taskAt(int row) const {
     return m_tasks.at(row);
 }
 
-void TaskStoreModel::setTaskTimerValue(int row, quint32 seconds) {
-    setData(index(row, 0), seconds, TimerValueRole);
+bool TaskStoreModel::setTaskTimerValue(int row, quint32 seconds) {
+    return setData(index(row, 0), seconds, TimerValueRole);
 }
 
 int TaskStoreModel::unviewedTodoCount() const {
@@ -389,16 +390,10 @@ int TaskStoreModel::totalTodoCount() const {
     return count;
 }
 
-void TaskStoreModel::markTaskViewed(int row) {
-    if (row < 0 || row >= m_tasks.size()) return;
-    if (m_tasks.at(row).isViewed()) return;
-
-    m_tasks[row].setViewed(true);
-    const QModelIndex idx = index(row, 0);
-    emit dataChanged(idx, idx, {IsViewedRole});
-    emit taskUpdated(row, m_tasks[row]);
-    emit taskDataChanged();
-    emit unviewedTodoCountChanged();
+bool TaskStoreModel::markTaskViewed(int row) {
+    if (row < 0 || row >= m_tasks.size()) return false;
+    if (m_tasks.at(row).isViewed()) return true;
+    return setData(index(row, 0), true, IsViewedRole);
 }
 
 } // namespace gofi

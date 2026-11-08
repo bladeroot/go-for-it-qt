@@ -42,14 +42,14 @@ signals:
     void refreshed();
 
 private slots:
-    void onTodoTaskDoneToggled(int row, const gofi::TxtTask& task, bool* success = nullptr);
-    void onDoneTaskDoneToggled(int row, const gofi::TxtTask& task, bool* success = nullptr);
-    void onTaskUpdated(int row, const gofi::TxtTask& task, bool* success = nullptr);
     void onTaskRemoved(qint64 taskId);
     void onTodoTasksReordered();
     void onDoneTasksReordered();
 
 private:
+    bool toggleTodoTaskDone(int row, const gofi::TxtTask& task);
+    bool toggleDoneTaskDone(int row, const gofi::TxtTask& task);
+    bool updateTaskInDatabase(int row, const gofi::TxtTask& task);
     void loadFromDatabase(bool addDefaultsIfEmpty);
     bool updateTasksOrders(bool done, const QVector<TxtTask>& tasks);
 

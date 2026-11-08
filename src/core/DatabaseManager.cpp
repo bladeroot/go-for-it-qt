@@ -1120,7 +1120,21 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         }
 
         QSqlQuery sp(database);
-        const bool useSavepoint = sp.exec(QStringLiteral("SAVEPOINT upsert_remote_task"));
+        if (!sp.exec(QStringLiteral("SAVEPOINT upsert_remote_task"))) {
+            qWarning() << "DatabaseManager::upsertRemoteIssueTask failed to create savepoint:" << sp.lastError().text();
+            return false;
+        }
+
+        auto rollbackSavepoint = [&database]() {
+            QSqlQuery rb(database);
+            if (!rb.exec(QStringLiteral("ROLLBACK TO SAVEPOINT upsert_remote_task"))) {
+                qWarning() << "DatabaseManager::upsertRemoteIssueTask ROLLBACK TO SAVEPOINT failed:" << rb.lastError().text();
+            }
+            QSqlQuery rel(database);
+            if (!rel.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"))) {
+                qWarning() << "DatabaseManager::upsertRemoteIssueTask RELEASE SAVEPOINT after rollback failed:" << rel.lastError().text();
+            }
+        };
 
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
@@ -1141,11 +1155,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":comments_json"), nonNullString(commentsJson));
         upd.bindValue(QStringLiteral(":id"), existingId);
         if (!upd.exec() || upd.numRowsAffected() <= 0) {
-            if (useSavepoint) {
-                QSqlQuery rb(database);
-                rb.exec(QStringLiteral("ROLLBACK TO SAVEPOINT upsert_remote_task"));
-                rb.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"));
-            }
+            rollbackSavepoint();
             return false;
         }
 
@@ -1158,18 +1168,16 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
             compactQ.bindValue(QStringLiteral(":wasDone"), wasDone ? 1 : 0);
             compactQ.bindValue(QStringLiteral(":oldOrder"), oldOrder);
             if (!compactQ.exec()) {
-                if (useSavepoint) {
-                    QSqlQuery rb(database);
-                    rb.exec(QStringLiteral("ROLLBACK TO SAVEPOINT upsert_remote_task"));
-                    rb.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"));
-                }
+                rollbackSavepoint();
                 return false;
             }
         }
 
-        if (useSavepoint) {
-            QSqlQuery rel(database);
-            rel.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"));
+        QSqlQuery rel(database);
+        if (!rel.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"))) {
+            qWarning() << "DatabaseManager::upsertRemoteIssueTask final RELEASE SAVEPOINT failed:" << rel.lastError().text();
+            rollbackSavepoint();
+            return false;
         }
 
         return true;

@@ -3,6 +3,7 @@
 #include "TxtTask.h"
 #include <QAbstractListModel>
 #include <QVector>
+#include <functional>
 
 namespace gofi {
 
@@ -57,34 +58,42 @@ public:
     void clear();
     void sortTasks();
 
+    using ToggleDoneHandler = std::function<bool(int row, const TxtTask& task)>;
+    using UpdateTaskHandler = std::function<bool(int row, const TxtTask& task)>;
+
+    void setToggleDoneHandler(ToggleDoneHandler handler) { m_toggleDoneHandler = std::move(handler); }
+    void setUpdateTaskHandler(UpdateTaskHandler handler) { m_updateTaskHandler = std::move(handler); }
+
     Q_INVOKABLE void removeAt(int row);
     Q_INVOKABLE void moveItem(int fromRow, int toRow);
-    Q_INVOKABLE void updateTaskText(int row, const QString& simpleText);
-    Q_INVOKABLE void setTaskStatus(int row, const QString& newStatus);
-    Q_INVOKABLE void updateTaskDetails(int row, const QString& details);
-    Q_INVOKABLE void appendTaskComment(int row, const QString& author, const QString& commentBody);
+    Q_INVOKABLE bool updateTaskText(int row, const QString& simpleText);
+    Q_INVOKABLE bool setTaskStatus(int row, const QString& newStatus);
+    Q_INVOKABLE bool updateTaskDetails(int row, const QString& details);
+    Q_INVOKABLE bool appendTaskComment(int row, const QString& author, const QString& commentBody);
 
     [[nodiscard]] const QVector<TxtTask>& tasks() const noexcept { return m_tasks; }
     [[nodiscard]] TxtTask taskAt(int row) const;
-    void setTaskTimerValue(int row, quint32 seconds);
+    bool setTaskTimerValue(int row, quint32 seconds);
     [[nodiscard]] int unviewedTodoCount() const;
     [[nodiscard]] int totalTodoCount() const;
-    Q_INVOKABLE void markTaskViewed(int row);
+    Q_INVOKABLE bool markTaskViewed(int row);
 
 signals:
     void countChanged();
     void unviewedTodoCountChanged();
     void totalTodoCountChanged();
     void taskDataChanged();
-    void taskUpdated(int row, gofi::TxtTask task, bool* success = nullptr);
+    void taskUpdated(int row, gofi::TxtTask task);
     void taskRemoved(qint64 taskId);
     void tasksReordered();
-    void taskDoneToggled(int row, gofi::TxtTask task, bool* success = nullptr);
+    void taskDoneToggled(int row, gofi::TxtTask task);
     void taskBecameInvalid(int row);
 
 private:
     QVector<TxtTask> m_tasks;
     bool m_doneByDefault = false;
+    ToggleDoneHandler m_toggleDoneHandler;
+    UpdateTaskHandler m_updateTaskHandler;
 };
 
 } // namespace gofi
