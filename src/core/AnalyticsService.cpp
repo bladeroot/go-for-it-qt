@@ -18,6 +18,20 @@
 
 namespace gofi {
 
+namespace {
+QString escapeCsvField(QString val) {
+    val.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+    if (!val.isEmpty()) {
+        const QChar first = val.at(0);
+        if (first == QLatin1Char('=') || first == QLatin1Char('+') || first == QLatin1Char('-') ||
+            first == QLatin1Char('@') || first == QLatin1Char('\t') || first == QLatin1Char('\r')) {
+            val.prepend(QLatin1Char('\''));
+        }
+    }
+    return val;
+}
+} // namespace
+
 AnalyticsService::AnalyticsService(QObject* parent)
     : QObject(parent)
 {
@@ -312,17 +326,17 @@ bool AnalyticsService::exportBillingCsv(const QString& filePath,
 
     for (const QVariant& tv : tasks) {
         const QVariantMap m = tv.toMap();
-        const QString desc = m.value(QStringLiteral("description")).toString().replace(QLatin1Char('"'), QStringLiteral("\"\""));
-        const QString key = m.value(QStringLiteral("jiraKey")).toString().replace(QLatin1Char('"'), QStringLiteral("\"\""));
-        const QString listName = m.value(QStringLiteral("listName")).toString().replace(QLatin1Char('"'), QStringLiteral("\"\""));
+        const QString desc = escapeCsvField(m.value(QStringLiteral("description")).toString());
+        const QString key = escapeCsvField(m.value(QStringLiteral("jiraKey")).toString());
+        const QString listName = escapeCsvField(m.value(QStringLiteral("listName")).toString());
         const QString duration = m.value(QStringLiteral("formattedTime")).toString();
         const double hours = m.value(QStringLiteral("hours")).toDouble();
         const int sessions = m.value(QStringLiteral("sessions")).toInt();
         const QString first = m.value(QStringLiteral("firstStart")).toString();
         const QString last = m.value(QStringLiteral("lastStop")).toString();
 
-        const QString projs = extractProjects(desc).join(QStringLiteral(", "));
-        const QString ctxs = extractContexts(desc).join(QStringLiteral(", "));
+        const QString projs = escapeCsvField(extractProjects(m.value(QStringLiteral("description")).toString()).join(QStringLiteral(", ")));
+        const QString ctxs = escapeCsvField(extractContexts(m.value(QStringLiteral("description")).toString()).join(QStringLiteral(", ")));
 
         out << "\"" << desc << "\",\""
             << key << "\",\""

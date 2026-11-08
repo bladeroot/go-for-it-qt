@@ -9,6 +9,7 @@
 #include "todotxt/TaskFilterProxyModel.h"
 #include "todotxt/TaskStoreModel.h"
 #include "todotxt/TxtTask.h"
+#include "tui/TuiApp.h"
 #include <QtTest>
 
 using namespace gofi;
@@ -991,6 +992,244 @@ private slots:
         SystemHookService::setSystemIntegrationEnabled(false);
         QFile::remove(testDb);
         QFile::remove(markerFile);
+    }
+
+    void testDatabaseBackupImportSafety() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("safety_test.db"));
+        QFile::remove(testDb);
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+        QVERIFY(db.isOpen());
+
+        const QFile::Permissions perms = QFile::permissions(testDb);
+        QVERIFY(perms & QFile::ReadOwner);
+        QVERIFY(perms & QFile::WriteOwner);
+        QVERIFY(!(perms & QFile::ReadOther));
+        QVERIFY(!(perms & QFile::WriteOther));
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("list1");
+        entry.name = QStringLiteral("Primary List");
+        QVERIFY(db.saveList(entry, 0));
+
+        TxtTask t1 = TxtTask::fromSimpleTxt(QStringLiteral("Task 1 to stay safe"), false, false);
+        QVERIFY(db.insertTask(entry.id, t1, 0) > 0);
+
+        TxtTask t2 = TxtTask::fromSimpleTxt(QStringLiteral("Task 2 to stay safe"), false, false);
+        QVERIFY(db.insertTask(entry.id, t2, 1) > 0);
+
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        // 1. Export-to-self test: must fail and NOT delete live DB!
+        QVERIFY(!db.exportDatabaseBackup(testDb));
+        QVERIFY(QFile::exists(testDb));
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        const QString relativeSelf = QDir::current().relativeFilePath(testDb);
+        QVERIFY(!db.exportDatabaseBackup(relativeSelf));
+        QVERIFY(QFile::exists(testDb));
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        // 2. Import-from-self test: must fail and NOT destroy live DB!
+        QVERIFY(!db.importDatabaseBackup(testDb));
+        QVERIFY(QFile::exists(testDb));
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        // 3. Import non-existent file test: must fail, live DB remains
+        QVERIFY(!db.importDatabaseBackup(m_testSandbox.filePath(QStringLiteral("non_existent.db"))));
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        // 4. Import arbitrary non-SQLite file test: must fail, live DB remains intact
+        const QString corruptFile = m_testSandbox.filePath(QStringLiteral("corrupt.txt"));
+        {
+            QFile f(corruptFile);
+            QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+            f.write("This is not an SQLite database!");
+            f.close();
+        }
+        QVERIFY(!db.importDatabaseBackup(corruptFile));
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        // 5. Successful export and restore
+        const QString validBackup = m_testSandbox.filePath(QStringLiteral("valid_backup.db"));
+        QVERIFY(db.exportDatabaseBackup(validBackup));
+        QVERIFY(QFile::exists(validBackup));
+
+        TxtTask t3 = TxtTask::fromSimpleTxt(QStringLiteral("Task 3 added after backup"), false, false);
+        QVERIFY(db.insertTask(entry.id, t3, 2) > 0);
+        QCOMPARE(db.countAllTasksInList(entry.id), 3);
+
+        QVERIFY(db.importDatabaseBackup(validBackup));
+        QVERIFY(db.isOpen());
+        QCOMPARE(db.countAllTasksInList(entry.id), 2);
+
+        const QVector<TxtTask> tasks = db.loadTasks(entry.id, false);
+        QCOMPARE(tasks.size(), 2);
+        QCOMPARE(tasks.at(0).description(), QStringLiteral("Task 1 to stay safe"));
+
+        db.close();
+        QFile::remove(testDb);
+        QFile::remove(validBackup);
+        QFile::remove(corruptFile);
+    }
+
+    void testTaskCompletedHookCallback() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("hook_test.db"));
+        QFile::remove(testDb);
+
+        AppController controller(QString(), testDb);
+        SettingsManager* settings = controller.settings();
+        SystemHookService* hooks = controller.systemHooks();
+        QVERIFY(settings != nullptr);
+        QVERIFY(hooks != nullptr);
+
+        SystemHookService::setSystemIntegrationEnabled(true);
+        const auto resetIntegration = qScopeGuard([]() {
+            SystemHookService::setSystemIntegrationEnabled(false);
+        });
+
+        const QString markerFile = m_testSandbox.filePath(QStringLiteral("task_completed.marker"));
+        QFile::remove(markerFile);
+
+        settings->setCustomHooksEnabled(true);
+        settings->setHookTaskCompletedCommand(QStringLiteral("echo \"$GOFI_TASK_TITLE|$GOFI_TASK_KEY\" >> '%1'").arg(markerFile));
+
+        const QString listId = controller.listManager()->addList(QStringLiteral("HookList"));
+        controller.selectListById(listId);
+        const int initialCount = controller.todoProxyModel()->rowCount();
+
+        controller.addNewTask(QStringLiteral("First task GH#123"));
+        controller.addNewTask(QStringLiteral("Second task PR#456"));
+
+        QCOMPARE(controller.todoProxyModel()->rowCount(), initialCount + 2);
+
+        const QString completedDesc = controller.todoProxyModel()->data(controller.todoProxyModel()->index(0, 0), TaskStoreModel::DescriptionRole).toString();
+
+        QSignalSpy spy(hooks, &SystemHookService::hookExecuted);
+
+        controller.toggleTaskDone(false, 0);
+
+        QVERIFY(spy.wait(2000));
+        QCOMPARE(spy.count(), 1);
+        const QList<QVariant> args = spy.takeFirst();
+        QCOMPARE(args.at(0).toString(), QStringLiteral("task_completed"));
+
+        QVERIFY(QFile::exists(markerFile));
+        {
+            QFile f(markerFile);
+            QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+            const QString content = QString::fromUtf8(f.readAll());
+            f.close();
+            QVERIFY(content.contains(completedDesc));
+        }
+
+        // Test changeTaskStatus with lowercase "done"
+        QCOMPARE(controller.todoProxyModel()->rowCount(), initialCount + 1);
+        const QString secondDesc = controller.todoProxyModel()->data(controller.todoProxyModel()->index(0, 0), TaskStoreModel::DescriptionRole).toString();
+
+        controller.changeTaskStatus(false, 0, QStringLiteral("done"));
+
+        QVERIFY(spy.wait(2000));
+        QCOMPARE(spy.count(), 1);
+        const QList<QVariant> args2 = spy.takeFirst();
+        QCOMPARE(args2.at(0).toString(), QStringLiteral("task_completed"));
+
+        {
+            QFile f(markerFile);
+            QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+            const QString content = QString::fromUtf8(f.readAll());
+            f.close();
+            QVERIFY(content.contains(secondDesc));
+        }
+
+        SystemHookService::setSystemIntegrationEnabled(false);
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+        QFile::remove(markerFile);
+    }
+
+    void testTerminalSanitization() {
+        const QString osc52Attack = QStringLiteral("Normal Task\033]52;c;cGFzc3dvcmQ=\007 Title");
+        const QString cleanOsc = TuiApp::sanitizeTerminalText(osc52Attack);
+        QVERIFY(!cleanOsc.contains(QLatin1Char('\033')));
+        QVERIFY(!cleanOsc.contains(QStringLiteral("52;c;")));
+        QCOMPARE(cleanOsc, QStringLiteral("Normal Task Title"));
+
+        const QString oscTitle = QStringLiteral("Task\033]0;Hacked Title\033\\ Done");
+        const QString cleanTitle = TuiApp::sanitizeTerminalText(oscTitle);
+        QVERIFY(!cleanTitle.contains(QStringLiteral("Hacked Title")));
+        QCOMPARE(cleanTitle, QStringLiteral("Task Done"));
+
+        const QString csiAttack = QStringLiteral("Before\033[2J\033[?25lAfter");
+        const QString cleanCsi = TuiApp::sanitizeTerminalText(csiAttack);
+        QCOMPARE(cleanCsi, QStringLiteral("BeforeAfter"));
+
+        const QString controlChars = QStringLiteral("Line1\x01\x02\x07\x1bLine2");
+        const QString cleanCtrl = TuiApp::sanitizeTerminalText(controlChars);
+        QVERIFY(!cleanCtrl.contains(QLatin1Char('\x01')));
+        QVERIFY(!cleanCtrl.contains(QLatin1Char('\x07')));
+        QVERIFY(!cleanCtrl.contains(QLatin1Char('\x1b')));
+    }
+
+    void testSafeUriSchemeAndCsvSanitization() {
+        // 1. TxtTask URL scheme whitelist
+        const TxtTask taskFile = TxtTask::fromSimpleTxt(QStringLiteral("file:///etc/passwd smb://share/dir ssh://server/path"), false, false);
+        for (const TxtPart& p : taskFile.parts()) {
+            QVERIFY(p.type != TxtPartType::Uri);
+        }
+
+        const TxtTask taskSafe = TxtTask::fromSimpleTxt(QStringLiteral("Visit http://example.com and https://secure.com or mailto:user@mail.com"), false, false);
+        int uriCount = 0;
+        for (const TxtPart& p : taskSafe.parts()) {
+            if (p.type == TxtPartType::Uri) {
+                uriCount++;
+            }
+        }
+        QCOMPARE(uriCount, 3);
+
+        // 2. CSV formula injection sanitization
+        const QString testCsv = m_testSandbox.filePath(QStringLiteral("formula_test.csv"));
+        QFile::remove(testCsv);
+
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("analytics_test.db"));
+        QFile::remove(testDb);
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("csv_list");
+        entry.name = QStringLiteral("=CmdList");
+        QVERIFY(db.saveList(entry, 0));
+
+        db.insertActivityLog(
+            entry.id,
+            entry.name,
+            -1,
+            QStringLiteral("KEY-1"),
+            QStringLiteral("=SUM(1+1) dangerous task"),
+            QDateTime::currentDateTimeUtc().addSecs(-3600),
+            3600,
+            QDateTime::currentDateTimeUtc(),
+            false,
+            true
+        );
+
+        AnalyticsService analytics;
+        QVERIFY(analytics.exportBillingCsv(testCsv, QStringLiteral("all"), entry.id));
+
+        QFile csvFile(testCsv);
+        QVERIFY(csvFile.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString csvContent = QString::fromUtf8(csvFile.readAll());
+        csvFile.close();
+
+        QVERIFY(csvContent.contains(QStringLiteral("\"'=SUM(1+1) dangerous task\"")));
+        QVERIFY(csvContent.contains(QStringLiteral("\"'=CmdList\"")));
+
+        db.close();
+        QFile::remove(testCsv);
+        QFile::remove(testDb);
     }
 };
 

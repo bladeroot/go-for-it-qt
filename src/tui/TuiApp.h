@@ -35,6 +35,7 @@ public:
 
     bool start();
     void openMarkdownFile(const QString& filePath);
+    static QString sanitizeTerminalText(const QString& input, bool allowNewlines = false);
 
 private slots:
     void onStdinActivated();

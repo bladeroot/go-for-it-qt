@@ -383,9 +383,14 @@ bool TxtTask::isContextToken(const QString& token) {
 }
 
 bool TxtTask::isCommonUriScheme(const QString& scheme) {
-    return scheme == QStringLiteral("mailto")
-        || scheme == QStringLiteral("tel")
-        || scheme == QStringLiteral("sms");
+    return isSafeUriScheme(scheme);
+}
+
+bool TxtTask::isSafeUriScheme(const QString& scheme) {
+    const QString s = scheme.toLower();
+    return s == QStringLiteral("http")
+        || s == QStringLiteral("https")
+        || s == QStringLiteral("mailto");
 }
 
 TxtPart TxtTask::tokenizePart(const QString& token) {
@@ -399,7 +404,10 @@ TxtPart TxtTask::tokenizePart(const QString& token) {
     if (colonPos > 0 && colonPos + 1 < token.size() && !token.at(colonPos + 1).isSpace()) {
         const QString key = token.left(colonPos);
         const QString val = token.mid(colonPos + 1);
-        if (isCommonUriScheme(key) || (val.startsWith(QStringLiteral("//")) && val.size() > 2)) {
+        const QString lowerKey = key.toLower();
+        if ((lowerKey == QStringLiteral("mailto") && !val.isEmpty())
+            || ((lowerKey == QStringLiteral("http") || lowerKey == QStringLiteral("https"))
+                && val.startsWith(QStringLiteral("//")) && val.size() > 2)) {
             return {TxtPartType::Uri, val, key};
         }
         if (!val.contains(QLatin1Char(':'))) {

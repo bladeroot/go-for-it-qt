@@ -126,8 +126,12 @@ private:
     void fetchNextcloudTasks(const TodoListEntry& entry);
     void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName);
 
+    void startSyncOperation();
+    void endSyncOperation();
+
     QNetworkAccessManager m_nam;
     bool m_syncing = false;
+    int m_activeSyncRequests = 0;
     QString m_lastStatusMessage;
 };
 

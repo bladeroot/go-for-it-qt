@@ -199,6 +199,15 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setRawHeader("Accept", "application/json");
     req.setRawHeader("User-Agent", "Go-For-It-Qt");
+    req.setTransferTimeout(25000); // 25 seconds timeout to prevent hanging connections
+
+    const QUrl reqUrl = req.url();
+    if (reqUrl.scheme().compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0 && !entry.apiToken.trimmed().isEmpty()) {
+        const QString host = reqUrl.host();
+        if (host != QStringLiteral("localhost") && host != QStringLiteral("127.0.0.1")) {
+            qWarning() << "Security warning: Transmitting API token over unencrypted HTTP to" << host;
+        }
+    }
 
     const QString user = entry.jiraUser.trimmed();
     const QString token = entry.apiToken.trimmed();
@@ -240,9 +249,28 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
 }
 
 void IssueTrackerService::setSyncing(bool value) {
+    if (!value) {
+        m_activeSyncRequests = 0;
+    }
     if (m_syncing == value) return;
     m_syncing = value;
     emit syncingChanged();
+}
+
+void IssueTrackerService::startSyncOperation() {
+    m_activeSyncRequests++;
+    if (!m_syncing) {
+        m_syncing = true;
+        emit syncingChanged();
+    }
+}
+
+void IssueTrackerService::endSyncOperation() {
+    m_activeSyncRequests = qMax(0, m_activeSyncRequests - 1);
+    if (m_activeSyncRequests == 0 && m_syncing) {
+        m_syncing = false;
+        emit syncingChanged();
+    }
 }
 
 void IssueTrackerService::setStatusMessage(const QString& msg) {
@@ -1576,7 +1604,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
         return;
     }
 
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing issues from Jira..."));
 
     const QString jql = entry.jiraJql.trimmed().isEmpty()
@@ -1620,7 +1648,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
                 return;
             }
             if (seraphAuthFailed) {
-                setSyncing(false);
+                endSyncOperation();
                 const QString errMsg = tr("Jira authentication failed: please verify your Jira Email (e.g. corporate email) and API Token.");
                 setStatusMessage(errMsg);
                 emit syncFailed(entry.id, errMsg);
@@ -1632,7 +1660,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
                 return;
             }
 
-            setSyncing(false);
+            endSyncOperation();
             QString serverDetail;
             const QJsonDocument errDoc = QJsonDocument::fromJson(bodyBytes);
             if (errDoc.isObject()) {
@@ -1663,7 +1691,7 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
         return;
     }
 
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing issues from YouTrack..."));
 
     const QString ytQuery = entry.jiraJql.trimmed().isEmpty()
@@ -1689,7 +1717,7 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
         if (reply->error() != QNetworkReply::NoError) {
-            setSyncing(false);
+            endSyncOperation();
             const QString errMsg = tr("YouTrack sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
@@ -1729,8 +1757,12 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         }
     }
 
-    setSyncing(false);
-    setStatusMessage(tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName));
+    endSyncOperation();
+    if (items.size() >= 100) {
+        setStatusMessage(tr("Synced %1 issues from %2 (maximum page limit reached; older items omitted).").arg(items.size()).arg(providerName));
+    } else {
+        setStatusMessage(tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName));
+    }
     emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
     if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
         emit trackerChangesDetected(entry.name, newIssues, statusChanges);
@@ -1740,15 +1772,15 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
 void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
     const QString apiUrl = gitHubApiBaseUrl(entry.jiraUrl);
 
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing issues and pull requests from GitHub..."));
 
     QString queryStr = entry.jiraJql.trimmed();
     if (queryStr.isEmpty()) {
-        queryStr = entry.apiToken.trimmed().isEmpty() ? QStringLiteral("is:open") : QStringLiteral("is:open involves:@me");
+        queryStr = entry.apiToken.trimmed().isEmpty() ? QStringLiteral("sort:updated-desc") : QStringLiteral("involves:@me");
     } else if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:"))) {
         if (queryStr.contains(QLatin1Char('/'))) {
-            queryStr = QStringLiteral("repo:") + queryStr + QStringLiteral(" is:open");
+            queryStr = QStringLiteral("repo:") + queryStr;
         }
     }
 
@@ -1768,7 +1800,7 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
         reply->deleteLater();
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError) {
-            setSyncing(false);
+            endSyncOperation();
             const QString errMsg = tr("GitHub sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
@@ -1786,7 +1818,7 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
         baseUrl = QStringLiteral("https://gitlab.com");
     }
 
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing issues and merge requests from GitLab..."));
 
     const QString projectSpec = entry.jiraJql.trimmed();
@@ -1794,11 +1826,11 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     QString mrPath;
     if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
         const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(projectSpec));
-        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&per_page=100").arg(encodedProj);
-        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&per_page=100").arg(encodedProj);
+        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=all&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
+        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=all&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
     } else {
-        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=all&per_page=100");
-        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=all&per_page=100");
+        issuesPath = QStringLiteral("/api/v4/issues?state=all&scope=all&order_by=updated_at&sort=desc&per_page=100");
+        mrPath = QStringLiteral("/api/v4/merge_requests?state=all&scope=all&order_by=updated_at&sort=desc&per_page=100");
         if (!projectSpec.isEmpty()) {
             issuesPath += QLatin1Char('&') + projectSpec;
             mrPath += QLatin1Char('&') + projectSpec;
@@ -1816,7 +1848,7 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     auto checkDone = [this, entry, combinedState]() {
         if (combinedState->completedRequests < 2) return;
         if (combinedState->hasError && combinedState->items.isEmpty()) {
-            setSyncing(false);
+            endSyncOperation();
             setStatusMessage(combinedState->errorMsg);
             emit syncFailed(entry.id, combinedState->errorMsg);
             return;
@@ -1874,12 +1906,12 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
         return;
     }
 
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing issues from Redmine..."));
 
     QString queryStr = entry.jiraJql.trimmed();
     if (queryStr.isEmpty()) {
-        queryStr = QStringLiteral("assigned_to_id=me&status_id=open&limit=100");
+        queryStr = QStringLiteral("assigned_to_id=me&status_id=*&limit=100&sort=updated_on:desc");
     } else {
         if (!queryStr.contains(QStringLiteral("limit="))) {
             queryStr += QStringLiteral("&limit=100");
@@ -1897,7 +1929,7 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
     connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            setSyncing(false);
+            endSyncOperation();
             const QString errMsg = tr("Redmine sync error: %1").arg(reply->errorString());
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
@@ -1910,7 +1942,7 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
 }
 
 void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing tasks from Todoist..."));
 
     const QString apiUrl = QStringLiteral("https://api.todoist.com/rest/v2/tasks");
@@ -1927,7 +1959,7 @@ void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
     connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            setSyncing(false);
+            endSyncOperation();
             const QString errMsg = tr("Todoist sync error: %1").arg(reply->errorString());
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
@@ -1948,7 +1980,7 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
         return;
     }
 
-    setSyncing(true);
+    startSyncOperation();
     setStatusMessage(tr("Syncing tasks from Nextcloud (CalDAV)..."));
 
     if (!urlStr.contains(QStringLiteral("/dav/calendars/")) && !urlStr.endsWith(QStringLiteral(".ics"))) {
@@ -1972,7 +2004,7 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
         connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
             reply->deleteLater();
             if (reply->error() != QNetworkReply::NoError) {
-                setSyncing(false);
+                endSyncOperation();
                 const QString errMsg = tr("Nextcloud sync error: %1").arg(reply->errorString());
                 setStatusMessage(errMsg);
                 emit syncFailed(entry.id, errMsg);
@@ -2018,7 +2050,7 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                 connect(propReply, &QNetworkReply::finished, this, [this, propReply, entry]() {
                     propReply->deleteLater();
                     if (propReply->error() != QNetworkReply::NoError) {
-                        setSyncing(false);
+                        endSyncOperation();
                         const QString errMsg = tr("Nextcloud CalDAV error: %1").arg(propReply->errorString());
                         setStatusMessage(errMsg);
                         emit syncFailed(entry.id, errMsg);
@@ -2030,7 +2062,7 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                 return;
             }
 
-            setSyncing(false);
+            endSyncOperation();
             const QString errMsg = tr("Nextcloud CalDAV sync error (%1): %2").arg(statusCode).arg(reply->errorString());
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
@@ -2060,7 +2092,8 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
 
     if (listEntry.provider == QStringLiteral("Jira")) {
         const quint32 loggedSeconds = qMax(60U, runtimeSeconds);
-        QUrl url(baseUrl + QStringLiteral("/rest/api/2/issue/") + issueKey + QStringLiteral("/worklog"));
+        const QString encodedKey = QString::fromUtf8(QUrl::toPercentEncoding(issueKey));
+        QUrl url(baseUrl + QStringLiteral("/rest/api/2/issue/") + encodedKey + QStringLiteral("/worklog"));
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
 
@@ -2080,7 +2113,8 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
-        QUrl url(baseUrl + QStringLiteral("/api/issues/") + issueKey + QStringLiteral("/timeTracking/workItems?fields=id"));
+        const QString encodedKey = QString::fromUtf8(QUrl::toPercentEncoding(issueKey));
+        QUrl url(baseUrl + QStringLiteral("/api/issues/") + encodedKey + QStringLiteral("/timeTracking/workItems?fields=id"));
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
 

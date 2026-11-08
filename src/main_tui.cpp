@@ -48,7 +48,9 @@ int main(int argc, char* argv[]) {
         QTextStream out(stdout);
         out << "Lists (List type : List ID - List name):\n";
         for (const gofi::TodoListEntry& e : controller.listManager()->entries()) {
-            out << '"' << e.provider << "\" : \"" << e.id << "\" - \"" << e.name << "\"\n";
+            out << '"' << gofi::TuiApp::sanitizeTerminalText(e.provider)
+                << "\" : \"" << gofi::TuiApp::sanitizeTerminalText(e.id)
+                << "\" - \"" << gofi::TuiApp::sanitizeTerminalText(e.name) << "\"\n";
         }
         return 0;
     }

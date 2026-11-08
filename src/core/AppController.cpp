@@ -315,14 +315,18 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
     const bool currentDone = store->data(idx, TaskStoreModel::DoneRole).toBool();
     const bool willBeDone = !currentDone;
+
+    // Pre-fetch metadata BEFORE mutating the model, because setData triggers taskDoneToggled
+    // which immediately removes the row from the store.
+    const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
+    const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+
     store->setData(idx, willBeDone, TaskStoreModel::DoneRole);
     m_notifications.notifyTaskEvent(
         tr("Task status changed"),
         QStringLiteral("%1 → %2").arg(desc, willBeDone ? tr("Done") : tr("To-Do"))
     );
     if (willBeDone) {
-        const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
-        const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
         m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
     }
 }
@@ -336,15 +340,19 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     const QModelIndex idx = store->index(sourceRow, 0);
     const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
     const QString oldStatus = store->data(idx, TaskStoreModel::StatusRole).toString();
+
+    // Pre-fetch metadata and check for completion status case-insensitively BEFORE mutating model
+    const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
+    const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+    const bool isCompleting = (newStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
+
     store->setTaskStatus(sourceRow, newStatus);
     if (oldStatus != newStatus) {
         m_notifications.notifyTaskEvent(
             tr("Task status changed"),
             QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
         );
-        if (newStatus == QStringLiteral("Done")) {
-            const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
-            const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+        if (isCompleting) {
             m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
         }
     }

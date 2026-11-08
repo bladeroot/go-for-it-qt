@@ -1,11 +1,13 @@
 #include "TuiApp.h"
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
-#include <QStandardPaths>
 #include <QRegularExpression>
+#include <QStandardPaths>
+#include <QTemporaryFile>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -1006,16 +1008,17 @@ void TuiApp::editTaskDetailsInVim() {
     const QModelIndex idx = proxy->index(m_selectedRow, 0);
     const QString currentDetails = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
 
-    const QString tmpPath = QStringLiteral("/tmp/gofi-task-details-%1.md").arg(QCoreApplication::applicationPid());
-    {
-        QFile out(tmpPath);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            m_statusMessage = tr("Failed to create temporary Markdown file in /tmp.");
-            return;
-        }
-        out.write(currentDetails.toUtf8());
-        out.close();
+    QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi-task-details-XXXXXX.md"));
+    tempFile.setAutoRemove(false);
+    if (!tempFile.open()) {
+        m_statusMessage = tr("Failed to create temporary Markdown file.");
+        return;
     }
+    tempFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    tempFile.write(currentDetails.toUtf8());
+    tempFile.flush();
+    const QString tmpPath = tempFile.fileName();
+    tempFile.close();
 
     QString editor = qEnvironmentVariable("VISUAL").trimmed();
     if (editor.isEmpty()) editor = qEnvironmentVariable("EDITOR").trimmed();
@@ -1033,6 +1036,7 @@ void TuiApp::editTaskDetailsInVim() {
         m_inputBuffer = currentDetails.isEmpty() ? QString() : currentDetails;
         m_inputCursor = static_cast<int>(m_inputBuffer.size());
         m_mode = Mode::EditDetails;
+        QFile::remove(tmpPath);
         return;
     }
 
@@ -1066,15 +1070,15 @@ void TuiApp::addTaskCommentInVim() {
     if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
         return;
     }
-    const QString tmpPath = QStringLiteral("/tmp/gofi-task-comment-%1.md").arg(QCoreApplication::applicationPid());
-    {
-        QFile out(tmpPath);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-            m_statusMessage = tr("Failed to create temporary comment file in /tmp.");
-            return;
-        }
-        out.close();
+    QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi-task-comment-XXXXXX.md"));
+    tempFile.setAutoRemove(false);
+    if (!tempFile.open()) {
+        m_statusMessage = tr("Failed to create temporary comment file.");
+        return;
     }
+    tempFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    const QString tmpPath = tempFile.fileName();
+    tempFile.close();
 
     QString editor = qEnvironmentVariable("VISUAL").trimmed();
     if (editor.isEmpty()) editor = qEnvironmentVariable("EDITOR").trimmed();
@@ -1205,7 +1209,8 @@ QString TuiApp::formatInlineMarkdown(const QString& text) {
 QStringList TuiApp::renderMarkdownToAnsi(const QString& markdown, int maxWidth) {
     QStringList out;
     const int wrapCols = qMax(20, maxWidth - 4);
-    const QStringList rawLines = markdown.split(QLatin1Char('\n'));
+    const QString safeMarkdown = sanitizeTerminalText(markdown, true);
+    const QStringList rawLines = safeMarkdown.split(QLatin1Char('\n'));
     bool inCodeBlock = false;
     QString codeLang;
 
@@ -1695,6 +1700,45 @@ QString TuiApp::formatSeconds(uint secs) {
         .arg(s, 2, 10, QLatin1Char('0'));
 }
 
+QString TuiApp::sanitizeTerminalText(const QString& input, bool allowNewlines) {
+    if (input.isEmpty()) return {};
+
+    // Strip ANSI escape sequences:
+    // - OSC sequences: ESC ] ... (BEL | ESC \)
+    // - CSI sequences: ESC [ ... [@-~]
+    // - DCS/APC/PM: ESC [P^_X] ... ESC \ or two-byte ESC .
+    static const QRegularExpression oscRe(QStringLiteral("\x1b\\][^\x07\x1b]*(\x07|\x1b\\\\)"));
+    static const QRegularExpression csiRe(QStringLiteral("\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+    static const QRegularExpression escGeneralRe(QStringLiteral("\x1b[P^_X][^\x1b]*\x1b\\\\|\x1b."));
+
+    QString clean = input;
+    clean.remove(oscRe);
+    clean.remove(csiRe);
+    clean.remove(escGeneralRe);
+    clean.remove(QLatin1Char('\x1b'));
+
+    QString result;
+    result.reserve(clean.size());
+    for (int i = 0; i < clean.size(); ++i) {
+        const QChar ch = clean.at(i);
+        const ushort u = ch.unicode();
+
+        if (allowNewlines && ch == QLatin1Char('\n')) {
+            result.append(QLatin1Char('\n'));
+        } else if (ch == QLatin1Char('\t')) {
+            result.append(QStringLiteral("    "));
+        } else if (u < 0x20 || u == 0x7F || (u >= 0x80 && u <= 0x9F)) {
+            if (ch == QLatin1Char('\r')) {
+                continue;
+            }
+            result.append(QLatin1Char(' '));
+        } else {
+            result.append(ch);
+        }
+    }
+    return result;
+}
+
 void TuiApp::render() {
     if (!m_rawModeActive) return;
     clampSelection();
@@ -2065,7 +2109,7 @@ void TuiApp::render() {
 
             const QString status = proxy->data(idx, TaskStoreModel::StatusRole).toString();
             const quint8 prio = static_cast<quint8>(proxy->data(idx, TaskStoreModel::PriorityRole).toUInt());
-            const QString desc = proxy->data(idx, TaskStoreModel::DescriptionRole).toString();
+            const QString desc = sanitizeTerminalText(proxy->data(idx, TaskStoreModel::DescriptionRole).toString());
             const QString details = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
             const QVariantList comments = proxy->data(idx, TaskStoreModel::CommentsRole).toList();
             const uint durSec = proxy->data(idx, TaskStoreModel::DurationRole).toUInt();
@@ -2200,7 +2244,7 @@ void TuiApp::render() {
             QStringList previewLines;
             if (totalTasks > 0 && m_selectedRow < totalTasks) {
                 const QModelIndex idx = proxy->index(m_selectedRow, 0);
-                const QString desc = proxy->data(idx, TaskStoreModel::DescriptionRole).toString();
+                const QString desc = sanitizeTerminalText(proxy->data(idx, TaskStoreModel::DescriptionRole).toString());
                 const QString details = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
                 const QVariantList comments = proxy->data(idx, TaskStoreModel::CommentsRole).toList();
                 const QString status = proxy->data(idx, TaskStoreModel::StatusRole).toString();
@@ -2237,7 +2281,9 @@ void TuiApp::render() {
                     previewLines.append(FG_YELLOW + ESC_BOLD + tr("  ── Comments (%1) ──").arg(comments.size()) + ESC_RESET);
                     for (const QVariant& cv : comments) {
                         const QVariantMap cm = cv.toMap();
-                        previewLines.append(FG_PURPLE + QStringLiteral("  • %1 (%2):").arg(cm.value(QStringLiteral("author")).toString(), cm.value(QStringLiteral("created")).toString()) + ESC_RESET);
+                        const QString author = sanitizeTerminalText(cm.value(QStringLiteral("author")).toString());
+                        const QString created = sanitizeTerminalText(cm.value(QStringLiteral("created")).toString());
+                        previewLines.append(FG_PURPLE + QStringLiteral("  • %1 (%2):").arg(author, created) + ESC_RESET);
                         previewLines.append(renderMarkdownToAnsi(cm.value(QStringLiteral("body")).toString(), m_cols - 2));
                     }
                 }

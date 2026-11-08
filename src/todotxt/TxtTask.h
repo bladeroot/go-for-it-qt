@@ -129,6 +129,7 @@ private:
     static bool isProjectToken(const QString& token);
     static bool isContextToken(const QString& token);
     static bool isCommonUriScheme(const QString& scheme);
+    static bool isSafeUriScheme(const QString& scheme);
 
     static TxtPart tokenizePart(const QString& token);
     void parseDescriptionTokens(const QStringList& tokens, int startIndex);
