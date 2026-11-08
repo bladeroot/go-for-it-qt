@@ -59,6 +59,7 @@ private:
     QStringList m_listIds;
     bool m_addCreationDates = true;
     bool m_movingBetweenStores = false;
+    bool m_suppressStoreTaskUpdated = false;
 };
 
 } // namespace gofi

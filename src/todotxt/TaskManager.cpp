@@ -82,7 +82,17 @@ bool TaskManager::toggleTaskDone(bool fromDoneList, int sourceRow) {
     task.setDone(willBeDone);
     const int newOrder = destStore->rowCount();
 
-    if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+    QMap<QString, QVector<TxtTask>> remainingPerList;
+    for (int i = 0; i < sourceStore->rowCount(); ++i) {
+        if (i == sourceRow) continue;
+        const TxtTask t = sourceStore->taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (!lid.isEmpty()) {
+            remainingPerList[lid].append(t);
+        }
+    }
+
+    if (!DatabaseManager::instance().moveTaskDoneAndReorder(task, newOrder, remainingPerList, fromDoneList)) {
         emit errorOccurred(tr("Failed to update task status in database."));
         return false;
     }
@@ -91,10 +101,6 @@ bool TaskManager::toggleTaskDone(bool fromDoneList, int sourceRow) {
     sourceStore->removeAt(sourceRow);
     m_movingBetweenStores = false;
 
-    if (!updateTasksOrders(fromDoneList, sourceStore->tasks())) {
-        loadFromDatabase(false);
-        return false;
-    }
     destStore->appendTask(task);
     return true;
 }
@@ -107,15 +113,26 @@ bool TaskManager::setTaskStatus(bool fromDoneList, int sourceRow, const QString&
 
     TxtTask task = store->taskAt(sourceRow);
     const QString oldStatus = task.status();
+    const QString normNewStatus = TxtTask::normalizeStatus(newStatus);
     const bool wasClosed = TxtTask::isClosedStatus(oldStatus);
-    const bool willBeClosed = TxtTask::isClosedStatus(newStatus);
+    const bool willBeClosed = TxtTask::isClosedStatus(normNewStatus);
 
     if (wasClosed != willBeClosed) {
-        task.setStatus(newStatus);
+        task.setStatus(normNewStatus);
         TaskStoreModel* destStore = willBeClosed ? &m_doneStore : &m_todoStore;
         const int newOrder = destStore->rowCount();
 
-        if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+        QMap<QString, QVector<TxtTask>> remainingPerList;
+        for (int i = 0; i < store->rowCount(); ++i) {
+            if (i == sourceRow) continue;
+            const TxtTask t = store->taskAt(i);
+            const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+            if (!lid.isEmpty()) {
+                remainingPerList[lid].append(t);
+            }
+        }
+
+        if (!DatabaseManager::instance().moveTaskDoneAndReorder(task, newOrder, remainingPerList, wasClosed)) {
             emit errorOccurred(tr("Failed to update task status in database."));
             return false;
         }
@@ -124,19 +141,17 @@ bool TaskManager::setTaskStatus(bool fromDoneList, int sourceRow, const QString&
         store->removeAt(sourceRow);
         m_movingBetweenStores = false;
 
-        if (!updateTasksOrders(!willBeClosed, store->tasks())) {
-            loadFromDatabase(false);
-            return false;
-        }
         destStore->appendTask(task);
         return true;
     } else {
-        task.setStatus(newStatus);
+        task.setStatus(normNewStatus);
         if (!DatabaseManager::instance().updateTask(task)) {
             emit errorOccurred(tr("Failed to update task in database."));
             return false;
         }
-        store->setTaskStatus(sourceRow, newStatus);
+        m_suppressStoreTaskUpdated = true;
+        store->setTaskStatus(sourceRow, normNewStatus);
+        m_suppressStoreTaskUpdated = false;
         return true;
     }
 }
@@ -199,6 +214,9 @@ void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task) {
 
 void TaskManager::onTaskUpdated(int row, const TxtTask& task) {
     Q_UNUSED(row)
+    if (m_suppressStoreTaskUpdated) {
+        return;
+    }
     if (!DatabaseManager::instance().updateTask(task)) {
         emit errorOccurred(tr("Failed to update task in database."));
         loadFromDatabase(false);
@@ -259,9 +277,26 @@ void TaskManager::loadFromDatabase(bool addDefaultsIfEmpty) {
             QStringLiteral("Switch to the Timer tab and start working +Productivity duration:25m"),
             QStringLiteral("(A) Mark completed tasks as done @GoForIt")
         };
-        for (int i = 0; i < defaults.size(); ++i) {
-            TxtTask t = TxtTask::fromSimpleTxt(defaults.at(i), false, m_addCreationDates);
-            db.insertTask(m_listId, t, i);
+        if (!db.beginTransaction()) {
+            emit errorOccurred(tr("Failed to start database transaction for initial tasks."));
+        } else {
+            bool allOk = true;
+            for (int i = 0; i < defaults.size(); ++i) {
+                TxtTask t = TxtTask::fromSimpleTxt(defaults.at(i), false, m_addCreationDates);
+                if (db.insertTask(m_listId, t, i) < 0) {
+                    allOk = false;
+                    break;
+                }
+            }
+            if (allOk) {
+                if (!db.commitTransaction()) {
+                    db.rollbackTransaction();
+                    emit errorOccurred(tr("Failed to commit initial tasks transaction."));
+                }
+            } else {
+                db.rollbackTransaction();
+                emit errorOccurred(tr("Failed to save initial tasks to database."));
+            }
         }
     }
 

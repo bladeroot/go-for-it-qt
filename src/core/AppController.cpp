@@ -416,8 +416,9 @@ bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, con
     const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
+    const QString normNewStatus = TxtTask::normalizeStatus(newStatus);
     const bool wasClosed = TxtTask::isClosedStatus(oldStatus);
-    const bool willBeClosed = TxtTask::isClosedStatus(newStatus);
+    const bool willBeClosed = TxtTask::isClosedStatus(normNewStatus);
     const bool willMoveToDone = (!fromDoneList && !wasClosed && willBeClosed);
 
     if (willMoveToDone && m_timer.isRunning()) {
@@ -428,19 +429,19 @@ bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, con
         }
     }
 
-    if (!m_taskManager.setTaskStatus(fromDoneList, sourceRow, newStatus)) {
+    if (!m_taskManager.setTaskStatus(fromDoneList, sourceRow, normNewStatus)) {
         return false;
     }
 
-    if (oldStatus != newStatus) {
+    if (oldStatus != normNewStatus) {
         m_notifications.notifyTaskEvent(
             tr("Task status changed"),
-            QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
+            QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, normNewStatus)
         );
         if (!remoteKey.isEmpty() && !effectiveListId.isEmpty() && wasClosed != willBeClosed) {
             for (const TodoListEntry& listEntry : m_listManager.entries()) {
                 if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite") && listEntry.syncStatusToRemote) {
-                    m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, willBeClosed, newStatus);
+                    m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, willBeClosed, normNewStatus);
                     break;
                 }
             }

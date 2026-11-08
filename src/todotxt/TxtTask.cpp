@@ -112,8 +112,14 @@ TxtTask TxtTask::fromDatabase(qint64 id,
     return task;
 }
 
+QString TxtTask::normalizeStatus(const QString& status) {
+    const QString norm = status.trimmed().toLower();
+    return norm.isEmpty() ? QStringLiteral("todo") : norm;
+}
+
 bool TxtTask::isClosedStatus(const QString& status) {
-    return status == QStringLiteral("done") || status == QStringLiteral("canceled");
+    const QString norm = normalizeStatus(status);
+    return norm == QStringLiteral("done") || norm == QStringLiteral("canceled");
 }
 
 void TxtTask::setDone(bool done) {
@@ -130,7 +136,7 @@ void TxtTask::setDone(bool done) {
 }
 
 void TxtTask::setStatus(const QString& status) {
-    const QString norm = status.trimmed().isEmpty() ? QStringLiteral("todo") : status.trimmed().toLower();
+    const QString norm = normalizeStatus(status);
     m_status = norm;
     const bool closed = isClosedStatus(norm);
     if (m_done != closed) {

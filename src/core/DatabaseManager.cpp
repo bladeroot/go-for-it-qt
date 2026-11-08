@@ -935,6 +935,51 @@ bool DatabaseManager::updateTaskDoneAndOrder(const TxtTask& task, int sortOrder)
     return q.exec();
 }
 
+bool DatabaseManager::moveTaskDoneAndReorder(const TxtTask& task, int newOrder, const QMap<QString, QVector<TxtTask>>& remainingPerList, bool remainingDone) {
+    if (task.id() < 0) return false;
+    QSqlDatabase database = db();
+    if (!database.transaction()) {
+        return false;
+    }
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(
+        "UPDATE tasks SET done = :done, status = :status, completion_date = :completion_date, sort_order = :sort_order "
+        "WHERE id = :id"
+    ));
+    q.bindValue(QStringLiteral(":done"), task.isDone() ? 1 : 0);
+    q.bindValue(QStringLiteral(":status"), nonNullString(task.status()));
+    q.bindValue(QStringLiteral(":completion_date"), task.completionDate().isValid() ? task.completionDate().toString(Qt::ISODate) : QStringLiteral(""));
+    q.bindValue(QStringLiteral(":sort_order"), newOrder);
+    q.bindValue(QStringLiteral(":id"), task.id());
+    if (!q.exec()) {
+        database.rollback();
+        return false;
+    }
+
+    QSqlQuery reorderQ(database);
+    reorderQ.prepare(QStringLiteral(
+        "UPDATE tasks SET sort_order = :order WHERE id = :id AND list_id = :list_id AND done = :done"
+    ));
+    for (auto it = remainingPerList.cbegin(); it != remainingPerList.cend(); ++it) {
+        const QString& listId = it.key();
+        const QVector<TxtTask>& tasks = it.value();
+        for (int i = 0; i < tasks.size(); ++i) {
+            if (tasks.at(i).id() < 0) continue;
+            reorderQ.bindValue(QStringLiteral(":order"), i);
+            reorderQ.bindValue(QStringLiteral(":id"), tasks.at(i).id());
+            reorderQ.bindValue(QStringLiteral(":list_id"), listId);
+            reorderQ.bindValue(QStringLiteral(":done"), remainingDone ? 1 : 0);
+            if (!reorderQ.exec()) {
+                database.rollback();
+                return false;
+            }
+        }
+    }
+
+    return database.commit();
+}
+
 bool DatabaseManager::updateTaskTimer(qint64 taskId, quint32 timerSeconds, quint32 jiraSyncedSeconds) {
     if (taskId < 0) return false;
     QSqlQuery q(db());

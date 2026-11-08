@@ -85,7 +85,8 @@ public:
 
     [[nodiscard]] QString status() const { return m_status; }
     void setStatus(const QString& status);
-    static bool isClosedStatus(const QString& status);
+    [[nodiscard]] static QString normalizeStatus(const QString& status);
+    [[nodiscard]] static bool isClosedStatus(const QString& status);
 
     [[nodiscard]] quint8 priority() const noexcept { return m_priority; }
     void setPriority(quint8 prio) noexcept { m_priority = prio; }
