@@ -1925,11 +1925,11 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     }
 
     // Reconcile: Only reconcile closed issues if:
-    // 1. Page limit was NOT reached (neither explicitly flagged nor items >= 100).
+    // 1. Page limit was NOT reached (pageLimitReached is false).
     // 2. No partial or parser error occurred (!hasError).
     // 3. Remote items list is non-empty (!items.isEmpty()), OR the tracker explicitly reported total == 0 (explicitZeroTotal)
     //    in a valid error-free response (e.g. GitHub/Jira/Redmine total_count == 0).
-    const bool limitReached = pageLimitReached || (items.size() >= 100);
+    const bool limitReached = pageLimitReached;
     const bool canReconcile = !limitReached && !hasError && (!items.isEmpty() || explicitZeroTotal);
     if (canReconcile) {
         const auto localOpenTasks = db.loadTasks(entry.id, false);
