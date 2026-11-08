@@ -2586,6 +2586,132 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(testDb);
     }
+
+    void testSyncCompletionDateTimerRestorationAndMultiListOrder() {
+        const QString testDb = QStringLiteral("/tmp/gofi-sync-timer-order-test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QString(), testDb);
+            const QSqlDatabase dbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+
+            // 1. Remote-sync completion_date for existing tasks
+            const QString list1Id = ctrl.listManager()->addList(QStringLiteral("List 1"));
+            const QString list2Id = ctrl.listManager()->addList(QStringLiteral("List 2"));
+
+            TodoListEntry entry1 = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(list1Id));
+            QVector<RemoteIssueItem> syncItems;
+            RemoteIssueItem it;
+            it.key = QStringLiteral("REM-1");
+            it.description = QStringLiteral("Remote task 1");
+            it.remoteStatus = QStringLiteral("todo");
+            syncItems.append(it);
+
+            ctrl.issueTracker()->processSyncedItems(entry1, syncItems, QStringLiteral("Jira"), false, false, false);
+            QSqlQuery checkDate(QStringLiteral("SELECT done, completion_date FROM tasks WHERE jira_key = 'REM-1'"), dbConn);
+            QVERIFY(checkDate.next());
+            QCOMPARE(checkDate.value(0).toInt(), 0);
+            QVERIFY(checkDate.value(1).toString().isEmpty());
+
+            // Transition existing task to 'done' remotely
+            syncItems[0].remoteStatus = QStringLiteral("done");
+            ctrl.issueTracker()->processSyncedItems(entry1, syncItems, QStringLiteral("Jira"), false, false, false);
+            checkDate.exec(QStringLiteral("SELECT done, completion_date FROM tasks WHERE jira_key = 'REM-1'"));
+            QVERIFY(checkDate.next());
+            QCOMPARE(checkDate.value(0).toInt(), 1);
+            QCOMPARE(checkDate.value(1).toString(), QDate::currentDate().toString(Qt::ISODate));
+
+            // Reopen existing task to 'todo' remotely
+            syncItems[0].remoteStatus = QStringLiteral("todo");
+            ctrl.issueTracker()->processSyncedItems(entry1, syncItems, QStringLiteral("Jira"), false, false, false);
+            checkDate.exec(QStringLiteral("SELECT done, completion_date FROM tasks WHERE jira_key = 'REM-1'"));
+            QVERIFY(checkDate.next());
+            QCOMPARE(checkDate.value(0).toInt(), 0);
+            QVERIFY(checkDate.value(1).toString().isEmpty());
+
+            // 2. Failed Done toggle restores running timer
+            ctrl.selectListById(list1Id);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("Timer test task"));
+            ctrl.setActiveTodoRow(0);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+
+            QSqlQuery trig(dbConn);
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_timer_toggle BEFORE UPDATE ON tasks "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated update failure'); END;"
+            )));
+
+            // Attempt toggle: fails, so timer must be restored to running
+            ctrl.toggleTaskDone(false, 0);
+            QVERIFY(ctrl.timer()->isRunning());
+
+            // Attempt status change to done: fails, so timer must be restored to running
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("done"));
+            QVERIFY(ctrl.timer()->isRunning());
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_timer_toggle"));
+
+            // 3. Multi-list sort_order isolation for new done tasks
+            QSqlQuery cleanAll(dbConn);
+            cleanAll.exec(QStringLiteral("DELETE FROM tasks"));
+
+            // List 1 gets 3 done tasks
+            ctrl.selectListById(list1Id);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("L1 Done 1"));
+            ctrl.toggleTaskDone(false, 0);
+            ctrl.addNewTask(QStringLiteral("L1 Done 2"));
+            ctrl.toggleTaskDone(false, 0);
+            ctrl.addNewTask(QStringLiteral("L1 Done 3"));
+            ctrl.toggleTaskDone(false, 0);
+
+            // List 2 has 0 done tasks, 1 todo task
+            ctrl.selectListById(list2Id);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("L2 Task 1"));
+
+            // Switch to All Lists view (shows 3 done tasks from L1, 1 todo from L2)
+            ctrl.showAllLists();
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 3);
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+
+            // Toggle L2 Task 1 to done from All Lists view
+            ctrl.toggleTaskDone(false, 0);
+
+            // In SQLite, L2 Task 1's sort_order must be 0 (isolated to List 2), NOT 3!
+            QSqlQuery orderCheck(dbConn);
+            orderCheck.prepare(QStringLiteral("SELECT sort_order FROM tasks WHERE list_id = :lid AND description LIKE '%L2 Task 1%'"));
+            orderCheck.bindValue(QStringLiteral(":lid"), list2Id);
+            QVERIFY(orderCheck.exec() && orderCheck.next());
+            QCOMPARE(orderCheck.value(0).toInt(), 0);
+
+            // 4. numRowsAffected check on non-existent task ID
+            TxtTask nonExistentTask = TxtTask::fromSimpleTxt(QStringLiteral("Ghost"), false, false);
+            nonExistentTask.setId(999999);
+            QVERIFY(!DatabaseManager::instance().updateTask(nonExistentTask));
+            QVERIFY(!DatabaseManager::instance().deleteTask(999999));
+            QVERIFY(!DatabaseManager::instance().markTaskViewed(999999));
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
