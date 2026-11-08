@@ -2782,6 +2782,39 @@ private slots:
                 QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
 
                 triggerQ.exec(QStringLiteral("DROP TRIGGER test_fail_done"));
+
+                // Test appendTaskComment & markTaskViewed failure handling and persistence
+                QSqlQuery failCommentTrigger(dbConn);
+                failCommentTrigger.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_comment BEFORE UPDATE OF comments_json ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated comment failure'); "
+                    "END;"
+                ));
+                QVERIFY(!todoStore->appendTaskComment(0, QStringLiteral("Alice"), QStringLiteral("Test comment")));
+                QCOMPARE(todoStore->taskAt(0).comments().size(), 0);
+                failCommentTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_comment"));
+
+                // Successful comment
+                QVERIFY(todoStore->appendTaskComment(0, QStringLiteral("Alice"), QStringLiteral("Test comment")));
+                QCOMPARE(todoStore->taskAt(0).comments().size(), 1);
+
+                QSqlQuery resetView(dbConn);
+                QVERIFY(resetView.exec(QStringLiteral("UPDATE tasks SET is_viewed = 0")));
+                ctrl.selectListById(listId);
+                QCOMPARE(todoStore->taskAt(1).isViewed(), false);
+
+                QSqlQuery failViewedTrigger(dbConn);
+                failViewedTrigger.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_viewed BEFORE UPDATE OF is_viewed ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated view failure'); "
+                    "END;"
+                ));
+                QVERIFY(!todoStore->markTaskViewed(1));
+                failViewedTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_viewed"));
+                QVERIFY(todoStore->markTaskViewed(1));
+                QCOMPARE(todoStore->taskAt(1).isViewed(), true);
             }
 
             // 2. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
