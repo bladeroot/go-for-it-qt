@@ -80,7 +80,15 @@ bool TaskManager::toggleTaskDone(bool fromDoneList, int sourceRow) {
     TxtTask task = sourceStore->taskAt(sourceRow);
     const bool willBeDone = !fromDoneList;
     task.setDone(willBeDone);
-    const int newOrder = destStore->rowCount();
+    const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
+    int newOrder = 0;
+    for (int i = 0; i < destStore->rowCount(); ++i) {
+        const TxtTask t = destStore->taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (lid == targetListId) {
+            newOrder++;
+        }
+    }
 
     QMap<QString, QVector<TxtTask>> remainingPerList;
     for (int i = 0; i < sourceStore->rowCount(); ++i) {
@@ -120,7 +128,15 @@ bool TaskManager::setTaskStatus(bool fromDoneList, int sourceRow, const QString&
     if (wasClosed != willBeClosed) {
         task.setStatus(normNewStatus);
         TaskStoreModel* destStore = willBeClosed ? &m_doneStore : &m_todoStore;
-        const int newOrder = destStore->rowCount();
+        const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
+        int newOrder = 0;
+        for (int i = 0; i < destStore->rowCount(); ++i) {
+            const TxtTask t = destStore->taskAt(i);
+            const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+            if (lid == targetListId) {
+                newOrder++;
+            }
+        }
 
         QMap<QString, QVector<TxtTask>> remainingPerList;
         for (int i = 0; i < store->rowCount(); ++i) {

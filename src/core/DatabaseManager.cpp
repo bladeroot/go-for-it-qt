@@ -908,7 +908,7 @@ bool DatabaseManager::updateTask(const TxtTask& task) {
     q.bindValue(QStringLiteral(":comments_json"), nonNullString(serializeCommentsList(task.comments())));
     q.bindValue(QStringLiteral(":is_viewed"), task.isViewed() ? 1 : 0);
     q.bindValue(QStringLiteral(":id"), task.id());
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::markTaskViewed(qint64 taskId, bool viewed) {
@@ -917,7 +917,7 @@ bool DatabaseManager::markTaskViewed(qint64 taskId, bool viewed) {
     q.prepare(QStringLiteral("UPDATE tasks SET is_viewed = :viewed WHERE id = :id"));
     q.bindValue(QStringLiteral(":viewed"), viewed ? 1 : 0);
     q.bindValue(QStringLiteral(":id"), taskId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::updateTaskDoneAndOrder(const TxtTask& task, int sortOrder) {
@@ -932,7 +932,7 @@ bool DatabaseManager::updateTaskDoneAndOrder(const TxtTask& task, int sortOrder)
     q.bindValue(QStringLiteral(":completion_date"), task.completionDate().isValid() ? task.completionDate().toString(Qt::ISODate) : QStringLiteral(""));
     q.bindValue(QStringLiteral(":sort_order"), sortOrder);
     q.bindValue(QStringLiteral(":id"), task.id());
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::moveTaskDoneAndReorder(const TxtTask& task, int newOrder, const QMap<QString, QVector<TxtTask>>& remainingPerList, bool remainingDone) {
@@ -952,7 +952,7 @@ bool DatabaseManager::moveTaskDoneAndReorder(const TxtTask& task, int newOrder, 
     q.bindValue(QStringLiteral(":completion_date"), task.completionDate().isValid() ? task.completionDate().toString(Qt::ISODate) : QStringLiteral(""));
     q.bindValue(QStringLiteral(":sort_order"), newOrder);
     q.bindValue(QStringLiteral(":id"), task.id());
-    if (!q.exec()) {
+    if (!q.exec() || q.numRowsAffected() <= 0) {
         database.rollback();
         return false;
     }
@@ -990,7 +990,7 @@ bool DatabaseManager::updateTaskTimer(qint64 taskId, quint32 timerSeconds, quint
     q.bindValue(QStringLiteral(":timer_seconds"), timerSeconds);
     q.bindValue(QStringLiteral(":jira_synced_seconds"), jiraSyncedSeconds);
     q.bindValue(QStringLiteral(":id"), taskId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::deleteTask(qint64 taskId) {
@@ -998,7 +998,7 @@ bool DatabaseManager::deleteTask(qint64 taskId) {
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM tasks WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), taskId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::deleteDoneTasks(const QStringList& listIds) {
@@ -1076,7 +1076,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     QSqlDatabase database = db();
     QSqlQuery check(database);
     check.prepare(QStringLiteral(
-        "SELECT id, duration_seconds, details, status, comments_json FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
+        "SELECT id, duration_seconds, details, status, comments_json, completion_date, done FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
     ));
     check.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     check.bindValue(QStringLiteral(":jira_key"), nonNullString(issueKey));
@@ -1086,23 +1086,39 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         const QString existingDetails = check.value(2).toString();
         const QString prevStatus = check.value(3).toString();
         const QString existingCommentsJson = check.value(4).toString();
+        const QString existingCompletionDate = check.value(5).toString();
+        const bool wasDone = check.value(6).toInt() == 1 || TxtTask::isClosedStatus(prevStatus);
         if (outOldStatus) *outOldStatus = prevStatus;
+
+        QString completionDateToSet;
+        if (isDone) {
+            if (!wasDone || existingCompletionDate.trimmed().isEmpty()) {
+                completionDateToSet = QDate::currentDate().toString(Qt::ISODate);
+            } else {
+                completionDateToSet = existingCompletionDate.trimmed();
+            }
+        } else {
+            completionDateToSet = QStringLiteral("");
+        }
+
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
             "UPDATE tasks SET description = :description, done = :done, status = :status, "
+            "completion_date = :completion_date, "
             "priority = :priority, duration_seconds = :duration, details = :details, comments_json = :comments_json "
             "WHERE id = :id"
         ));
         upd.bindValue(QStringLiteral(":description"), nonNullString(description));
         upd.bindValue(QStringLiteral(":done"), isDone ? 1 : 0);
         upd.bindValue(QStringLiteral(":status"), nonNullString(normStatus));
+        upd.bindValue(QStringLiteral(":completion_date"), completionDateToSet);
         upd.bindValue(QStringLiteral(":priority"), static_cast<int>(priority));
         upd.bindValue(QStringLiteral(":duration"), durationSeconds > 0 ? durationSeconds : existingDur);
         upd.bindValue(QStringLiteral(":details"), !details.trimmed().isEmpty() ? nonNullString(details) : nonNullString(existingDetails));
         const QString commentsJson = !comments.isEmpty() ? serializeCommentsList(comments) : existingCommentsJson;
         upd.bindValue(QStringLiteral(":comments_json"), nonNullString(commentsJson));
         upd.bindValue(QStringLiteral(":id"), existingId);
-        return upd.exec();
+        return upd.exec() && upd.numRowsAffected() > 0;
     }
 
     if (outIsNew) *outIsNew = true;

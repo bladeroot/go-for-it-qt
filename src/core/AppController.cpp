@@ -366,15 +366,20 @@ bool AppController::toggleTaskDoneSource(bool fromDoneList, int sourceRow) {
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
 
+    bool timerWasStopped = false;
     if (!fromDoneList && m_timer.isRunning()) {
         const qint64 timedTaskId = m_timer.activeTaskId();
         const qint64 targetTaskId = taskId.toLongLong();
         if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
             m_timer.stop();
+            timerWasStopped = true;
         }
     }
 
     if (!m_taskManager.toggleTaskDone(fromDoneList, sourceRow)) {
+        if (timerWasStopped) {
+            m_timer.start();
+        }
         return false;
     }
 
@@ -421,15 +426,20 @@ bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, con
     const bool willBeClosed = TxtTask::isClosedStatus(normNewStatus);
     const bool willMoveToDone = (!fromDoneList && !wasClosed && willBeClosed);
 
+    bool timerWasStopped = false;
     if (willMoveToDone && m_timer.isRunning()) {
         const qint64 timedTaskId = m_timer.activeTaskId();
         const qint64 targetTaskId = taskId.toLongLong();
         if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
             m_timer.stop();
+            timerWasStopped = true;
         }
     }
 
     if (!m_taskManager.setTaskStatus(fromDoneList, sourceRow, normNewStatus)) {
+        if (timerWasStopped) {
+            m_timer.start();
+        }
         return false;
     }
 
