@@ -1640,9 +1640,6 @@ private slots:
             const QString trTuiSync = translator.translate("TuiApp", "8. Sync Status Back to Tracker  : %1");
             QCOMPARE(trTuiSync, QStringLiteral("8. Синхронізувати статус із трекером : %1"));
 
-            const QString trTuiSave8 = translator.translate("TuiApp", "8. >>> [ SAVE & ACTIVATE LIST ] <<<");
-            QCOMPARE(trTuiSave8, QStringLiteral("8. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<"));
-
             const QString trTuiSave9 = translator.translate("TuiApp", "9. >>> [ SAVE & ACTIVATE LIST ] <<<");
             QCOMPARE(trTuiSave9, QStringLiteral("9. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<"));
 
@@ -1675,6 +1672,13 @@ private slots:
                      QStringLiteral("Synchronisiere Aufgabenabschluss zuruck zum Tracker"));
             QFile::remove(tempJsonPath);
 
+            // Verify embedded translations loaded via Q_INIT_RESOURCE
+            QVERIFY(translator.hasLanguage(QStringLiteral("uk")));
+            QVERIFY(translator.hasLanguage(QStringLiteral("de")));
+            QVERIFY(translator.hasLanguage(QStringLiteral("fr")));
+            QVERIFY(translator.hasLanguage(QStringLiteral("es")));
+            QVERIFY(translator.hasLanguage(QStringLiteral("it")));
+
             // Test dynamic language addition via directory (e.g. ru.json)
             const QString customTransDir = m_testSandbox.filePath(QStringLiteral("dynamic_translations"));
             QDir().mkpath(customTransDir);
@@ -1684,10 +1688,21 @@ private slots:
             ruFile.write(R"({"Settings": "Настройки", "Tasks": "Задачи"})");
             ruFile.close();
 
+            // Also place an invalid filename (non-language code, e.g. backup.json)
+            const QString backupJsonPath = customTransDir + QStringLiteral("/backup.json");
+            QFile backupFile(backupJsonPath);
+            QVERIFY(backupFile.open(QIODevice::WriteOnly));
+            backupFile.write(R"({"Settings": "Резерв"})");
+            backupFile.close();
+
             translator.loadTranslationsFromDirectory(customTransDir);
             QVERIFY(translator.hasLanguage(QStringLiteral("ru")));
             QVERIFY(translator.availableLanguageCodes().contains(QStringLiteral("ru")));
             QVERIFY(translator.languageDisplayName(QStringLiteral("ru")).contains(QStringLiteral("Русский"), Qt::CaseInsensitive));
+
+            // backup.json must NOT be registered as a language!
+            QVERIFY(!translator.hasLanguage(QStringLiteral("backup")));
+            QVERIFY(!translator.availableLanguageCodes().contains(QStringLiteral("backup")));
 
             // Verify effective language resolution
             QCOMPARE(translator.resolveEffectiveLanguage(QStringLiteral("ru")), QStringLiteral("ru"));
@@ -1702,6 +1717,7 @@ private slots:
             QCOMPARE(sm.effectiveLanguage(), QStringLiteral("ru"));
 
             QFile::remove(ruJsonPath);
+            QFile::remove(backupJsonPath);
             QDir().rmdir(customTransDir);
         }
 
@@ -1750,6 +1766,39 @@ private slots:
             // MUST NOT close any of the remaining 5 tasks!
             svc.processSyncedItems(e, items150.mid(0, 2), QStringLiteral("GitLab"), false, true /* hasError */);
             QCOMPARE(db.loadTasks(e.id, false).size(), 5);
+        }
+
+        // Test 11: updateListStatusMapping preserves sort order
+        {
+            TodoListEntry e;
+            e.id = QStringLiteral("status_mapping_test");
+            e.name = QStringLiteral("Status Mapping Test");
+            e.provider = QStringLiteral("Redmine");
+            e.statusMapping = {{QStringLiteral("Resolved"), QStringLiteral("done")}};
+            QVERIFY(db.saveList(e, 42));
+
+            QVariantMap newMapping = e.statusMapping;
+            newMapping[QStringLiteral("_id_Closed")] = 5;
+            newMapping[QStringLiteral("_id_Resolved")] = 3;
+
+            QVERIFY(db.updateListStatusMapping(e.id, newMapping));
+
+            QVector<TodoListEntry> allLists = db.loadLists();
+            bool found = false;
+            for (const auto& l : allLists) {
+                if (l.id == e.id) {
+                    found = true;
+                    QCOMPARE(l.statusMapping.value(QStringLiteral("_id_Closed")).toInt(), 5);
+                    QCOMPARE(l.statusMapping.value(QStringLiteral("_id_Resolved")).toInt(), 3);
+                    break;
+                }
+            }
+            QVERIFY(found);
+
+            QSqlQuery q(QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn")));
+            QVERIFY(q.exec(QStringLiteral("SELECT sort_order FROM lists WHERE id = 'status_mapping_test'")));
+            QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 42); // sort_order MUST be preserved!
         }
 
         db.close();

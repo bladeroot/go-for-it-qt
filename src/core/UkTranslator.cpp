@@ -6,7 +6,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QRegularExpression>
 #include <QStandardPaths>
+#include <algorithm>
+
+static void initTranslationsResource() {
+    Q_INIT_RESOURCE(translations);
+}
 
 namespace gofi {
 
@@ -17,30 +23,37 @@ UkTranslator::UkTranslator(QObject* parent)
 }
 
 void UkTranslator::reloadTranslations() {
+    initTranslationsResource();
     m_dicts.clear();
     m_availableLanguages.clear();
 
-    // 1. Built-in Qt Resources (:/translations)
+    // 1. Built-in Qt Resources (:/translations) — lowest priority baseline
     loadTranslationsFromDirectory(QStringLiteral(":/translations"));
 
-    // 2. Application share directory and dev paths
-    if (QCoreApplication::instance()) {
-        const QString appDir = QCoreApplication::applicationDirPath();
-        loadTranslationsFromDirectory(appDir + QStringLiteral("/../share/go-for-it-qt/translations"));
-        loadTranslationsFromDirectory(appDir + QStringLiteral("/data/translations"));
-    }
-
-    // 3. System data locations (/usr/share, /usr/local/share, etc.)
-    const QStringList sysDataDirs = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
+    // 2. System data locations (/usr/share, /usr/local/share, etc.) in reverse order
+    // standardLocations returns [~/.local/share, /usr/local/share, /usr/share]
+    // Reversing ensures system /usr/share loads before local/user dirs
+    QStringList sysDataDirs = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
+    std::reverse(sysDataDirs.begin(), sysDataDirs.end());
+    const QString userGeneric = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
     for (const QString& d : sysDataDirs) {
+        if (!userGeneric.isEmpty() && d == userGeneric) continue;
         loadTranslationsFromDirectory(d + QStringLiteral("/go-for-it-qt/translations"));
     }
 
-    // 4. User data location (~/.local/share/go-for-it-qt/translations)
+    // 3. Application installed / bundle share directory
+    if (QCoreApplication::instance()) {
+        const QString appDir = QCoreApplication::applicationDirPath();
+        loadTranslationsFromDirectory(appDir + QStringLiteral("/../share/go-for-it-qt/translations"));
+        // 4. Development build data directory (e.g. build/data/translations)
+        loadTranslationsFromDirectory(appDir + QStringLiteral("/data/translations"));
+    }
+
+    // 5. User data location (~/.local/share/go-for-it-qt/translations) — overrides system & dev
     const QString appDataTranslations = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/translations");
     loadTranslationsFromDirectory(appDataTranslations);
 
-    // 5. Environment variable override
+    // 6. Environment variable override (highest priority)
     const QString customDir = QString::fromUtf8(qgetenv("GOFI_TRANSLATIONS_DIR"));
     if (!customDir.isEmpty()) {
         loadTranslationsFromDirectory(customDir);
@@ -71,10 +84,12 @@ void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
     if (dirPath.isEmpty()) return;
     QDir dir(dirPath);
     if (!dir.exists()) return;
+    static const QRegularExpression langCodeRegex(QStringLiteral("^[a-z]{2,3}([_-][a-z]{2})?$"), QRegularExpression::CaseInsensitiveOption);
     const QStringList files = dir.entryList(QDir::Files);
     for (const QString& file : files) {
         if (!file.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) continue;
         const QString lang = file.left(file.lastIndexOf(QLatin1Char('.'))).toLower();
+        if (!langCodeRegex.match(lang).hasMatch()) continue;
         loadTranslationsFromJson(dir.filePath(file), lang);
         if (lang.contains(QLatin1Char('_'))) {
             loadTranslationsFromJson(dir.filePath(file), lang.section(QLatin1Char('_'), 0, 0));

@@ -30,7 +30,6 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_systemHooks(this, &m_settings, &m_timer, this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
-    m_ukTranslator.reloadTranslations();
     m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
     applyLanguageTranslator();
     connect(&m_settings, &SettingsManager::languageChanged, this, [this]() {
@@ -54,6 +53,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     });
     connect(&m_desktopIntegration, &DesktopIntegration::showWindowRequested, this, &AppController::showWindowRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::quitRequested, this, &AppController::quitRequested);
+    connect(&m_issueTracker, &IssueTrackerService::listStatusMappingUpdated, &m_listManager, &ListManagerModel::updateListStatusMapping);
 
     m_issueTracker.setActiveTaskChecker([this](const QString& listId, const QString& jiraKey) {
         if (m_timer.isRunning() && m_timer.hasActiveTask()) {
