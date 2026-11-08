@@ -2293,6 +2293,198 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(testDb);
     }
+
+    void testAllListsClearDoneAndStatusSideEffectsSafety() {
+        const QString testDb = QStringLiteral("/tmp/gofi-alllists-safety-test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QString(), testDb);
+            const QSqlDatabase dbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+
+            // 1. "Clear Done" in All Lists (__ALL__) mode deletes done tasks across all lists
+            const QString list1Id = ctrl.listManager()->addList(QStringLiteral("List 1"));
+            const QString list2Id = ctrl.listManager()->addList(QStringLiteral("List 2"));
+            QVERIFY(!list1Id.isEmpty() && !list2Id.isEmpty());
+
+            ctrl.selectListById(list1Id);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("Task 1 in List 1"));
+            ctrl.toggleTaskDone(false, 0);
+
+            ctrl.selectListById(list2Id);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("Task 2 in List 2"));
+            ctrl.toggleTaskDone(false, 0);
+
+            // Directly verify SQLite has 2 completed tasks
+            QSqlQuery countQ(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE done = 1"), dbConn);
+            QVERIFY(countQ.next());
+            QCOMPARE(countQ.value(0).toInt(), 2);
+
+            // Switch to All Lists mode
+            ctrl.showAllLists();
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 2);
+
+            // Clear done tasks in All Lists mode
+            ctrl.clearDoneTasks();
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+            // Verify SQLite has 0 completed tasks
+            countQ.exec(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE done = 1"));
+            QVERIFY(countQ.next());
+            QCOMPARE(countQ.value(0).toInt(), 0);
+
+            // Re-check individual lists to ensure done tasks are gone permanently
+            ctrl.selectListById(list1Id);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+            ctrl.selectListById(list2Id);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+            // 2. Atomic deletion across multiple lists with rollback on failure
+            ctrl.addNewTask(QStringLiteral("Done task A"));
+            ctrl.toggleTaskDone(false, 0);
+            ctrl.selectListById(list1Id);
+            ctrl.addNewTask(QStringLiteral("Done task B"));
+            ctrl.toggleTaskDone(false, 0);
+
+            countQ.exec(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE done = 1"));
+            QVERIFY(countQ.next());
+            QCOMPARE(countQ.value(0).toInt(), 2);
+
+            QSqlQuery trig(dbConn);
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_multi_delete BEFORE DELETE ON tasks "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated delete error'); END;"
+            )));
+
+            // deleteDoneTasks on list IDs should fail and rollback
+            const bool delOk = DatabaseManager::instance().deleteDoneTasks(QStringList{list1Id, list2Id});
+            QVERIFY(!delOk);
+
+            // Both tasks must still exist in DB due to atomic rollback
+            countQ.exec(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE done = 1"));
+            QVERIFY(countQ.next());
+            QCOMPARE(countQ.value(0).toInt(), 2);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_multi_delete"));
+
+            ctrl.showAllLists();
+            ctrl.clearDoneTasks();
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+            // 3. Status side-effects blocked on SQLite persistence failure
+            ctrl.selectListById(list1Id);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("Side effect test task"));
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_status_update BEFORE UPDATE ON tasks "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated update error'); END;"
+            )));
+
+            bool statusChangedNotifReceived = false;
+            QObject::connect(&ctrl, &AppController::notificationRequested, [&statusChangedNotifReceived](const QString& title, const QString&) {
+                if (title == QObject::tr("Task status changed")) {
+                    statusChangedNotifReceived = true;
+                }
+            });
+
+            // Attempt toggleTaskDone: must fail, suppress "Task status changed" notification, and keep task in todo
+            ctrl.toggleTaskDone(false, 0);
+            QVERIFY(!statusChangedNotifReceived);
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+            // Attempt changeTaskStatus: must fail, suppress "Task status changed" notification, and keep task in todo
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("done"));
+            QVERIFY(!statusChangedNotifReceived);
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_status_update"));
+
+            // 4. Status 'canceled' is treated as closed and handled consistently
+            ctrl.setActiveTodoRow(0);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("canceled"));
+            // Timer must be stopped when transitioning to 'canceled'
+            QVERIFY(!ctrl.timer()->isRunning());
+            // Task moves from todo to done
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 0);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 1);
+
+            // Check SQLite state for 'canceled'
+            QSqlQuery checkStatus(dbConn);
+            checkStatus.prepare(QStringLiteral("SELECT done, status FROM tasks WHERE list_id = :lid"));
+            checkStatus.bindValue(QStringLiteral(":lid"), list1Id);
+            QVERIFY(checkStatus.exec() && checkStatus.next());
+            QCOMPARE(checkStatus.value(0).toInt(), 1);
+            QCOMPARE(checkStatus.value(1).toString(), QStringLiteral("canceled"));
+
+            // Reopen from 'canceled' to 'todo'
+            ctrl.changeTaskStatus(true, 0, QStringLiteral("todo"));
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+            checkStatus.bindValue(QStringLiteral(":lid"), list1Id);
+            QVERIFY(checkStatus.exec() && checkStatus.next());
+            QCOMPARE(checkStatus.value(0).toInt(), 0);
+            QCOMPARE(checkStatus.value(1).toString(), QStringLiteral("todo"));
+
+            // 5. Remote sync transaction atomic rollback on SQLite error
+            TodoListEntry entry = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(list1Id));
+            QVector<RemoteIssueItem> syncItems;
+            RemoteIssueItem item1;
+            item1.key = QStringLiteral("TX-1");
+            item1.description = QStringLiteral("First item");
+            syncItems.append(item1);
+
+            RemoteIssueItem item2;
+            item2.key = QStringLiteral("TX-FAIL");
+            item2.description = QStringLiteral("Second item fails");
+            syncItems.append(item2);
+
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_tx_item BEFORE INSERT ON tasks "
+                "WHEN NEW.jira_key = 'TX-FAIL' "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated second item failure'); END;"
+            )));
+
+            bool syncFailedCalled = false;
+            QObject::connect(ctrl.issueTracker(), &IssueTrackerService::syncFailed, [&syncFailedCalled](const QString&, const QString&) {
+                syncFailedCalled = true;
+            });
+
+            ctrl.issueTracker()->processSyncedItems(entry, syncItems, QStringLiteral("Jira"), false, false, false);
+            QVERIFY(syncFailedCalled);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_tx_item"));
+
+            // Because transaction rolled back, item1 (TX-1) must NOT be present in database
+            QSqlQuery txCheck(QStringLiteral("SELECT COUNT(*) FROM tasks WHERE jira_key = 'TX-1'"), dbConn);
+            QVERIFY(txCheck.next());
+            QCOMPARE(txCheck.value(0).toInt(), 0);
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
