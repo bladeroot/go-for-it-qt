@@ -147,6 +147,13 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         m_notifications.notifyTaskEvent(tr("Database Error"), message);
         emit databaseError(message);
     });
+    connect(&m_issueTracker, &IssueTrackerService::syncFailed, this, [this](const QString&, const QString& message) {
+        if (message.contains(QStringLiteral("database"), Qt::CaseInsensitive)) {
+            qCritical() << "IssueTracker database error:" << message;
+            m_notifications.notifyTaskEvent(tr("Database Error"), message);
+            emit databaseError(message);
+        }
+    });
 
     const QString lastId = m_settings.lastLoadedListId();
     if (!lastId.isEmpty() && m_listManager.indexOfId(lastId) >= 0) {
@@ -366,21 +373,21 @@ bool AppController::toggleTaskDoneSource(bool fromDoneList, int sourceRow) {
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
 
-    bool timerWasStopped = false;
-    if (!fromDoneList && m_timer.isRunning()) {
-        const qint64 timedTaskId = m_timer.activeTaskId();
-        const qint64 targetTaskId = taskId.toLongLong();
-        if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
-            m_timer.stop();
-            timerWasStopped = true;
-        }
+    const qint64 timedTaskId = m_timer.activeTaskId();
+    const qint64 targetTaskId = taskId.toLongLong();
+    const bool isTimingThisTask = !fromDoneList && m_timer.isRunning() &&
+        (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId));
+
+    if (isTimingThisTask) {
+        m_timer.flushActiveTaskSeconds();
     }
 
     if (!m_taskManager.toggleTaskDone(fromDoneList, sourceRow)) {
-        if (timerWasStopped) {
-            m_timer.start();
-        }
         return false;
+    }
+
+    if (isTimingThisTask && m_timer.isRunning()) {
+        m_timer.stop();
     }
 
     m_notifications.notifyTaskEvent(
@@ -426,21 +433,21 @@ bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, con
     const bool willBeClosed = TxtTask::isClosedStatus(normNewStatus);
     const bool willMoveToDone = (!fromDoneList && !wasClosed && willBeClosed);
 
-    bool timerWasStopped = false;
-    if (willMoveToDone && m_timer.isRunning()) {
-        const qint64 timedTaskId = m_timer.activeTaskId();
-        const qint64 targetTaskId = taskId.toLongLong();
-        if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
-            m_timer.stop();
-            timerWasStopped = true;
-        }
+    const qint64 timedTaskId = m_timer.activeTaskId();
+    const qint64 targetTaskId = taskId.toLongLong();
+    const bool isTimingThisTask = willMoveToDone && m_timer.isRunning() &&
+        (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId));
+
+    if (isTimingThisTask) {
+        m_timer.flushActiveTaskSeconds();
     }
 
     if (!m_taskManager.setTaskStatus(fromDoneList, sourceRow, normNewStatus)) {
-        if (timerWasStopped) {
-            m_timer.start();
-        }
         return false;
+    }
+
+    if (isTimingThisTask && m_timer.isRunning()) {
+        m_timer.stop();
     }
 
     if (oldStatus != normNewStatus) {

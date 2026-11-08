@@ -86,6 +86,25 @@ void TaskTimer::clearActiveTask() {
     emit activeTaskChanged();
 }
 
+uint TaskTimer::flushActiveTaskSeconds() {
+    if (!m_running || m_breakActive || !m_monotonicTimer.isValid()) {
+        return m_activeTaskTimerSec;
+    }
+    const qint64 elapsedMs = m_monotonicTimer.elapsed();
+    const qint64 unsyncedMs = elapsedMs - m_lastTaskSyncMs;
+    const qint64 totalTaskMs = unsyncedMs + m_accumulatedMsRemainder;
+    if (totalTaskMs > 0) {
+        const uint addedSec = static_cast<uint>(totalTaskMs / 1000LL);
+        m_accumulatedMsRemainder = totalTaskMs % 1000LL;
+        m_lastTaskSyncMs += static_cast<qint64>(addedSec) * 1000LL;
+        if (addedSec > 0) {
+            m_activeTaskTimerSec += addedSec;
+            emit activeTaskTimeUpdated(m_activeTaskTimerSec);
+        }
+    }
+    return m_activeTaskTimerSec;
+}
+
 void TaskTimer::start() {
     if (m_running || !hasActiveTask()) {
         return;
@@ -119,6 +138,7 @@ void TaskTimer::stop() {
         if (totalTaskMs > 0) {
             const uint addedSec = static_cast<uint>(totalTaskMs / 1000LL);
             m_accumulatedMsRemainder = totalTaskMs % 1000LL;
+            m_lastTaskSyncMs += static_cast<qint64>(addedSec) * 1000LL;
             if (addedSec > 0) {
                 m_activeTaskTimerSec += addedSec;
                 emit activeTaskTimeUpdated(m_activeTaskTimerSec);

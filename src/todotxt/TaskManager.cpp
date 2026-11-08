@@ -107,9 +107,8 @@ bool TaskManager::toggleTaskDone(bool fromDoneList, int sourceRow) {
 
     m_movingBetweenStores = true;
     sourceStore->removeAt(sourceRow);
-    m_movingBetweenStores = false;
-
     destStore->appendTask(task);
+    m_movingBetweenStores = false;
     return true;
 }
 
@@ -155,9 +154,8 @@ bool TaskManager::setTaskStatus(bool fromDoneList, int sourceRow, const QString&
 
         m_movingBetweenStores = true;
         store->removeAt(sourceRow);
-        m_movingBetweenStores = false;
-
         destStore->appendTask(task);
+        m_movingBetweenStores = false;
         return true;
     } else {
         task.setStatus(normNewStatus);
@@ -195,37 +193,69 @@ void TaskManager::refresh() {
 }
 
 void TaskManager::onTodoTaskDoneToggled(int row, const TxtTask& task) {
-    const int newOrder = m_doneStore.rowCount();
-    if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+    if (m_movingBetweenStores) return;
+    const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
+    int newOrder = 0;
+    for (int i = 0; i < m_doneStore.rowCount(); ++i) {
+        const TxtTask t = m_doneStore.taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (lid == targetListId) {
+            newOrder++;
+        }
+    }
+
+    QMap<QString, QVector<TxtTask>> remainingPerList;
+    for (int i = 0; i < m_todoStore.rowCount(); ++i) {
+        if (i == row) continue;
+        const TxtTask t = m_todoStore.taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (!lid.isEmpty()) {
+            remainingPerList[lid].append(t);
+        }
+    }
+
+    if (!DatabaseManager::instance().moveTaskDoneAndReorder(task, newOrder, remainingPerList, false)) {
         emit errorOccurred(tr("Failed to update task status in database."));
         loadFromDatabase(false);
         return;
     }
     m_movingBetweenStores = true;
     m_todoStore.removeAt(row);
-    m_movingBetweenStores = false;
-
-    if (!updateTasksOrders(false, m_todoStore.tasks())) {
-        return;
-    }
     m_doneStore.appendTask(task);
+    m_movingBetweenStores = false;
 }
 
 void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task) {
-    const int newOrder = m_todoStore.rowCount();
-    if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+    if (m_movingBetweenStores) return;
+    const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
+    int newOrder = 0;
+    for (int i = 0; i < m_todoStore.rowCount(); ++i) {
+        const TxtTask t = m_todoStore.taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (lid == targetListId) {
+            newOrder++;
+        }
+    }
+
+    QMap<QString, QVector<TxtTask>> remainingPerList;
+    for (int i = 0; i < m_doneStore.rowCount(); ++i) {
+        if (i == row) continue;
+        const TxtTask t = m_doneStore.taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (!lid.isEmpty()) {
+            remainingPerList[lid].append(t);
+        }
+    }
+
+    if (!DatabaseManager::instance().moveTaskDoneAndReorder(task, newOrder, remainingPerList, true)) {
         emit errorOccurred(tr("Failed to update task status in database."));
         loadFromDatabase(false);
         return;
     }
     m_movingBetweenStores = true;
     m_doneStore.removeAt(row);
-    m_movingBetweenStores = false;
-
-    if (!updateTasksOrders(true, m_doneStore.tasks())) {
-        return;
-    }
     m_todoStore.appendTask(task);
+    m_movingBetweenStores = false;
 }
 
 void TaskManager::onTaskUpdated(int row, const TxtTask& task) {

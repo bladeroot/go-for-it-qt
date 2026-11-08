@@ -1076,7 +1076,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     QSqlDatabase database = db();
     QSqlQuery check(database);
     check.prepare(QStringLiteral(
-        "SELECT id, duration_seconds, details, status, comments_json, completion_date, done FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
+        "SELECT id, duration_seconds, details, status, comments_json, completion_date, done, sort_order FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
     ));
     check.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     check.bindValue(QStringLiteral(":jira_key"), nonNullString(issueKey));
@@ -1088,6 +1088,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         const QString existingCommentsJson = check.value(4).toString();
         const QString existingCompletionDate = check.value(5).toString();
         const bool wasDone = check.value(6).toInt() == 1 || TxtTask::isClosedStatus(prevStatus);
+        const int oldOrder = check.value(7).toInt();
         if (outOldStatus) *outOldStatus = prevStatus;
 
         QString completionDateToSet;
@@ -1101,10 +1102,23 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
             completionDateToSet = QStringLiteral("");
         }
 
+        int targetOrder = oldOrder;
+        if (wasDone != isDone) {
+            QSqlQuery maxOrderQ(database);
+            maxOrderQ.prepare(QStringLiteral("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks WHERE list_id = :list_id AND done = :done"));
+            maxOrderQ.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
+            maxOrderQ.bindValue(QStringLiteral(":done"), isDone ? 1 : 0);
+            if (maxOrderQ.exec() && maxOrderQ.next()) {
+                targetOrder = maxOrderQ.value(0).toInt();
+            } else {
+                targetOrder = 0;
+            }
+        }
+
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
             "UPDATE tasks SET description = :description, done = :done, status = :status, "
-            "completion_date = :completion_date, "
+            "completion_date = :completion_date, sort_order = :sort_order, "
             "priority = :priority, duration_seconds = :duration, details = :details, comments_json = :comments_json "
             "WHERE id = :id"
         ));
@@ -1112,13 +1126,29 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":done"), isDone ? 1 : 0);
         upd.bindValue(QStringLiteral(":status"), nonNullString(normStatus));
         upd.bindValue(QStringLiteral(":completion_date"), completionDateToSet);
+        upd.bindValue(QStringLiteral(":sort_order"), targetOrder);
         upd.bindValue(QStringLiteral(":priority"), static_cast<int>(priority));
         upd.bindValue(QStringLiteral(":duration"), durationSeconds > 0 ? durationSeconds : existingDur);
         upd.bindValue(QStringLiteral(":details"), !details.trimmed().isEmpty() ? nonNullString(details) : nonNullString(existingDetails));
         const QString commentsJson = !comments.isEmpty() ? serializeCommentsList(comments) : existingCommentsJson;
         upd.bindValue(QStringLiteral(":comments_json"), nonNullString(commentsJson));
         upd.bindValue(QStringLiteral(":id"), existingId);
-        return upd.exec() && upd.numRowsAffected() > 0;
+        if (!upd.exec() || upd.numRowsAffected() <= 0) {
+            return false;
+        }
+
+        if (wasDone != isDone) {
+            QSqlQuery compactQ(database);
+            compactQ.prepare(QStringLiteral(
+                "UPDATE tasks SET sort_order = sort_order - 1 WHERE list_id = :list_id AND done = :wasDone AND sort_order > :oldOrder"
+            ));
+            compactQ.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
+            compactQ.bindValue(QStringLiteral(":wasDone"), wasDone ? 1 : 0);
+            compactQ.bindValue(QStringLiteral(":oldOrder"), oldOrder);
+            compactQ.exec();
+        }
+
+        return true;
     }
 
     if (outIsNew) *outIsNew = true;
@@ -1190,7 +1220,7 @@ bool DatabaseManager::markActivityWorklogSynced(qint64 logId) {
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE activity_log SET worklog_synced = 1 WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), logId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 QVector<ActivityRecord> DatabaseManager::loadActivityLogs(const QDateTime& startUtc,

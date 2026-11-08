@@ -42,6 +42,7 @@ public:
     void setActiveTask(qint64 taskId, const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds);
     void setActiveTask(const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds);
     void clearActiveTask();
+    uint flushActiveTaskSeconds();
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();

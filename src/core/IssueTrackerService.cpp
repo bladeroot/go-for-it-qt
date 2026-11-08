@@ -1952,11 +1952,11 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                     // Do not close a task that currently has an active running timer!
                     continue;
                 }
-                TxtTask closedTask = t;
-                closedTask.setDone(true);
-                closedTask.setStatus(QStringLiteral("done"));
-                closedTask.setCompletionDate(QDate::currentDate());
-                if (db.updateTask(closedTask)) {
+                bool isNew = false;
+                QString oldStatus;
+                if (db.upsertRemoteIssueTask(
+                    entry.id, t.jiraKey(), t.description(), QStringLiteral("done"),
+                    t.priority(), t.duration(), t.details(), t.comments(), &isNew, &oldStatus)) {
                     statusChanges.append(QStringLiteral("%1: %2 → done (closed remotely)").arg(t.jiraKey(), t.status()));
                 } else {
                     hasDbError = true;
@@ -2547,12 +2547,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         payload[QStringLiteral("comment")] = QStringLiteral("Logged via Go for It Qt Pomodoro timer");
 
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, loggedSeconds]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, loggedSeconds]() {
             reply->deleteLater();
             if (reply->error() == QNetworkReply::NoError) {
-                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                setStatusMessage(tr("Logged %1m to Jira issue %2").arg(loggedSeconds / 60U).arg(issueKey));
-                emit worklogPosted(issueKey, loggedSeconds);
+                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                    setStatusMessage(dbErr);
+                    emit syncFailed(listEntry.id, dbErr);
+                } else {
+                    setStatusMessage(tr("Logged %1m to Jira issue %2").arg(loggedSeconds / 60U).arg(issueKey));
+                    emit worklogPosted(issueKey, loggedSeconds);
+                }
             }
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
@@ -2572,12 +2577,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         payload[QStringLiteral("usesMarkdown")] = true;
 
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
             reply->deleteLater();
             if (reply->error() == QNetworkReply::NoError) {
-                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                setStatusMessage(tr("Logged %1m to YouTrack issue %2").arg(minutes).arg(issueKey));
-                emit worklogPosted(issueKey, minutes * 60U);
+                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                    setStatusMessage(dbErr);
+                    emit syncFailed(listEntry.id, dbErr);
+                } else {
+                    setStatusMessage(tr("Logged %1m to YouTrack issue %2").arg(minutes).arg(issueKey));
+                    emit worklogPosted(issueKey, minutes * 60U);
+                }
             }
         });
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
@@ -2624,12 +2634,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             {QStringLiteral("body"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
         };
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
             reply->deleteLater();
             if (reply->error() == QNetworkReply::NoError) {
-                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                setStatusMessage(tr("Logged %1m to GitHub issue %2").arg(minutes).arg(issueKey));
-                emit worklogPosted(issueKey, minutes * 60U);
+                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                    setStatusMessage(dbErr);
+                    emit syncFailed(listEntry.id, dbErr);
+                } else {
+                    setStatusMessage(tr("Logged %1m to GitHub issue %2").arg(minutes).arg(issueKey));
+                    emit worklogPosted(issueKey, minutes * 60U);
+                }
             }
         });
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
@@ -2679,12 +2694,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         applyAuthHeader(req, listEntry);
 
         QNetworkReply* reply = m_nam.post(req, QByteArray());
-        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
             reply->deleteLater();
             if (reply->error() == QNetworkReply::NoError) {
-                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                setStatusMessage(tr("Logged %1m to GitLab %2").arg(minutes).arg(issueKey));
-                emit worklogPosted(issueKey, minutes * 60U);
+                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                    setStatusMessage(dbErr);
+                    emit syncFailed(listEntry.id, dbErr);
+                } else {
+                    setStatusMessage(tr("Logged %1m to GitLab %2").arg(minutes).arg(issueKey));
+                    emit worklogPosted(issueKey, minutes * 60U);
+                }
             }
         });
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
@@ -2711,12 +2731,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         QJsonObject payload{{QStringLiteral("time_entry"), timeEntryObj}};
 
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, runtimeSeconds]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, runtimeSeconds]() {
             reply->deleteLater();
             if (reply->error() == QNetworkReply::NoError) {
-                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                setStatusMessage(tr("Logged %1m to Redmine %2").arg(runtimeSeconds / 60U).arg(issueKey));
-                emit worklogPosted(issueKey, runtimeSeconds);
+                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                    setStatusMessage(dbErr);
+                    emit syncFailed(listEntry.id, dbErr);
+                } else {
+                    setStatusMessage(tr("Logged %1m to Redmine %2").arg(runtimeSeconds / 60U).arg(issueKey));
+                    emit worklogPosted(issueKey, runtimeSeconds);
+                }
             }
         });
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
@@ -2735,12 +2760,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         };
 
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, activityLogId, issueKey, minutes]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
             reply->deleteLater();
             if (reply->error() == QNetworkReply::NoError) {
-                DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
-                emit worklogPosted(issueKey, minutes * 60U);
+                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                    setStatusMessage(dbErr);
+                    emit syncFailed(listEntry.id, dbErr);
+                } else {
+                    setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
+                    emit worklogPosted(issueKey, minutes * 60U);
+                }
             }
         });
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
@@ -2770,12 +2800,17 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                 QNetworkRequest putReq = req;
                 putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
                 QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
-                connect(putReply, &QNetworkReply::finished, this, [this, putReply, activityLogId, issueKey, minutes]() {
+                connect(putReply, &QNetworkReply::finished, this, [this, putReply, listEntry, activityLogId, issueKey, minutes]() {
                     putReply->deleteLater();
                     if (putReply->error() == QNetworkReply::NoError) {
-                        DatabaseManager::instance().markActivityWorklogSynced(activityLogId);
-                        setStatusMessage(tr("Logged %1m to Nextcloud task %2").arg(minutes).arg(issueKey));
-                        emit worklogPosted(issueKey, minutes * 60U);
+                        if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                            const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                            setStatusMessage(dbErr);
+                            emit syncFailed(listEntry.id, dbErr);
+                        } else {
+                            setStatusMessage(tr("Logged %1m to Nextcloud task %2").arg(minutes).arg(issueKey));
+                            emit worklogPosted(issueKey, minutes * 60U);
+                        }
                     }
                 });
             }
