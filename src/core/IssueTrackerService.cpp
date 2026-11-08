@@ -1708,8 +1708,10 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
             } else if (issuesArr.size() >= maxResults || (total >= 0 && (startAt + issuesArr.size() < total))) {
                 pageLimitReached = true;
             }
-            if (total == 0 && !hasError && issuesArr.isEmpty()) {
-                explicitZeroTotal = true;
+            if (!hasError && issuesArr.isEmpty()) {
+                if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && rootObj.value(QStringLiteral("isLast")).toBool(false))) {
+                    explicitZeroTotal = true;
+                }
             }
         }
 
@@ -2087,6 +2089,25 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
             }
             if (totalCount == 0 && issuesArr.isEmpty()) {
                 explicitZeroTotal = true;
+            }
+
+            // Auto-learn status IDs from returned issues for existing lists that haven't reloaded statuses
+            bool mappingChanged = false;
+            TodoListEntry updatedEntry = entry;
+            for (const auto& val : issuesArr) {
+                const QJsonObject statusObj = val.toObject().value(QStringLiteral("status")).toObject();
+                const QString sName = statusObj.value(QStringLiteral("name")).toString().trimmed();
+                const int sId = statusObj.value(QStringLiteral("id")).toInt(0);
+                if (!sName.isEmpty() && sId > 0) {
+                    const QString idKey = QStringLiteral("_id_") + sName;
+                    if (!updatedEntry.statusMapping.contains(idKey)) {
+                        updatedEntry.statusMapping[idKey] = sId;
+                        mappingChanged = true;
+                    }
+                }
+            }
+            if (mappingChanged) {
+                DatabaseManager::instance().saveList(updatedEntry, 0);
             }
         }
 
@@ -2950,8 +2971,8 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
                 setStatusMessage(errMsg);
                 emit syncFailed(listEntry.id, errMsg);
             } else {
-                setStatusMessage(tr("Updated %1 on %2 to %3")
-                    .arg(issueKey, listEntry.provider, done ? tr("Closed") : tr("Open")));
+                setStatusMessage(done ? tr("Updated %1 on %2: closed").arg(issueKey, listEntry.provider)
+                                      : tr("Updated %1 on %2: open").arg(issueKey, listEntry.provider));
             }
         });
     };

@@ -1640,21 +1640,87 @@ private slots:
             const QString trTuiSync = translator.translate("TuiApp", "8. Sync Status Back to Tracker  : %1");
             QCOMPARE(trTuiSync, QStringLiteral("8. Синхронізувати статус із трекером : %1"));
 
+            const QString trTuiSave8 = translator.translate("TuiApp", "8. >>> [ SAVE & ACTIVATE LIST ] <<<");
+            QCOMPARE(trTuiSave8, QStringLiteral("8. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<"));
+
+            const QString trTuiSave9 = translator.translate("TuiApp", "9. >>> [ SAVE & ACTIVATE LIST ] <<<");
+            QCOMPARE(trTuiSave9, QStringLiteral("9. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<"));
+
+            const QString trUpdatedClosed = translator.translate("IssueTrackerService", "Updated %1 on %2: closed");
+            QCOMPARE(trUpdatedClosed, QStringLiteral("Оновлено %1 на %2: закрито"));
+
+            const QString trUpdatedOpen = translator.translate("IssueTrackerService", "Updated %1 on %2: open");
+            QCOMPARE(trUpdatedOpen, QStringLiteral("Оновлено %1 на %2: відкрито"));
+
             const QString trInsecure = translator.translate("IssueTrackerService", " ⚠️ Insecure HTTP!");
             QCOMPARE(trInsecure, QStringLiteral(" ⚠️ Незахищений HTTP!"));
 
-            // Test loading external translation JSON file
-            const QString tempJsonPath = m_testSandbox.filePath(QStringLiteral("custom_de.json"));
+            // Test loading external translation JSON file with region suffix (e.g. de_AT.json)
+            const QString tempJsonPath = m_testSandbox.filePath(QStringLiteral("custom_de_AT.json"));
             QFile f(tempJsonPath);
             QVERIFY(f.open(QIODevice::WriteOnly));
             f.write(R"({"Sync task completion back to tracker": "Synchronisiere Aufgabenabschluss zuruck zum Tracker"})");
             f.close();
 
-            QVERIFY(translator.loadTranslationsFromJson(tempJsonPath, QStringLiteral("de")));
-            translator.setLanguageCode(QStringLiteral("de"));
-            const QString trDe = translator.translate("TxtListEditDialog", "Sync task completion back to tracker");
-            QCOMPARE(trDe, QStringLiteral("Synchronisiere Aufgabenabschluss zuruck zum Tracker"));
+            QVERIFY(translator.loadTranslationsFromJson(tempJsonPath, QStringLiteral("de_at")));
+            // Test lookup with regional code
+            translator.setLanguageCode(QStringLiteral("de_at"));
+            QCOMPARE(translator.translate("TxtListEditDialog", "Sync task completion back to tracker"),
+                     QStringLiteral("Synchronisiere Aufgabenabschluss zuruck zum Tracker"));
+
+            // Test fallback from de_DE to base de
+            translator.setLanguageCode(QStringLiteral("de_DE"));
+            translator.loadTranslationsFromJson(tempJsonPath, QStringLiteral("de"));
+            QCOMPARE(translator.translate("TxtListEditDialog", "Sync task completion back to tracker"),
+                     QStringLiteral("Synchronisiere Aufgabenabschluss zuruck zum Tracker"));
             QFile::remove(tempJsonPath);
+        }
+
+        // Test 10: Explicit Reproduction of User Case A & Case B from scratchpad
+        {
+            TodoListEntry e;
+            e.id = QStringLiteral("case_ab");
+            e.name = QStringLiteral("case_ab");
+            e.provider = QStringLiteral("GitHub");
+            e.apiToken = QStringLiteral("token");
+            QVERIFY(db.saveList(e, 0));
+
+            QVector<RemoteIssueItem> items150;
+            for (int i = 0; i < 150; ++i) {
+                RemoteIssueItem r;
+                r.key = QStringLiteral("GH#o/r#%1").arg(i);
+                r.description = QStringLiteral("issue %1").arg(i);
+                r.remoteStatus = QStringLiteral("open");
+                items150.append(r);
+            }
+
+            // Initial full sync with 150 open issues
+            svc.processSyncedItems(e, items150, QStringLiteral("GitHub"), false, false);
+            QCOMPARE(db.loadTasks(e.id, false).size(), 150);
+            QCOMPARE(db.loadTasks(e.id, true).size(), 0);
+
+            // Case A: Next sync returns first 100-item page (pageLimitReached = false, but items.size() == 100)
+            // MUST NOT close the remaining 50 items!
+            svc.processSyncedItems(e, items150.mid(0, 100), QStringLiteral("GitHub"), false, false);
+            QCOMPARE(db.loadTasks(e.id, false).size(), 150);
+            QCOMPARE(db.loadTasks(e.id, true).size(), 0);
+
+            // Case B: 200 OK with empty/unparseable body (items is empty, explicitZeroTotal is false)
+            // MUST NOT wipe out/close all open tasks!
+            svc.processSyncedItems(e, {}, QStringLiteral("GitHub"), false, false);
+            QCOMPARE(db.loadTasks(e.id, false).size(), 150);
+            QCOMPARE(db.loadTasks(e.id, true).size(), 0);
+
+            // Case C: Legitimate partial sync without limit reached (e.g. 5 open items returned, size < 100)
+            // The unreturned items ARE reconciled and marked closed!
+            svc.processSyncedItems(e, items150.mid(0, 5), QStringLiteral("GitHub"), false, false);
+            QCOMPARE(db.loadTasks(e.id, false).size(), 5);
+            QCOMPARE(db.loadTasks(e.id, true).size(), 145);
+
+            // Case D: Sync with partial network failure (hasError == true, e.g. GitLab MR request 403)
+            // MUST NOT close any of the remaining 5 tasks!
+            svc.processSyncedItems(e, items150.mid(0, 2), QStringLiteral("GitLab"), false, true /* hasError */);
+            QCOMPARE(db.loadTasks(e.id, false).size(), 5);
         }
 
         db.close();

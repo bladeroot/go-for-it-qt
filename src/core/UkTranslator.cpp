@@ -240,12 +240,11 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("Sync task completion back to tracker"), QStringLiteral("Синхронізувати завершення задач із трекером")},
         {QStringLiteral("8. Sync Status Back to Tracker  : %1"), QStringLiteral("8. Синхронізувати статус із трекером : %1")},
         {QStringLiteral("Failed to update status for %1 on %2 (%3): %4"), QStringLiteral("Не вдалося оновити статус для %1 на %2 (%3): %4")},
-        {QStringLiteral("Updated %1 on %2 to %3"), QStringLiteral("Оновлено %1 на %2 до %3")},
+        {QStringLiteral("Updated %1 on %2: closed"), QStringLiteral("Оновлено %1 на %2: закрито")},
+        {QStringLiteral("Updated %1 on %2: open"), QStringLiteral("Оновлено %1 на %2: відкрито")},
         {QStringLiteral(" ⚠️ Insecure HTTP!"), QStringLiteral(" ⚠️ Незахищений HTTP!")},
         {QStringLiteral("GitHub sync without an API token requires a repository, user, or organization in the query field (e.g. repo:owner/project, user:username, or org:name)."),
          QStringLiteral("Синхронізація з GitHub без API-токена вимагає репозиторію, користувача або організації в полі запиту (напр. repo:owner/project, user:username або org:name).")},
-        {QStringLiteral("Closed"), QStringLiteral("Закрито")},
-        {QStringLiteral("Open"), QStringLiteral("Відкрито")},
         {QStringLiteral("Jira authentication failed: please verify your Jira Email (e.g. corporate email) and API Token."),
          QStringLiteral("Помилка авторизації Jira: перевірте ваш Jira Email (напр. корпоративний) та API-токен.")},
         {QStringLiteral("Updated description on Jira issue %1."), QStringLiteral("Оновлено опис задачі Jira %1.")},
@@ -309,7 +308,9 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("5. API Token / Permanent Token  : %1"), QStringLiteral("5. API-токен / Постійний токен  : %1")},
         {QStringLiteral("6. JQL / Search Query           : %1"), QStringLiteral("6. JQL / Пошуковий запит        : %1")},
         {QStringLiteral("7. Auto-log Pomodoro Worklog    : %1"), QStringLiteral("7. Авто-логування часу Pomodoro : %1")},
+        {QStringLiteral("8. Sync Status Back to Tracker  : %1"), QStringLiteral("8. Синхронізувати статус із трекером : %1")},
         {QStringLiteral("8. >>> [ SAVE & ACTIVATE LIST ] <<<"), QStringLiteral("8. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<")},
+        {QStringLiteral("9. >>> [ SAVE & ACTIVATE LIST ] <<<"), QStringLiteral("9. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<")},
         {QStringLiteral("  📋 LISTS (j/k move, Enter select, a:Add new, e:Edit Jira/YouTrack, d:Delete, Esc close):"),
          QStringLiteral("  📋 СПИСКИ (j/k рух, Enter вибрати, a:Додати, e:Редагувати Jira/YouTrack, d:Видалити, Esc закрити):")},
         {QStringLiteral("   (No tasks in this view — press 'o' to add a task or 'r' to sync Jira/YouTrack)"),
@@ -784,6 +785,11 @@ void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
     for (const QString& file : files) {
         const QString lang = file.section(QLatin1Char('.'), 0, 0).toLower();
         loadTranslationsFromJson(dir.filePath(file), lang);
+        if (lang.contains(QLatin1Char('_'))) {
+            loadTranslationsFromJson(dir.filePath(file), lang.section(QLatin1Char('_'), 0, 0));
+        } else if (lang.contains(QLatin1Char('-'))) {
+            loadTranslationsFromJson(dir.filePath(file), lang.section(QLatin1Char('-'), 0, 0));
+        }
     }
 }
 
@@ -800,12 +806,25 @@ QString UkTranslator::translate(const char* context,
     Q_UNUSED(disambiguation)
     Q_UNUSED(n)
     if (!sourceText) return {};
-    const auto dictIt = m_dicts.constFind(m_langCode);
-    if (dictIt == m_dicts.constEnd()) return {};
     const QString key = QString::fromUtf8(sourceText);
-    const auto it = dictIt->constFind(key);
-    if (it != dictIt->constEnd()) {
-        return it.value();
+
+    auto tryLookup = [this, &key](const QString& code) -> QString {
+        const auto dictIt = m_dicts.constFind(code);
+        if (dictIt != m_dicts.constEnd()) {
+            const auto it = dictIt->constFind(key);
+            if (it != dictIt->constEnd()) return it.value();
+        }
+        return {};
+    };
+
+    QString res = tryLookup(m_langCode);
+    if (!res.isEmpty()) return res;
+
+    // Fallback: if m_langCode has region (e.g. "uk_ua" -> fallback to "uk")
+    if (m_langCode.contains(QLatin1Char('_')) || m_langCode.contains(QLatin1Char('-'))) {
+        const QString base = m_langCode.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+        res = tryLookup(base);
+        if (!res.isEmpty()) return res;
     }
     return {};
 }
