@@ -857,7 +857,11 @@ void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
                 }
             }
             if (!foundInDone) {
-                if (DatabaseManager::instance().loadTask(timedTaskId).has_value()) {
+                bool queryError = false;
+                const auto existingTask = DatabaseManager::instance().loadTask(timedTaskId, &queryError);
+                if (queryError) {
+                    ok = false;
+                } else if (existingTask.has_value()) {
                     ok = DatabaseManager::instance().updateTaskTimer(timedTaskId, totalSeconds);
                 }
             }

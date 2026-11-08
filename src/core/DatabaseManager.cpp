@@ -781,7 +781,10 @@ QVector<TxtTask> DatabaseManager::loadTasks(const QStringList& listIds, bool don
     return result;
 }
 
-std::optional<TxtTask> DatabaseManager::loadTask(qint64 taskId) const {
+std::optional<TxtTask> DatabaseManager::loadTask(qint64 taskId, bool* queryError) const {
+    if (queryError) {
+        *queryError = false;
+    }
     if (taskId < 0) return std::nullopt;
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
@@ -792,7 +795,13 @@ std::optional<TxtTask> DatabaseManager::loadTask(qint64 taskId) const {
         "WHERE t.id = :id"
     ));
     q.bindValue(QStringLiteral(":id"), taskId);
-    if (!q.exec() || !q.next()) {
+    if (!q.exec()) {
+        if (queryError) {
+            *queryError = true;
+        }
+        return std::nullopt;
+    }
+    if (!q.next()) {
         return std::nullopt;
     }
     const qint64 id = q.value(0).toLongLong();
@@ -928,13 +937,14 @@ qint64 DatabaseManager::insertTaskOnTopAndReorder(const QString& listId, const T
     for (const TxtTask& t : existingTasks) {
         const QString lid = !t.listId().isEmpty() ? t.listId() : listId;
         if (lid == listId && t.id() >= 0 && !t.isDone()) {
-            reorderQ.bindValue(QStringLiteral(":order"), currentOrder++);
+            reorderQ.bindValue(QStringLiteral(":order"), currentOrder);
             reorderQ.bindValue(QStringLiteral(":id"), t.id());
             reorderQ.bindValue(QStringLiteral(":list_id"), lid);
-            if (!reorderQ.exec()) {
+            if (!reorderQ.exec() || reorderQ.numRowsAffected() <= 0) {
                 database.rollback();
                 return -1;
             }
+            ++currentOrder;
         }
     }
 

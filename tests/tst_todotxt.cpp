@@ -2884,7 +2884,53 @@ private slots:
                 ctrl.selectListById(listId);
             }
 
-            // 3. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
+            // 3. Appending in a multi-list model must use the target list's order, not the global row count
+            {
+                const QString orderListA = ctrl.listManager()->addList(QStringLiteral("Append Order A"));
+                const QString orderListB = ctrl.listManager()->addList(QStringLiteral("Append Order B"));
+                QVERIFY(DatabaseManager::instance().insertTask(
+                    orderListA, TxtTask::fromSimpleTxt(QStringLiteral("A existing"), false, false), 0) >= 0);
+                QVERIFY(DatabaseManager::instance().insertTask(
+                    orderListB, TxtTask::fromSimpleTxt(QStringLiteral("B existing"), false, false), 0) >= 0);
+
+                TaskManager multiListManager;
+                multiListManager.setActiveLists({orderListA, orderListB}, orderListA, false);
+                multiListManager.addNewTask(QStringLiteral("A appended"), false, false);
+
+                QSqlQuery orderQ(dbConn);
+                orderQ.prepare(QStringLiteral(
+                    "SELECT sort_order FROM tasks WHERE list_id = :list_id AND description = :description"
+                ));
+                orderQ.bindValue(QStringLiteral(":list_id"), orderListA);
+                orderQ.bindValue(QStringLiteral(":description"), QStringLiteral("A appended"));
+                QVERIFY(orderQ.exec() && orderQ.next());
+                QCOMPARE(orderQ.value(0).toInt(), 1);
+            }
+
+            // 4. Prepend reorder must reject stale model rows that update no database record
+            {
+                const QString staleListId = ctrl.listManager()->addList(QStringLiteral("Stale Prepend Order"));
+                TaskManager staleManager;
+                staleManager.setActiveList(staleListId, false, false);
+                staleManager.addNewTask(QStringLiteral("Stale A"), false, false);
+                staleManager.addNewTask(QStringLiteral("Stale B"), false, false);
+                QCOMPARE(staleManager.todoModel()->rowCount(), 2);
+
+                const qint64 staleTaskId = staleManager.todoModel()->taskAt(0).id();
+                QVERIFY(DatabaseManager::instance().deleteTask(staleTaskId));
+                staleManager.addNewTask(QStringLiteral("Stale prepended"), true, false);
+
+                QSqlQuery orderQ(dbConn);
+                orderQ.prepare(QStringLiteral(
+                    "SELECT sort_order FROM tasks WHERE list_id = :list_id AND description = :description"
+                ));
+                orderQ.bindValue(QStringLiteral(":list_id"), staleListId);
+                orderQ.bindValue(QStringLiteral(":description"), QStringLiteral("Stale B"));
+                QVERIFY(orderQ.exec() && orderQ.next());
+                QCOMPARE(orderQ.value(0).toInt(), 1);
+            }
+
+            // 5. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
             {
                 ctrl.setActiveTodoRow(0);
                 ctrl.timer()->start();
@@ -2928,7 +2974,7 @@ private slots:
                 QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
             }
 
-            // 4. Timer persistence failure must not stop/log the active session or duplicate errors
+            // 6. Timer persistence failure must not stop/log the active session or duplicate errors
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -2974,7 +3020,7 @@ private slots:
                 }
             }
 
-            // 5. Failed deletion of the active task must not stop/log its timer
+            // 7. Failed deletion of the active task must not stop/log its timer
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3009,7 +3055,7 @@ private slots:
                 }
             }
 
-            // 6. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            // 8. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
             {
                 auto& db = DatabaseManager::instance();
                 const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
@@ -3071,12 +3117,28 @@ private slots:
                 failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
-            // 7. markActivityWorklogSynced() validation
+            // 9. markActivityWorklogSynced() validation
             {
                 auto& db = DatabaseManager::instance();
                 // Invalid IDs or non-existent log IDs must return false
                 QVERIFY(!db.markActivityWorklogSynced(-1));
                 QVERIFY(!db.markActivityWorklogSynced(999999));
+            }
+
+            // 10. loadTask distinction between not-found and query failure
+            {
+                auto& db = DatabaseManager::instance();
+                bool queryError = true;
+                // Non-existent task ID returns nullopt and sets queryError = false
+                auto resNotFound = db.loadTask(999999, &queryError);
+                QVERIFY(!resNotFound.has_value());
+                QCOMPARE(queryError, false);
+
+                // Negative task ID returns nullopt and sets queryError = false
+                queryError = true;
+                auto resNegative = db.loadTask(-1, &queryError);
+                QVERIFY(!resNegative.has_value());
+                QCOMPARE(queryError, false);
             }
         }
 

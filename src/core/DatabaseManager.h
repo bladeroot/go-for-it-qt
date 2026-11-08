@@ -74,7 +74,7 @@ public:
     bool updateListsOrder(const QVector<TodoListEntry>& entries);
 
     // Tasks CRUD
-    [[nodiscard]] std::optional<TxtTask> loadTask(qint64 taskId) const;
+    [[nodiscard]] std::optional<TxtTask> loadTask(qint64 taskId, bool* queryError = nullptr) const;
     [[nodiscard]] QVector<TxtTask> loadTasks(const QStringList& listIds, bool done) const;
     [[nodiscard]] QVector<TxtTask> loadTasks(const QString& listId, bool done) const;
     [[nodiscard]] int countAllTasksInLists(const QStringList& listIds) const;
