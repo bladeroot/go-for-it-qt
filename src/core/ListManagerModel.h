@@ -52,6 +52,7 @@ signals:
     void countChanged();
     void listRemoved(const QString& id);
     void listUpdated(const QString& id);
+    void errorOccurred(const QString& message);
 
 private:
     QVector<TodoListEntry> m_entries;

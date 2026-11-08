@@ -94,35 +94,49 @@ void TaskManager::refresh() {
 }
 
 void TaskManager::onTodoTaskDoneToggled(int row, const TxtTask& task) {
+    const int newOrder = m_doneStore.rowCount();
+    if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+        emit errorOccurred(tr("Failed to update task status in database."));
+        loadFromDatabase(false);
+        return;
+    }
     m_movingBetweenStores = true;
     m_todoStore.removeAt(row);
     m_movingBetweenStores = false;
 
-    const int newOrder = m_doneStore.rowCount();
-    DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder);
     updateTasksOrders(false, m_todoStore.tasks());
     m_doneStore.appendTask(task);
 }
 
 void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task) {
+    const int newOrder = m_todoStore.rowCount();
+    if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+        emit errorOccurred(tr("Failed to update task status in database."));
+        loadFromDatabase(false);
+        return;
+    }
     m_movingBetweenStores = true;
     m_doneStore.removeAt(row);
     m_movingBetweenStores = false;
 
-    const int newOrder = m_todoStore.rowCount();
-    DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder);
     updateTasksOrders(true, m_doneStore.tasks());
     m_todoStore.appendTask(task);
 }
 
 void TaskManager::onTaskUpdated(int row, const TxtTask& task) {
     Q_UNUSED(row)
-    DatabaseManager::instance().updateTask(task);
+    if (!DatabaseManager::instance().updateTask(task)) {
+        emit errorOccurred(tr("Failed to update task in database."));
+        loadFromDatabase(false);
+    }
 }
 
 void TaskManager::onTaskRemoved(qint64 taskId) {
     if (!m_movingBetweenStores && taskId >= 0) {
-        DatabaseManager::instance().deleteTask(taskId);
+        if (!DatabaseManager::instance().deleteTask(taskId)) {
+            emit errorOccurred(tr("Failed to delete task from database."));
+            loadFromDatabase(false);
+        }
     }
 }
 
@@ -143,8 +157,15 @@ void TaskManager::updateTasksOrders(bool done, const QVector<TxtTask>& tasks) {
             tasksByList[lid].append(t);
         }
     }
+    bool allSucceeded = true;
     for (auto it = tasksByList.cbegin(); it != tasksByList.cend(); ++it) {
-        DatabaseManager::instance().replaceListTasksOrders(it.key(), done, it.value());
+        if (!DatabaseManager::instance().replaceListTasksOrders(it.key(), done, it.value())) {
+            allSucceeded = false;
+        }
+    }
+    if (!allSucceeded) {
+        emit errorOccurred(tr("Failed to update tasks order in database."));
+        loadFromDatabase(false);
     }
 }
 

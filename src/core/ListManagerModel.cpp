@@ -199,8 +199,11 @@ QString ListManagerModel::saveListConfig(const QVariantMap& config, const QStrin
 
     const int idx = indexOfId(existingId);
     if (idx >= 0) {
+        if (!DatabaseManager::instance().saveList(entry, idx)) {
+            emit errorOccurred(tr("Failed to save list to database."));
+            return {};
+        }
         m_entries[idx] = entry;
-        DatabaseManager::instance().saveList(entry, idx);
         const QModelIndex modelIdx = index(idx, 0);
         emit dataChanged(modelIdx, modelIdx);
         emit listUpdated(entry.id);
@@ -208,7 +211,10 @@ QString ListManagerModel::saveListConfig(const QVariantMap& config, const QStrin
     }
 
     const int pos = static_cast<int>(m_entries.size());
-    DatabaseManager::instance().saveList(entry, pos);
+    if (!DatabaseManager::instance().saveList(entry, pos)) {
+        emit errorOccurred(tr("Failed to save new list to database."));
+        return {};
+    }
     beginInsertRows(QModelIndex(), pos, pos);
     m_entries.append(entry);
     endInsertRows();
@@ -220,13 +226,19 @@ void ListManagerModel::removeListById(const QString& id) {
     const int idx = indexOfId(id);
     if (idx < 0) return;
 
-    DatabaseManager::instance().removeList(id);
+    if (!DatabaseManager::instance().removeList(id)) {
+        emit errorOccurred(tr("Failed to remove list from database."));
+        return;
+    }
 
     beginRemoveRows(QModelIndex(), idx, idx);
     m_entries.removeAt(idx);
     endRemoveRows();
 
-    DatabaseManager::instance().updateListsOrder(m_entries);
+    if (!DatabaseManager::instance().updateListsOrder(m_entries)) {
+        emit errorOccurred(tr("Failed to update lists order in database."));
+        reloadFromDatabase();
+    }
     emit countChanged();
     emit listRemoved(id);
 }
@@ -241,14 +253,21 @@ void ListManagerModel::moveItem(int fromRow, int toRow) {
     }
     m_entries.move(fromRow, toRow);
     endMoveRows();
-    DatabaseManager::instance().updateListsOrder(m_entries);
+    if (!DatabaseManager::instance().updateListsOrder(m_entries)) {
+        emit errorOccurred(tr("Failed to save lists order to database."));
+        reloadFromDatabase();
+    }
 }
 
 void ListManagerModel::updateListStatusMapping(const QString& listId, const QVariantMap& mapping) {
     for (int i = 0; i < m_entries.size(); ++i) {
         if (m_entries[i].id == listId) {
             m_entries[i].statusMapping = mapping;
-            DatabaseManager::instance().updateListStatusMapping(listId, mapping);
+            if (!DatabaseManager::instance().updateListStatusMapping(listId, mapping)) {
+                emit errorOccurred(tr("Failed to save status mapping to database."));
+                reloadFromDatabase();
+                return;
+            }
             emit dataChanged(index(i, 0), index(i, 0));
             emit listUpdated(listId);
             break;
