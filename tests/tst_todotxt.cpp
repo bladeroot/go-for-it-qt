@@ -1231,6 +1231,18 @@ private slots:
         QVERIFY(csvContent.contains(QStringLiteral("\"'=SUM(1+1) dangerous task\"")));
         QVERIFY(csvContent.contains(QStringLiteral("\"'=CmdList\"")));
 
+        // 3. ActivityLog::logTaskInFile CSV formula injection sanitization
+        const QString actCsv = m_testSandbox.filePath(QStringLiteral("act_formula_test.csv"));
+        QFile::remove(actCsv);
+        QVERIFY(ActivityLog::logTaskInFile(actCsv, QStringLiteral("+DangerousList"), QStringLiteral("@SUM(1+1)"), QDateTime::currentDateTimeUtc(), 60, QDateTime::currentDateTimeUtc()));
+        QFile actCsvFile(actCsv);
+        QVERIFY(actCsvFile.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString actCsvContent = QString::fromUtf8(actCsvFile.readAll());
+        actCsvFile.close();
+        QVERIFY(actCsvContent.contains(QStringLiteral("\"'+DangerousList\"")));
+        QVERIFY(actCsvContent.contains(QStringLiteral("\"'@SUM(1+1)\"")));
+        QFile::remove(actCsv);
+
         db.close();
         QFile::remove(testCsv);
         QFile::remove(testDb);
@@ -1394,7 +1406,9 @@ private slots:
 
     void testJiraBearerAuthRetryWithLocalServer() {
         QTcpServer server;
-        QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
         const quint16 port = server.serverPort();
 
         int requestCount = 0;
@@ -1803,6 +1817,155 @@ private slots:
 
         db.close();
         QFile::remove(testDb);
+    }
+
+    void testTaskTimerTrackingAndDatabaseSafety() {
+        // 1. Timer distinguishes tasks with identical descriptions via taskId
+        {
+            SettingsManager sm;
+            TaskTimer timer(&sm);
+            timer.setActiveTask(101, QStringLiteral("Duplicate Description"), 0, 0);
+            timer.start();
+            QVERIFY(timer.isRunning());
+            QCOMPARE(timer.activeTaskId(), 101);
+
+            // Switching to another task with the same description must stop timer
+            timer.setActiveTask(102, QStringLiteral("Duplicate Description"), 0, 0);
+            QVERIFY(!timer.isRunning());
+            QCOMPARE(timer.activeTaskId(), 102);
+
+            // Setting the same task must keep state
+            timer.start();
+            QVERIFY(timer.isRunning());
+            timer.setActiveTask(102, QStringLiteral("Duplicate Description"), timer.activeTaskTimerValue(), 0);
+            QVERIFY(timer.isRunning());
+            timer.stop();
+        }
+
+        // 2. Short sessions do not inflate time to whole seconds
+        {
+            SettingsManager sm;
+            TaskTimer timer(&sm);
+            timer.setActiveTask(201, QStringLiteral("Short Session Task"), 0, 0);
+            // Run a few 50ms sessions
+            for (int i = 0; i < 4; ++i) {
+                timer.start();
+                QThread::msleep(40);
+                timer.stop();
+            }
+            // 4 * 40ms = ~160ms, which must be 0 seconds accumulated, NOT 4 seconds!
+            QCOMPARE(timer.activeTaskTimerValue(), 0u);
+        }
+
+        // 3. Database initialization failure does not silently open default database
+        {
+            DatabaseManager& db = DatabaseManager::instance();
+            db.close();
+            const bool failed = db.initialize(QStringLiteral("/proc/gofi-review/blocked.db"));
+            QVERIFY(!failed);
+            QVERIFY(!db.isOpen());
+            db.close();
+        }
+
+        // 4. Task reordering and row removal keeps active task locked by taskId
+        {
+            const QString testDb = m_testSandbox.filePath(QStringLiteral("reorder_safety.db"));
+            QFile::remove(testDb);
+            {
+                AppController ctrl(QString(), testDb);
+                while (ctrl.todoProxyModel()->rowCount() > 0) {
+                    ctrl.removeTask(false, 0);
+                }
+
+                ctrl.addNewTask(QStringLiteral("Task 0"));
+                ctrl.addNewTask(QStringLiteral("Task 1"));
+                ctrl.addNewTask(QStringLiteral("Task 2"));
+
+                ctrl.setActiveTodoRow(2); // Select Task 2
+                QCOMPARE(ctrl.activeTodoRow(), 2);
+                QCOMPARE(ctrl.timer()->activeTaskDescription(), QStringLiteral("Task 2"));
+
+                // Move Task 0 to Row 1
+                ctrl.moveTaskRow(false, 0, 1);
+                // Active task was at index 2, still at index 2
+                QCOMPARE(ctrl.activeTodoRow(), 2);
+                QCOMPARE(ctrl.timer()->activeTaskDescription(), QStringLiteral("Task 2"));
+
+                // Move Task 2 to Row 0
+                ctrl.moveTaskRow(false, 2, 0);
+                QCOMPARE(ctrl.activeTodoRow(), 0);
+                QCOMPARE(ctrl.timer()->activeTaskDescription(), QStringLiteral("Task 2"));
+
+                // Delete Task 1 (which is at index 1, after active task)
+                ctrl.removeTask(false, 1);
+                QCOMPARE(ctrl.activeTodoRow(), 0);
+                QCOMPARE(ctrl.timer()->activeTaskDescription(), QStringLiteral("Task 2"));
+
+                // Create a task at index 0 (prepend) or move row 1 before row 0
+                ctrl.moveTaskRow(false, 1, 0);
+                // Task 2 moved to row 1!
+                QCOMPARE(ctrl.activeTodoRow(), 1);
+                QCOMPARE(ctrl.timer()->activeTaskDescription(), QStringLiteral("Task 2"));
+            }
+            DatabaseManager::instance().close();
+            QFile::remove(testDb);
+        }
+
+        // 5. Multi-list activity CSV routing
+        {
+            const QString testDb = m_testSandbox.filePath(QStringLiteral("multilist_csv.db"));
+            const QString csvA = m_testSandbox.filePath(QStringLiteral("listA_activity.csv"));
+            const QString csvB = m_testSandbox.filePath(QStringLiteral("listB_activity.csv"));
+            QFile::remove(testDb);
+            QFile::remove(csvA);
+            QFile::remove(csvB);
+
+            {
+                AppController ctrl(QString(), testDb);
+                const QString listA = ctrl.listManager()->addList(QStringLiteral("List A"));
+                const QString listB = ctrl.listManager()->addList(QStringLiteral("List B"));
+
+                QVariantMap cfgA = ctrl.listManager()->getListConfig(listA);
+                cfgA[QStringLiteral("activityLogPath")] = csvA;
+                ctrl.listManager()->saveListConfig(cfgA);
+
+                QVariantMap cfgB = ctrl.listManager()->getListConfig(listB);
+                cfgB[QStringLiteral("activityLogPath")] = csvB;
+                ctrl.listManager()->saveListConfig(cfgB);
+
+                // Add task in List B
+                ctrl.selectListById(listB);
+                ctrl.addNewTask(QStringLiteral("Task in List B"));
+                ctrl.setActiveTodoRow(0);
+
+                // Switch to All Lists view
+                ctrl.showAllLists();
+                for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
+                    if (ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0), TaskStoreModel::DescriptionRole).toString().contains(QStringLiteral("Task in List B"))) {
+                        ctrl.setActiveTodoRow(r);
+                        break;
+                    }
+                }
+                // Trigger timer stop
+                ctrl.timer()->start();
+                QThread::msleep(1050);
+                ctrl.timer()->stop();
+
+                // Check that activity was written to csvB, not csvA!
+                QVERIFY(QFile::exists(csvB));
+                QFile f(csvB);
+                QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+                const QString content = QString::fromUtf8(f.readAll());
+                f.close();
+                QVERIFY(content.contains(QStringLiteral("Task in List B")));
+                QVERIFY(!QFile::exists(csvA));
+            }
+
+            DatabaseManager::instance().close();
+            QFile::remove(testDb);
+            QFile::remove(csvA);
+            QFile::remove(csvB);
+        }
     }
 };
 
