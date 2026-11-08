@@ -138,6 +138,7 @@ private slots:
 
 private:
     void syncActiveTaskToTimer();
+    int findActiveTodoRowById(qint64 taskId) const;
     void applyLanguageTranslator();
     void updateAutoSyncTimer();
 

@@ -52,14 +52,17 @@ void TaskTimer::setListTimerOverrides(const Schedule& overrideSchedule, int over
     }
 }
 
-void TaskTimer::setActiveTask(const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds) {
-    const bool changed = (m_activeTaskDescription != description);
+void TaskTimer::setActiveTask(qint64 taskId, const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds) {
+    const bool changed = (m_activeTaskId != taskId || (taskId < 0 && m_activeTaskDescription != description));
     if (changed) {
         stop();
+        m_accumulatedMsRemainder = 0;
+        m_accumulatedSessionMsRemainder = 0;
         if (m_settings && m_settings->resetTimerOnTaskSwitch()) {
             reset();
         }
     }
+    m_activeTaskId = taskId;
     m_activeTaskDescription = description;
     m_activeTaskTimerSec = accumulatedSeconds;
     m_activeTaskDurationSec = estimatedDurationSeconds;
@@ -67,8 +70,15 @@ void TaskTimer::setActiveTask(const QString& description, uint accumulatedSecond
     emit activeTaskChanged();
 }
 
+void TaskTimer::setActiveTask(const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds) {
+    setActiveTask(-1, description, accumulatedSeconds, estimatedDurationSeconds);
+}
+
 void TaskTimer::clearActiveTask() {
     stop();
+    m_activeTaskId = -1;
+    m_accumulatedMsRemainder = 0;
+    m_accumulatedSessionMsRemainder = 0;
     m_activeTaskDescription.clear();
     m_activeTaskTimerSec = 0;
     m_activeTaskDurationSec = 0;
@@ -102,18 +112,29 @@ void TaskTimer::stop() {
     const qint64 elapsedMs = m_monotonicTimer.isValid() ? m_monotonicTimer.elapsed() : 0;
     m_previousRuntimeMs += elapsedMs;
 
+    uint sessionSec = 0;
     if (!m_breakActive) {
         const qint64 unsyncedMs = elapsedMs - m_lastTaskSyncMs;
-        if (unsyncedMs > 0) {
-            m_activeTaskTimerSec += static_cast<uint>((unsyncedMs + 500) / 1000);
-            emit activeTaskTimeUpdated(m_activeTaskTimerSec);
+        const qint64 totalTaskMs = unsyncedMs + m_accumulatedMsRemainder;
+        if (totalTaskMs > 0) {
+            const uint addedSec = static_cast<uint>(totalTaskMs / 1000LL);
+            m_accumulatedMsRemainder = totalTaskMs % 1000LL;
+            if (addedSec > 0) {
+                m_activeTaskTimerSec += addedSec;
+                emit activeTaskTimeUpdated(m_activeTaskTimerSec);
+            }
         }
+        const qint64 totalSessionMs = elapsedMs + m_accumulatedSessionMsRemainder;
+        sessionSec = static_cast<uint>(totalSessionMs / 1000LL);
+        m_accumulatedSessionMsRemainder = totalSessionMs % 1000LL;
+    } else {
+        sessionSec = static_cast<uint>((elapsedMs + 500) / 1000);
     }
 
     m_tickTimer.stop();
     m_running = false;
     emit runningChanged();
-    emit timerStopped(m_startUtc, static_cast<uint>((elapsedMs + 500) / 1000));
+    emit timerStopped(m_startUtc, sessionSec);
     updateState();
 }
 
@@ -133,6 +154,8 @@ void TaskTimer::reset() {
     m_iterationDurationMs = static_cast<qint64>(defSec) * 1000LL;
     m_previousRuntimeMs = 0;
     m_lastTaskSyncMs = 0;
+    m_accumulatedMsRemainder = 0;
+    m_accumulatedSessionMsRemainder = 0;
     updateState();
 }
 

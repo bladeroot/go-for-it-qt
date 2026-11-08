@@ -31,6 +31,20 @@ qint64 ActivityLog::logTask(const QString& listId,
     return logId;
 }
 
+namespace {
+QString escapeCsvField(QString val) {
+    val.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+    if (!val.isEmpty()) {
+        const QChar first = val.at(0);
+        if (first == QLatin1Char('=') || first == QLatin1Char('+') || first == QLatin1Char('-') ||
+            first == QLatin1Char('@') || first == QLatin1Char('\t') || first == QLatin1Char('\r')) {
+            val.prepend(QLatin1Char('\''));
+        }
+    }
+    return val;
+}
+} // namespace
+
 bool ActivityLog::logTaskInFile(const QString& filePath,
                                 const QString& listName,
                                 const QString& taskDescription,
@@ -59,10 +73,8 @@ bool ActivityLog::logTaskInFile(const QString& filePath,
         out << "list name,task description,run time,timer started,timer stopped\r\n";
     }
 
-    QString escapedList = listName;
-    escapedList.replace(QLatin1Char('"'), QStringLiteral("\"\""));
-    QString escapedDesc = taskDescription;
-    escapedDesc.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+    const QString escapedList = escapeCsvField(listName);
+    const QString escapedDesc = escapeCsvField(taskDescription);
 
     out << '"' << escapedList << "\","
         << '"' << escapedDesc << "\","

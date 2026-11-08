@@ -30,6 +30,9 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_systemHooks(this, &m_settings, &m_timer, this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
+    if (!customDbPath.isEmpty() && !DatabaseManager::instance().isOpen()) {
+        qCritical() << "Error: Failed to initialize custom database at:" << customDbPath;
+    }
     m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
     applyLanguageTranslator();
     connect(&m_settings, &SettingsManager::languageChanged, this, [this]() {
@@ -109,6 +112,15 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     }
 
     connect(m_taskManager.todoModel(), &TaskStoreModel::countChanged, this, &AppController::onTodoListCountChanged);
+    connect(m_taskManager.todoModel(), &TaskStoreModel::tasksReordered, this, [this]() {
+        if (m_activeTaskId >= 0) {
+            const int found = findActiveTodoRowById(m_activeTaskId);
+            if (found >= 0 && found != m_activeTodoRow) {
+                m_activeTodoRow = found;
+                emit activeTodoRowChanged();
+            }
+        }
+    });
     connect(m_taskManager.todoModel(), &TaskStoreModel::unviewedTodoCountChanged, this, &AppController::todoCountsChanged);
     connect(m_taskManager.todoModel(), &TaskStoreModel::totalTodoCountChanged, this, [this]() {
         emit todoCountsChanged();
@@ -495,7 +507,22 @@ void AppController::removeTask(bool fromDoneList, int proxyRow) {
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
     if (sourceRow < 0) return;
 
+    const bool removingActive = (!fromDoneList && sourceRow == m_activeTodoRow);
     store->removeAt(sourceRow);
+    if (!fromDoneList) {
+        if (removingActive) {
+            const int count = m_taskManager.todoModel()->rowCount();
+            m_activeTodoRow = count > 0 ? qBound(0, sourceRow, count - 1) : -1;
+            emit activeTodoRowChanged();
+            syncActiveTaskToTimer();
+        } else if (m_activeTaskId >= 0) {
+            const int found = findActiveTodoRowById(m_activeTaskId);
+            if (found >= 0 && found != m_activeTodoRow) {
+                m_activeTodoRow = found;
+                emit activeTodoRowChanged();
+            }
+        }
+    }
 }
 
 void AppController::moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxyRow) {
@@ -506,9 +533,17 @@ void AppController::moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxy
     if (fromSource < 0 || toSource < 0 || fromSource == toSource) return;
 
     store->moveItem(fromSource, toSource);
-    if (!fromDoneList && m_activeTodoRow == fromSource) {
-        m_activeTodoRow = toSource;
-        emit activeTodoRowChanged();
+    if (!fromDoneList) {
+        if (m_activeTaskId >= 0) {
+            const int found = findActiveTodoRowById(m_activeTaskId);
+            if (found >= 0 && found != m_activeTodoRow) {
+                m_activeTodoRow = found;
+                emit activeTodoRowChanged();
+            }
+        } else if (m_activeTodoRow == fromSource) {
+            m_activeTodoRow = toSource;
+            emit activeTodoRowChanged();
+        }
     }
 }
 
@@ -639,9 +674,18 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         stopUtc,
         completedPomodoro
     );
-    if (!m_currentListActivityLogPath.isEmpty()) {
+    const int listIdx = m_listManager.indexOfId(targetListId);
+    QString logPath;
+    if (listIdx >= 0) {
+        logPath = m_listManager.entry(listIdx).activityLogPath;
+    }
+    if (logPath.isEmpty() && m_currentListId == targetListId) {
+        logPath = m_currentListActivityLogPath;
+    }
+
+    if (!logPath.isEmpty()) {
         ActivityLog::logTaskInFile(
-            m_currentListActivityLogPath,
+            logPath,
             targetListName,
             m_timer.activeTaskDescription(),
             startTimeUtc,
@@ -650,7 +694,6 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         );
     }
 
-    const int listIdx = m_listManager.indexOfId(targetListId);
     if (listIdx >= 0 && !jiraKey.isEmpty()) {
         const TodoListEntry listEntry = m_listManager.entry(listIdx);
         if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")
@@ -670,14 +713,29 @@ void AppController::onTodoListCountChanged() {
     const int count = m_taskManager.todoModel()->rowCount();
     if (count == 0) {
         m_activeTodoRow = -1;
+        m_activeTaskId = -1;
         emit activeTodoRowChanged();
         m_timer.clearActiveTask();
-    } else if (m_activeTodoRow < 0 || m_activeTodoRow >= count) {
-        m_activeTodoRow = qMin(qMax(0, m_activeTodoRow), count - 1);
-        emit activeTodoRowChanged();
-        syncActiveTaskToTimer();
     } else {
-        syncActiveTaskToTimer();
+        if (m_activeTaskId >= 0) {
+            const int found = findActiveTodoRowById(m_activeTaskId);
+            if (found >= 0) {
+                if (m_activeTodoRow != found) {
+                    m_activeTodoRow = found;
+                    emit activeTodoRowChanged();
+                }
+            } else {
+                m_activeTodoRow = qMin(qMax(0, m_activeTodoRow), count - 1);
+                emit activeTodoRowChanged();
+                syncActiveTaskToTimer();
+            }
+        } else if (m_activeTodoRow < 0 || m_activeTodoRow >= count) {
+            m_activeTodoRow = qMin(qMax(0, m_activeTodoRow), count - 1);
+            emit activeTodoRowChanged();
+            syncActiveTaskToTimer();
+        } else {
+            syncActiveTaskToTimer();
+        }
     }
     checkDueReminders();
 }
@@ -720,6 +778,17 @@ void AppController::updateAutoSyncTimer() {
     }
 }
 
+int AppController::findActiveTodoRowById(qint64 taskId) const {
+    if (taskId < 0) return -1;
+    const QVector<TxtTask>& tasks = m_taskManager.todoModel()->tasks();
+    for (int i = 0; i < tasks.size(); ++i) {
+        if (tasks[i].id() == taskId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 void AppController::syncActiveTaskToTimer() {
     if (m_activeTodoRow < 0 || m_activeTodoRow >= m_taskManager.todoModel()->rowCount()) {
         m_activeTaskId = -1;
@@ -732,7 +801,7 @@ void AppController::syncActiveTaskToTimer() {
     m_activeTaskId = task.id();
     m_activeTaskJiraKey = task.jiraKey();
     m_activeTaskListId = task.listId();
-    m_timer.setActiveTask(task.description(), task.timerValue(), task.duration());
+    m_timer.setActiveTask(task.id(), task.description(), task.timerValue(), task.duration());
 }
 
 QUrl AppController::getTaskBrowserUrl(const QString& listId, const QString& jiraKey, const QString& description) const {

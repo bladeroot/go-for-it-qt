@@ -17,6 +17,7 @@ class TaskTimer : public QObject {
     Q_PROPERTY(double progress READ progress NOTIFY timerUpdated)
     Q_PROPERTY(QString formattedRemainingTime READ formattedRemainingTime NOTIFY timerUpdated)
     Q_PROPERTY(bool hasActiveTask READ hasActiveTask NOTIFY activeTaskChanged)
+    Q_PROPERTY(qint64 activeTaskId READ activeTaskId NOTIFY activeTaskChanged)
     Q_PROPERTY(QString activeTaskDescription READ activeTaskDescription NOTIFY activeTaskChanged)
     Q_PROPERTY(uint activeTaskTimerValue READ activeTaskTimerValue NOTIFY activeTaskTimeUpdated)
     Q_PROPERTY(uint activeTaskDuration READ activeTaskDuration NOTIFY activeTaskChanged)
@@ -31,12 +32,14 @@ public:
     [[nodiscard]] double progress() const noexcept { return m_progress; }
     [[nodiscard]] QString formattedRemainingTime() const;
 
-    [[nodiscard]] bool hasActiveTask() const noexcept { return !m_activeTaskDescription.isEmpty(); }
+    [[nodiscard]] qint64 activeTaskId() const noexcept { return m_activeTaskId; }
+    [[nodiscard]] bool hasActiveTask() const noexcept { return m_activeTaskId >= 0 || !m_activeTaskDescription.isEmpty(); }
     [[nodiscard]] QString activeTaskDescription() const { return m_activeTaskDescription; }
     [[nodiscard]] uint activeTaskTimerValue() const noexcept { return m_activeTaskTimerSec; }
     [[nodiscard]] uint activeTaskDuration() const noexcept { return m_activeTaskDurationSec; }
 
     void setListTimerOverrides(const Schedule& overrideSchedule, int overrideReminderSec);
+    void setActiveTask(qint64 taskId, const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds);
     void setActiveTask(const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds);
     void clearActiveTask();
 
@@ -81,8 +84,11 @@ private:
     qint64 m_iterationDurationMs = 1500LL * 1000LL;
     qint64 m_previousRuntimeMs = 0;
     qint64 m_lastTaskSyncMs = 0;
+    qint64 m_accumulatedMsRemainder = 0;
+    qint64 m_accumulatedSessionMsRemainder = 0;
     double m_progress = 0.0;
 
+    qint64 m_activeTaskId = -1;
     QString m_activeTaskDescription;
     uint m_activeTaskTimerSec = 0;
     uint m_activeTaskDurationSec = 0;
