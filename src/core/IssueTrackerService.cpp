@@ -1898,6 +1898,7 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     QStringList statusChanges;
     QSet<QString> remoteKeys;
 
+    bool hasDbError = false;
     for (const RemoteIssueItem& item : items) {
         if (!item.key.isEmpty()) {
             remoteKeys.insert(item.key);
@@ -1911,10 +1912,14 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         }
         bool isNew = false;
         QString oldStatus;
-        db.upsertRemoteIssueTask(
+        const bool ok = db.upsertRemoteIssueTask(
             entry.id, item.key, item.description, localStatus, localPriority,
             item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
         );
+        if (!ok) {
+            hasDbError = true;
+            continue;
+        }
         if (isNew) {
             if (!TxtTask::isClosedStatus(localStatus)) {
                 newIssues.append(item.description);
@@ -1927,10 +1932,11 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     // Reconcile: Only reconcile closed issues if:
     // 1. Page limit was NOT reached (pageLimitReached is false).
     // 2. No partial or parser error occurred (!hasError).
-    // 3. Remote items list is non-empty (!items.isEmpty()), OR the tracker explicitly reported total == 0 (explicitZeroTotal)
+    // 3. No database write error occurred (!hasDbError).
+    // 4. Remote items list is non-empty (!items.isEmpty()), OR the tracker explicitly reported total == 0 (explicitZeroTotal)
     //    in a valid error-free response (e.g. GitHub/Jira/Redmine total_count == 0).
     const bool limitReached = pageLimitReached;
-    const bool canReconcile = !limitReached && !hasError && (!items.isEmpty() || explicitZeroTotal);
+    const bool canReconcile = !limitReached && !hasError && !hasDbError && (!items.isEmpty() || explicitZeroTotal);
     if (canReconcile) {
         const auto localOpenTasks = db.loadTasks(entry.id, false);
         for (const TxtTask& t : localOpenTasks) {
@@ -1943,10 +1949,21 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                 closedTask.setDone(true);
                 closedTask.setStatus(QStringLiteral("done"));
                 closedTask.setCompletionDate(QDate::currentDate());
-                db.updateTask(closedTask);
-                statusChanges.append(QStringLiteral("%1: %2 → done (closed remotely)").arg(t.jiraKey(), t.status()));
+                if (db.updateTask(closedTask)) {
+                    statusChanges.append(QStringLiteral("%1: %2 → done (closed remotely)").arg(t.jiraKey(), t.status()));
+                } else {
+                    hasDbError = true;
+                }
             }
         }
+    }
+
+    if (hasDbError) {
+        endSyncOperation();
+        const QString errMsg = tr("Database error occurred while saving synchronized issues from %1.").arg(providerName);
+        setStatusMessage(errMsg);
+        emit syncFailed(entry.id, errMsg);
+        return;
     }
 
     endSyncOperation();
