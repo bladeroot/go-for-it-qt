@@ -694,7 +694,9 @@ bool DatabaseManager::removeList(const QString& listId) {
 
 bool DatabaseManager::updateListsOrder(const QVector<TodoListEntry>& entries) {
     QSqlDatabase database = db();
-    database.transaction();
+    if (!database.transaction()) {
+        return false;
+    }
     QSqlQuery q(database);
     q.prepare(QStringLiteral("UPDATE lists SET sort_order = :order WHERE id = :id"));
     for (int i = 0; i < entries.size(); ++i) {
@@ -915,7 +917,9 @@ bool DatabaseManager::deleteDoneTasks(const QString& listId) {
 bool DatabaseManager::replaceListTasksOrders(const QString& listId, bool done, const QVector<TxtTask>& tasks) {
     if (listId.isEmpty()) return false;
     QSqlDatabase database = db();
-    database.transaction();
+    if (!database.transaction()) {
+        return false;
+    }
     QSqlQuery q(database);
     q.prepare(QStringLiteral(
         "UPDATE tasks SET sort_order = :order WHERE id = :id AND list_id = :list_id AND done = :done"
