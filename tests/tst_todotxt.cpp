@@ -2485,6 +2485,107 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(testDb);
     }
+
+    void testStatusNormalizationAndAtomicReorderAndSyncTx() {
+        // 1. TxtTask::isClosedStatus and normalizeStatus handles unnormalized cases
+        QVERIFY(TxtTask::isClosedStatus(QStringLiteral("DONE")));
+        QVERIFY(TxtTask::isClosedStatus(QStringLiteral("Canceled")));
+        QVERIFY(TxtTask::isClosedStatus(QStringLiteral("  done  ")));
+        QVERIFY(TxtTask::isClosedStatus(QStringLiteral("  CANCELED  ")));
+        QVERIFY(!TxtTask::isClosedStatus(QStringLiteral("TODO")));
+        QVERIFY(!TxtTask::isClosedStatus(QStringLiteral("in_progress")));
+        QCOMPARE(TxtTask::normalizeStatus(QStringLiteral("  DONE  ")), QStringLiteral("done"));
+        QCOMPARE(TxtTask::normalizeStatus(QStringLiteral(" Canceled ")), QStringLiteral("canceled"));
+        QCOMPARE(TxtTask::normalizeStatus(QStringLiteral("   ")), QStringLiteral("todo"));
+
+        const QString testDb = QStringLiteral("/tmp/gofi-reorder-atomic-test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QString(), testDb);
+            const QSqlDatabase dbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+
+            const QString listId = ctrl.listManager()->addList(QStringLiteral("Atomic List"));
+            ctrl.selectListById(listId);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            while (ctrl.doneProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(true, 0);
+            }
+
+            ctrl.addNewTask(QStringLiteral("Task 1"));
+            ctrl.addNewTask(QStringLiteral("Task 2"));
+            ctrl.setActiveTodoRow(0);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+
+            // 2. Change status with unnormalized string " DONE "
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("  DONE  "));
+            QVERIFY(!ctrl.timer()->isRunning());
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 1);
+            QCOMPARE(ctrl.doneProxyModel()->data(ctrl.doneProxyModel()->index(0, 0), TaskStoreModel::StatusRole).toString(), QStringLiteral("done"));
+
+            // 3. Atomic move and reorder rollback when reorder update fails
+            ctrl.addNewTask(QStringLiteral("Task 3"));
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 2);
+
+            QSqlQuery trig(dbConn);
+            // Trigger failure on updating sort_order of remaining tasks
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_reorder BEFORE UPDATE OF sort_order ON tasks "
+                "WHEN OLD.done = 0 AND NEW.done = 0 "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated reorder error'); END;"
+            )));
+
+            // Attempt toggleTaskDone: reordering remaining tasks fails, so entire transaction must rollback
+            ctrl.toggleTaskDone(false, 0);
+            // Task must NOT have moved because transaction rolled back
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 2);
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 1);
+
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_reorder"));
+
+            // 4. Remote sync aborts immediately if transaction cannot start
+            TodoListEntry entry = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(listId));
+            QVector<RemoteIssueItem> syncItems;
+            RemoteIssueItem it;
+            it.key = QStringLiteral("NO-TX-1");
+            it.description = QStringLiteral("No tx task");
+            syncItems.append(it);
+
+            // Intentionally hold open a transaction so beginTransaction inside processSyncedItems fails
+            QVERIFY(DatabaseManager::instance().beginTransaction());
+            bool syncFailedCalled = false;
+            QObject::connect(ctrl.issueTracker(), &IssueTrackerService::syncFailed, [&syncFailedCalled](const QString&, const QString&) {
+                syncFailedCalled = true;
+            });
+
+            ctrl.issueTracker()->processSyncedItems(entry, syncItems, QStringLiteral("Jira"), false, false, false);
+            QVERIFY(syncFailedCalled);
+            DatabaseManager::instance().rollbackTransaction();
+
+            // 5. Default tasks insertion fails cleanly if transaction fails
+            const QString emptyListId = ctrl.listManager()->addList(QStringLiteral("Empty List"));
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_default_insert BEFORE INSERT ON tasks "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated default insert error'); END;"
+            )));
+
+            bool dbErr = false;
+            QObject::connect(&ctrl, &AppController::databaseError, [&dbErr](const QString&) {
+                dbErr = true;
+            });
+            ctrl.selectListById(emptyListId);
+            QVERIFY(dbErr);
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 0);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_default_insert"));
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
