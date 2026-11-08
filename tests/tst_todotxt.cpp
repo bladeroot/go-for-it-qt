@@ -2956,7 +2956,23 @@ private slots:
                 QCOMPARE(orderQ.value(3).toInt(), 2);
             }
 
-            // 6. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
+            // 6. Delete reorder must reject stale remaining rows that update no database record
+            {
+                const QString staleDeleteListId = ctrl.listManager()->addList(QStringLiteral("Stale Delete Reorder"));
+                TaskManager staleDeleteManager;
+                staleDeleteManager.setActiveList(staleDeleteListId, false, false);
+                staleDeleteManager.addNewTask(QStringLiteral("Delete stale A"), false, false);
+                staleDeleteManager.addNewTask(QStringLiteral("Delete stale B"), false, false);
+                staleDeleteManager.addNewTask(QStringLiteral("Delete stale C"), false, false);
+                QCOMPARE(staleDeleteManager.todoModel()->rowCount(), 3);
+
+                const qint64 externallyDeletedId = staleDeleteManager.todoModel()->taskAt(1).id();
+                QVERIFY(DatabaseManager::instance().deleteTask(externallyDeletedId));
+                const bool removed = staleDeleteManager.todoModel()->removeAt(0);
+                QVERIFY(!removed);
+            }
+
+            // 7. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
             {
                 ctrl.setActiveTodoRow(0);
                 ctrl.timer()->start();
@@ -3000,7 +3016,7 @@ private slots:
                 QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
             }
 
-            // 7. Timer persistence failure must not stop/log the active session or duplicate errors
+            // 8. Timer persistence failure must not stop/log the active session or duplicate errors
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3046,7 +3062,7 @@ private slots:
                 }
             }
 
-            // 8. Failed deletion of the active task must not stop/log its timer
+            // 9. Failed deletion of the active task must not stop/log its timer
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3081,7 +3097,7 @@ private slots:
                 }
             }
 
-            // 9. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            // 10. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
             {
                 auto& db = DatabaseManager::instance();
                 const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
@@ -3143,7 +3159,7 @@ private slots:
                 failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
-            // 10. markActivityWorklogSynced() validation
+            // 11. markActivityWorklogSynced() validation
             {
                 auto& db = DatabaseManager::instance();
                 // Invalid IDs or non-existent log IDs must return false
@@ -3151,7 +3167,7 @@ private slots:
                 QVERIFY(!db.markActivityWorklogSynced(999999));
             }
 
-            // 11. loadTask distinction between not-found and query failure
+            // 12. loadTask distinction between not-found and query failure
             {
                 auto& db = DatabaseManager::instance();
                 bool queryError = true;

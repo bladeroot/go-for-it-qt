@@ -1099,7 +1099,7 @@ bool DatabaseManager::deleteTaskAndReorder(qint64 taskId, const QString& listId,
         reorderQ.bindValue(QStringLiteral(":id"), t.id());
         reorderQ.bindValue(QStringLiteral(":list_id"), listId);
         reorderQ.bindValue(QStringLiteral(":done"), done ? 1 : 0);
-        if (!reorderQ.exec()) {
+        if (!reorderQ.exec() || reorderQ.numRowsAffected() <= 0) {
             database.rollback();
             return false;
         }

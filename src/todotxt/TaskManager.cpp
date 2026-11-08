@@ -343,6 +343,7 @@ bool TaskManager::deleteTaskFromDatabase(bool isDone, int row, qint64 taskId) {
     if (taskId >= 0) {
         if (!DatabaseManager::instance().deleteTaskAndReorder(taskId, targetListId, isDone, remainingTasks)) {
             emit errorOccurred(tr("Failed to delete task from database."));
+            loadFromDatabase(false);
             return false;
         }
     }
