@@ -138,6 +138,18 @@ private:
     void fetchNextcloudTasks(const TodoListEntry& entry);
     void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false, bool hasError = false, bool explicitZeroTotal = false);
 
+    struct JiraSyncState;
+    struct YouTrackSyncState;
+    struct GitHubSyncState;
+    struct GitLabCombinedSyncState;
+    struct RedmineSyncState;
+
+    void fetchJiraPage(const TodoListEntry& entry, const std::shared_ptr<JiraSyncState>& state, const QString& baseUrl, const QString& path, const QString& jql, int endpointStage, bool forceBearerAuth);
+    void fetchYouTrackPage(const TodoListEntry& entry, const std::shared_ptr<YouTrackSyncState>& state, const QString& baseUrl, const QString& ytQuery);
+    void fetchGitHubPage(const TodoListEntry& entry, const std::shared_ptr<GitHubSyncState>& state, const QString& apiUrl, const QString& queryStr);
+    void fetchGitLabStreamPage(const TodoListEntry& entry, const std::shared_ptr<GitLabCombinedSyncState>& combinedState, const QString& baseUrl, const QString& path, bool isMr, int page);
+    void fetchRedminePage(const TodoListEntry& entry, const std::shared_ptr<RedmineSyncState>& state, const QString& baseUrl, const QString& queryStr);
+
     void startSyncOperation();
     void endSyncOperation();
 
