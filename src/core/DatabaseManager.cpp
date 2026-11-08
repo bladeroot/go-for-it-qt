@@ -769,6 +769,44 @@ QVector<TxtTask> DatabaseManager::loadTasks(const QStringList& listIds, bool don
     return result;
 }
 
+std::optional<TxtTask> DatabaseManager::loadTask(qint64 taskId) const {
+    if (taskId < 0) return std::nullopt;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral(
+        "SELECT t.id, t.description, t.done, t.status, t.priority, t.creation_date, t.completion_date, "
+        "t.duration_seconds, t.timer_seconds, t.jira_key, t.jira_synced_seconds, t.details, t.comments_json, t.is_viewed, "
+        "t.list_id, COALESCE(l.name, ''), COALESCE(l.provider, 'SQLite') "
+        "FROM tasks t LEFT JOIN lists l ON t.list_id = l.id "
+        "WHERE t.id = :id"
+    ));
+    q.bindValue(QStringLiteral(":id"), taskId);
+    if (!q.exec() || !q.next()) {
+        return std::nullopt;
+    }
+    const qint64 id = q.value(0).toLongLong();
+    const QString desc = q.value(1).toString();
+    const bool isDone = q.value(2).toInt() != 0;
+    const QString status = q.value(3).toString();
+    const auto prio = static_cast<quint8>(q.value(4).toUInt());
+    const QDate cDate = QDate::fromString(q.value(5).toString(), Qt::ISODate);
+    const QDate compDate = QDate::fromString(q.value(6).toString(), Qt::ISODate);
+    const quint32 duration = q.value(7).toUInt();
+    const quint32 timerVal = q.value(8).toUInt();
+    const QString jiraKey = q.value(9).toString();
+    const quint32 jiraSynced = q.value(10).toUInt();
+    const QString details = q.value(11).toString();
+    const QVariantList comments = deserializeCommentsList(q.value(12).toString());
+    const bool isViewed = q.value(13).isNull() ? true : (q.value(13).toInt() != 0);
+    const QString lId = q.value(14).toString();
+    const QString lName = q.value(15).toString();
+    const QString lProvider = q.value(16).toString();
+
+    return TxtTask::fromDatabase(
+        id, desc, isDone, status, prio, cDate, compDate, duration, timerVal,
+        jiraKey, jiraSynced, details, comments, isViewed, lId, lName, lProvider
+    );
+}
+
 QVector<TxtTask> DatabaseManager::loadTasks(const QString& listId, bool done) const {
     if (listId.isEmpty()) return {};
     return loadTasks(QStringList{listId}, done);

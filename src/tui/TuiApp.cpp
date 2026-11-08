@@ -73,6 +73,10 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
         m_statusMessage = sanitizeTerminalText(m_app->issueTracker()->lastStatusMessage());
         render();
     });
+    connect(m_app, &AppController::databaseError, this, [this](const QString& err) {
+        m_statusMessage = sanitizeTerminalText(tr("Database Error: %1").arg(err));
+        render();
+    });
     connect(m_app->todoProxyModel(), &QAbstractItemModel::modelReset, this, &TuiApp::render);
     connect(m_app->todoProxyModel(), &QAbstractItemModel::rowsInserted, this, &TuiApp::render);
     connect(m_app->todoProxyModel(), &QAbstractItemModel::rowsRemoved, this, &TuiApp::render);

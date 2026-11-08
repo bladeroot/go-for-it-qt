@@ -131,6 +131,7 @@ signals:
     void todoCountsChanged();
     void totalTodoCountChanged();
     void notificationRequested(const QString& title, const QString& body);
+    void databaseError(const QString& message);
     void showWindowRequested();
     void quitRequested();
 

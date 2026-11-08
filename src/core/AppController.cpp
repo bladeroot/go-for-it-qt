@@ -137,6 +137,16 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
             selectListById(id);
         }
     });
+    connect(&m_taskManager, &TaskManager::errorOccurred, this, [this](const QString& message) {
+        qCritical() << "TaskManager database error:" << message;
+        m_notifications.notifyTaskEvent(tr("Database Error"), message);
+        emit databaseError(message);
+    });
+    connect(&m_listManager, &ListManagerModel::errorOccurred, this, [this](const QString& message) {
+        qCritical() << "ListManager database error:" << message;
+        m_notifications.notifyTaskEvent(tr("Database Error"), message);
+        emit databaseError(message);
+    });
 
     const QString lastId = m_settings.lastLoadedListId();
     if (!lastId.isEmpty() && m_listManager.indexOfId(lastId) >= 0) {
@@ -352,6 +362,14 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
 
+    if (!fromDoneList && m_timer.isRunning()) {
+        const qint64 timedTaskId = m_timer.activeTaskId();
+        const qint64 targetTaskId = taskId.toLongLong();
+        if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
+            m_timer.stop();
+        }
+    }
+
     store->setData(idx, willBeDone, TaskStoreModel::DoneRole);
     m_notifications.notifyTaskEvent(
         tr("Task status changed"),
@@ -387,6 +405,14 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
     const bool wasDone = (oldStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
     const bool isCompleting = (newStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
+
+    if (!fromDoneList && m_timer.isRunning()) {
+        const qint64 timedTaskId = m_timer.activeTaskId();
+        const qint64 targetTaskId = taskId.toLongLong();
+        if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && targetTaskId == timedTaskId)) {
+            m_timer.stop();
+        }
+    }
 
     store->setTaskStatus(sourceRow, newStatus);
     if (oldStatus != newStatus) {
@@ -510,6 +536,14 @@ void AppController::removeTask(bool fromDoneList, int proxyRow) {
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
     if (sourceRow < 0) return;
+
+    if (!fromDoneList && m_timer.isRunning()) {
+        const qint64 timedTaskId = m_timer.activeTaskId();
+        const qint64 removingTaskId = store->taskAt(sourceRow).id();
+        if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && removingTaskId == timedTaskId)) {
+            m_timer.stop();
+        }
+    }
 
     const bool removingActive = (!fromDoneList && sourceRow == m_activeTodoRow);
     store->removeAt(sourceRow);
@@ -655,25 +689,60 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
     QString jiraKey;
     QString targetListId = m_currentListId;
     QString targetListName = m_currentListName;
+    QString taskDescription = m_timer.activeTaskDescription();
 
     const qint64 timedTaskId = m_timer.activeTaskId();
-    int row = -1;
+    TxtTask taskInfo;
+    bool foundTask = false;
+
     if (timedTaskId >= 0) {
-        row = findActiveTodoRowById(timedTaskId);
-    }
-    if (row < 0 && m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
-        row = m_activeTodoRow;
+        activeTaskId = timedTaskId;
+        const int row = findActiveTodoRowById(timedTaskId);
+        if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
+            taskInfo = m_taskManager.todoModel()->taskAt(row);
+            foundTask = true;
+        } else {
+            for (int r = 0; r < m_taskManager.doneModel()->rowCount(); ++r) {
+                if (m_taskManager.doneModel()->taskAt(r).id() == timedTaskId) {
+                    taskInfo = m_taskManager.doneModel()->taskAt(r);
+                    foundTask = true;
+                    break;
+                }
+            }
+            if (!foundTask) {
+                const auto dbTask = DatabaseManager::instance().loadTask(timedTaskId);
+                if (dbTask.has_value()) {
+                    taskInfo = *dbTask;
+                    foundTask = true;
+                }
+            }
+        }
+    } else if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        taskInfo = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
+        foundTask = true;
     }
 
-    if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
-        const TxtTask activeTask = m_taskManager.todoModel()->taskAt(row);
-        activeTaskId = activeTask.id();
-        jiraKey = activeTask.jiraKey();
-        if (!activeTask.listId().isEmpty()) {
-            targetListId = activeTask.listId();
-            targetListName = activeTask.listName().isEmpty() ? m_currentListName : activeTask.listName();
+    if (foundTask) {
+        activeTaskId = taskInfo.id();
+        jiraKey = taskInfo.jiraKey();
+        if (!taskInfo.description().isEmpty()) {
+            taskDescription = taskInfo.description();
+        }
+        if (!taskInfo.listId().isEmpty()) {
+            targetListId = taskInfo.listId();
+            targetListName = taskInfo.listName().isEmpty() ? m_currentListName : taskInfo.listName();
         }
     }
+
+    if (targetListName.isEmpty() || targetListName == QStringLiteral("__ALL__")) {
+        const int idx = m_listManager.indexOfId(targetListId);
+        if (idx >= 0) {
+            targetListName = m_listManager.entry(idx).name;
+        } else if (!m_currentListName.isEmpty() && m_currentListName != QStringLiteral("__ALL__")) {
+            targetListName = m_currentListName;
+        }
+    }
+
     const bool completedPomodoro = m_lastSessionCompletedPomodoro;
     m_lastSessionCompletedPomodoro = false;
 
@@ -682,7 +751,7 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         targetListName,
         activeTaskId,
         jiraKey,
-        m_timer.activeTaskDescription(),
+        taskDescription,
         startTimeUtc,
         runtimeSeconds,
         stopUtc,
@@ -701,7 +770,7 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
         ActivityLog::logTaskInFile(
             logPath,
             targetListName,
-            m_timer.activeTaskDescription(),
+            taskDescription,
             startTimeUtc,
             runtimeSeconds,
             stopUtc
@@ -719,21 +788,32 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
 
 void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
     const qint64 timedTaskId = m_timer.activeTaskId();
-    int row = -1;
     if (timedTaskId >= 0) {
-        row = findActiveTodoRowById(timedTaskId);
+        const int row = findActiveTodoRowById(timedTaskId);
+        if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
+            m_taskManager.todoModel()->setTaskTimerValue(row, totalSeconds);
+            return;
+        }
+        for (int r = 0; r < m_taskManager.doneModel()->rowCount(); ++r) {
+            if (m_taskManager.doneModel()->taskAt(r).id() == timedTaskId) {
+                m_taskManager.doneModel()->setTaskTimerValue(r, totalSeconds);
+                return;
+            }
+        }
+        DatabaseManager::instance().updateTaskTimer(timedTaskId, totalSeconds);
+        return;
     }
-    if (row < 0 && m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
-        row = m_activeTodoRow;
-    }
-    if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
-        m_taskManager.todoModel()->setTaskTimerValue(row, totalSeconds);
+    if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        m_taskManager.todoModel()->setTaskTimerValue(m_activeTodoRow, totalSeconds);
     }
 }
 
 void AppController::onTodoListCountChanged() {
     const int count = m_taskManager.todoModel()->rowCount();
     if (count == 0) {
+        if (m_timer.isRunning()) {
+            m_timer.stop();
+        }
         m_activeTodoRow = -1;
         m_activeTaskId = -1;
         emit activeTodoRowChanged();
@@ -747,11 +827,17 @@ void AppController::onTodoListCountChanged() {
                     emit activeTodoRowChanged();
                 }
             } else {
+                if (m_timer.isRunning()) {
+                    m_timer.stop();
+                }
                 m_activeTodoRow = qMin(qMax(0, m_activeTodoRow), count - 1);
                 emit activeTodoRowChanged();
                 syncActiveTaskToTimer();
             }
         } else if (m_activeTodoRow < 0 || m_activeTodoRow >= count) {
+            if (m_timer.isRunning()) {
+                m_timer.stop();
+            }
             m_activeTodoRow = qMin(qMax(0, m_activeTodoRow), count - 1);
             emit activeTodoRowChanged();
             syncActiveTaskToTimer();
