@@ -2774,9 +2774,9 @@ private slots:
                     errorEmitted = true;
                 });
 
-                // Trying to mark Task 1 done must trigger DB failure and loadFromDatabase rollback
+                // Trying to mark Task 1 done must trigger DB failure, loadFromDatabase rollback, and return false
                 QModelIndex idx1 = todoStore->index(0, 0);
-                QVERIFY(todoStore->setData(idx1, true, TaskStoreModel::DoneRole));
+                QVERIFY(!todoStore->setData(idx1, true, TaskStoreModel::DoneRole));
                 QVERIFY(errorEmitted);
                 QCOMPARE(ctrl.todoProxyModel()->rowCount(), 3);
                 QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
@@ -2868,6 +2868,26 @@ private slots:
                 QCOMPARE(loadOrder(QStringLiteral("KEY-1")), 0);
                 QCOMPARE(loadOrder(QStringLiteral("KEY-3")), 1);
                 QCOMPARE(loadOrder(QStringLiteral("KEY-2")), 2);
+
+                // Compaction failure rollback in upsertRemoteIssueTask
+                QSqlQuery failCompactTrigger(dbConn);
+                failCompactTrigger.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_compact BEFORE UPDATE OF sort_order ON tasks "
+                    "WHEN NEW.description LIKE '%Task 3%' "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated compaction failure'); "
+                    "END;"
+                ));
+
+                // Moving KEY-1 from todo to done should fail and rollback because compacting KEY-3's sort_order aborts
+                QVERIFY(!db.upsertRemoteIssueTask(remListId, QStringLiteral("KEY-1"), QStringLiteral("Task 1"), QStringLiteral("done"), 0, 0, QString(), {}, &isNew, &oldStatus));
+
+                // KEY-1 must still be open in SQLite, sort orders must remain unchanged
+                QCOMPARE(loadOrder(QStringLiteral("KEY-1")), 0);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-3")), 1);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-2")), 2);
+
+                failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
             // 4. markActivityWorklogSynced() validation
