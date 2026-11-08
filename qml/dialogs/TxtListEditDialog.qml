@@ -354,8 +354,8 @@ Dialog {
                             id: jiraJqlField
                             Layout.fillWidth: true
                             placeholderText: {
-                                if (listEditDialog.selectedProvider === "GitHub") return "owner/repo is:open"
-                                if (listEditDialog.selectedProvider === "GitLab") return "group/project"
+                                if (listEditDialog.selectedProvider === "GitHub") return "repo:owner/name, org:name, user:name, or blank for all @me"
+                                if (listEditDialog.selectedProvider === "GitLab") return "group/project, group:name, or blank for all @me"
                                 if (listEditDialog.selectedProvider === "Redmine") return "assigned_to_id=me&status_id=open"
                                 if (listEditDialog.selectedProvider === "Todoist") return "filter=today | overdue"
                                 if (listEditDialog.selectedProvider === "Nextcloud") return "tasks"

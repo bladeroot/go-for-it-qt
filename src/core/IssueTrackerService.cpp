@@ -1783,20 +1783,20 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
     QString queryStr = entry.jiraJql.trimmed();
     if (queryStr.isEmpty()) {
         if (entry.apiToken.trimmed().isEmpty()) {
-            const QString errMsg = tr("GitHub sync without an API token requires a repository in the query field (e.g. repo:owner/project).");
+            const QString errMsg = tr("GitHub sync without an API token requires a repository, user, or organization in the query field (e.g. repo:owner/project, user:username, or org:name).");
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
             return;
         }
         queryStr = QStringLiteral("is:open involves:@me");
     } else {
-        if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:"))) {
+        if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:")) && !queryStr.contains(QStringLiteral("user:"))) {
             if (queryStr.contains(QLatin1Char('/'))) {
                 queryStr = QStringLiteral("repo:") + queryStr;
             }
         }
-        if (entry.apiToken.trimmed().isEmpty() && !queryStr.contains(QStringLiteral("repo:"))) {
-            const QString errMsg = tr("GitHub sync without an API token requires a repository in the query field (e.g. repo:owner/project).");
+        if (entry.apiToken.trimmed().isEmpty() && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:")) && !queryStr.contains(QStringLiteral("user:"))) {
+            const QString errMsg = tr("GitHub sync without an API token requires a repository, user, or organization in the query field (e.g. repo:owner/project, user:username, or org:name).");
             setStatusMessage(errMsg);
             emit syncFailed(entry.id, errMsg);
             return;
@@ -1846,7 +1846,12 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     const QString projectSpec = entry.jiraJql.trimmed();
     QString issuesPath;
     QString mrPath;
-    if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
+    if (projectSpec.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive)) {
+        const QString groupName = projectSpec.mid(6).trimmed();
+        const QString encodedGroup = QString::fromUtf8(QUrl::toPercentEncoding(groupName));
+        issuesPath = QStringLiteral("/api/v4/groups/%1/issues?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedGroup);
+        mrPath = QStringLiteral("/api/v4/groups/%1/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedGroup);
+    } else if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
         const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(projectSpec));
         issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
         mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
