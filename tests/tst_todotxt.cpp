@@ -2815,6 +2815,40 @@ private slots:
                 failViewedTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_viewed"));
                 QVERIFY(todoStore->markTaskViewed(1));
                 QCOMPARE(todoStore->taskAt(1).isViewed(), true);
+
+                // Controller level updateTaskDetails, addTaskComment, and updateTaskText error return
+                QSqlQuery failDetailsTrigger(dbConn);
+                failDetailsTrigger.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_details BEFORE UPDATE OF details ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated details failure'); "
+                    "END;"
+                ));
+                QVERIFY(!ctrl.updateTaskDetails(false, 0, QStringLiteral("Remote details")));
+                failDetailsTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_details"));
+                QVERIFY(ctrl.updateTaskDetails(false, 0, QStringLiteral("Valid details")));
+
+                QSqlQuery failCommentCtrlTrigger(dbConn);
+                failCommentCtrlTrigger.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_comm_ctrl BEFORE UPDATE OF comments_json ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated comment ctrl failure'); "
+                    "END;"
+                ));
+                QVERIFY(!ctrl.addTaskComment(false, 0, QStringLiteral("Ctrl comment")));
+                failCommentCtrlTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_comm_ctrl"));
+                QVERIFY(ctrl.addTaskComment(false, 0, QStringLiteral("Ctrl comment")));
+
+                QSqlQuery failTextTrigger(dbConn);
+                failTextTrigger.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_text BEFORE UPDATE OF description ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated text failure'); "
+                    "END;"
+                ));
+                QVERIFY(!ctrl.updateTaskText(false, 0, QStringLiteral("Failed update text")));
+                failTextTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_text"));
+                QVERIFY(ctrl.updateTaskText(false, 0, QStringLiteral("Success update text")));
             }
 
             // 2. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
