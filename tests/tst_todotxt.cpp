@@ -2712,6 +2712,176 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(testDb);
     }
+
+    void testAtomicDoneAndWorklogSyncAndOrderCompaction() {
+        const QString testDb = QStringLiteral("/tmp/gofi_atomic_done_test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QStringLiteral("/tmp/gofi_atomic_ctrl.log"), testDb);
+            const QSqlDatabase dbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+            const QString listId = ctrl.listManager()->addList(QStringLiteral("Atomic Done Test"));
+            ctrl.selectListById(listId);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+
+            // 1. Direct TaskStoreModel::setData(DoneRole) atomic move & rollback
+            {
+                ctrl.addNewTask(QStringLiteral("Task 1"));
+                ctrl.addNewTask(QStringLiteral("Task 2"));
+                ctrl.addNewTask(QStringLiteral("Task 3"));
+                QCOMPARE(ctrl.todoProxyModel()->rowCount(), 3);
+                QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+                // Toggle Task 2 to done directly via TaskStoreModel::setData (simulates QML toggle)
+                auto* todoStore = qobject_cast<TaskStoreModel*>(ctrl.todoProxyModel()->sourceModel());
+                auto* doneStore = qobject_cast<TaskStoreModel*>(ctrl.doneProxyModel()->sourceModel());
+                QVERIFY(todoStore && doneStore);
+                QModelIndex idx = todoStore->index(1, 0);
+                QVERIFY(todoStore->setData(idx, true, TaskStoreModel::DoneRole));
+                QCOMPARE(ctrl.todoProxyModel()->rowCount(), 2);
+                QCOMPARE(ctrl.doneProxyModel()->rowCount(), 1);
+                QCOMPARE(doneStore->taskAt(0).description(), QStringLiteral("Task 2"));
+
+                // Check SQLite orders: Todo tasks 1 and 3 should have orders 0 and 1
+                auto todoTasks = DatabaseManager::instance().loadTasks(listId, false);
+                QCOMPARE(todoTasks.size(), 2);
+                QCOMPARE(todoTasks[0].description(), QStringLiteral("Task 1"));
+                QCOMPARE(todoTasks[1].description(), QStringLiteral("Task 3"));
+                auto doneTasks = DatabaseManager::instance().loadTasks(listId, true);
+                QCOMPARE(doneTasks.size(), 1);
+                QCOMPARE(doneTasks[0].description(), QStringLiteral("Task 2"));
+
+                // Toggle back to todo via setData on doneModel
+                QModelIndex doneIdx = doneStore->index(0, 0);
+                QVERIFY(doneStore->setData(doneIdx, false, TaskStoreModel::DoneRole));
+                QCOMPARE(ctrl.todoProxyModel()->rowCount(), 3);
+                QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+                // Failure path with trigger on UPDATE tasks
+                QSqlQuery triggerQ(dbConn);
+                triggerQ.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_done BEFORE UPDATE OF done ON tasks "
+                    "WHEN NEW.description LIKE '%Task 1%' "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated DB failure on done'); "
+                    "END;"
+                ));
+
+                bool errorEmitted = false;
+                QObject::connect(&ctrl, &AppController::databaseError, [&errorEmitted](const QString&) {
+                    errorEmitted = true;
+                });
+
+                // Trying to mark Task 1 done must trigger DB failure and loadFromDatabase rollback
+                QModelIndex idx1 = todoStore->index(0, 0);
+                QVERIFY(todoStore->setData(idx1, true, TaskStoreModel::DoneRole));
+                QVERIFY(errorEmitted);
+                QCOMPARE(ctrl.todoProxyModel()->rowCount(), 3);
+                QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+                triggerQ.exec(QStringLiteral("DROP TRIGGER test_fail_done"));
+            }
+
+            // 2. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
+            {
+                ctrl.setActiveTodoRow(0);
+                ctrl.timer()->start();
+                QVERIFY(ctrl.timer()->isRunning());
+                QThread::msleep(1050);
+
+                // Count existing activity logs
+                QSqlQuery countQ(dbConn);
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                const int initialActivityCount = countQ.value(0).toInt();
+
+                // Setup abort trigger
+                QSqlQuery triggerQ(dbConn);
+                triggerQ.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_timer_toggle BEFORE UPDATE OF done ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated toggleTaskDone failure'); "
+                    "END;"
+                ));
+
+                // Attempt to toggle done while timer running - must fail
+                ctrl.toggleTaskDone(false, 0);
+
+                // Timer MUST still be running!
+                QVERIFY(ctrl.timer()->isRunning());
+
+                // NO new activity log must have been inserted
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                QCOMPARE(countQ.value(0).toInt(), initialActivityCount);
+
+                // Drop trigger and complete task successfully
+                triggerQ.exec(QStringLiteral("DROP TRIGGER test_fail_timer_toggle"));
+                ctrl.toggleTaskDone(false, 0);
+                QVERIFY(!ctrl.timer()->isRunning());
+
+                // Now exactly 1 activity log entry must be created
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
+            }
+
+            // 3. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            {
+                auto& db = DatabaseManager::instance();
+                const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
+
+                bool isNew = false;
+                QString oldStatus;
+                QVERIFY(db.upsertRemoteIssueTask(remListId, QStringLiteral("KEY-1"), QStringLiteral("Task 1"), QStringLiteral("todo"), 0, 0, QString(), {}, &isNew, &oldStatus));
+                QVERIFY(db.upsertRemoteIssueTask(remListId, QStringLiteral("KEY-2"), QStringLiteral("Task 2"), QStringLiteral("todo"), 0, 0, QString(), {}, &isNew, &oldStatus));
+                QVERIFY(db.upsertRemoteIssueTask(remListId, QStringLiteral("KEY-3"), QStringLiteral("Task 3"), QStringLiteral("todo"), 0, 0, QString(), {}, &isNew, &oldStatus));
+
+                // Verify initial sort orders: 0, 1, 2
+                auto loadOrder = [&](const QString& key) -> int {
+                    QSqlQuery q(dbConn);
+                    q.prepare(QStringLiteral("SELECT sort_order FROM tasks WHERE list_id = :lid AND jira_key = :k"));
+                    q.bindValue(QStringLiteral(":lid"), remListId);
+                    q.bindValue(QStringLiteral(":k"), key);
+                    if (q.exec() && q.next()) return q.value(0).toInt();
+                    return -1;
+                };
+                QCOMPARE(loadOrder(QStringLiteral("KEY-1")), 0);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-2")), 1);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-3")), 2);
+
+                // Close KEY-2 via remote sync
+                QVERIFY(db.upsertRemoteIssueTask(remListId, QStringLiteral("KEY-2"), QStringLiteral("Task 2"), QStringLiteral("done"), 0, 0, QString(), {}, &isNew, &oldStatus));
+
+                // KEY-2 in done list should have sort_order 0
+                QCOMPARE(loadOrder(QStringLiteral("KEY-2")), 0);
+                // In todo list: KEY-1 should still have 0, KEY-3 compacted from 2 to 1!
+                QCOMPARE(loadOrder(QStringLiteral("KEY-1")), 0);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-3")), 1);
+
+                // Reopen KEY-2 via remote sync
+                QVERIFY(db.upsertRemoteIssueTask(remListId, QStringLiteral("KEY-2"), QStringLiteral("Task 2"), QStringLiteral("todo"), 0, 0, QString(), {}, &isNew, &oldStatus));
+
+                // In todo list: KEY-2 should now be at end (sort_order 2)
+                QCOMPARE(loadOrder(QStringLiteral("KEY-1")), 0);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-3")), 1);
+                QCOMPARE(loadOrder(QStringLiteral("KEY-2")), 2);
+            }
+
+            // 4. markActivityWorklogSynced() validation
+            {
+                auto& db = DatabaseManager::instance();
+                // Invalid IDs or non-existent log IDs must return false
+                QVERIFY(!db.markActivityWorklogSynced(-1));
+                QVERIFY(!db.markActivityWorklogSynced(999999));
+            }
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
