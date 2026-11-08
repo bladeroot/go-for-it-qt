@@ -12,7 +12,7 @@ ListManagerModel::ListManagerModel(QObject* parent)
 void ListManagerModel::reloadFromDatabase() {
     DatabaseManager& db = DatabaseManager::instance();
     if (!db.isOpen()) {
-        db.initialize();
+        return;
     }
     beginResetModel();
     m_entries = db.loadLists();

@@ -118,6 +118,7 @@ private:
 
     QString m_connectionName = QStringLiteral("gofi_sqlite_conn");
     QString m_dbPath;
+    bool m_initFailed = false;
 };
 
 } // namespace gofi

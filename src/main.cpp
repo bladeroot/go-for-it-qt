@@ -58,7 +58,16 @@ int main(int argc, char* argv[]) {
     parser.addOption(tuiOption);
     parser.process(app);
 
-    gofi::AppController controller(parser.value(logFileOption), parser.value(dbOption));
+    const QString customDbPath = parser.value(dbOption);
+    if (parser.isSet(dbOption)) {
+        if (customDbPath.isEmpty() || !gofi::DatabaseManager::instance().initialize(customDbPath)) {
+            QTextStream err(stderr);
+            err << "Error: Failed to open database at: " << customDbPath << "\n";
+            return 1;
+        }
+    }
+
+    gofi::AppController controller(parser.value(logFileOption), customDbPath);
 
     if (parser.isSet(listOption)) {
         QTextStream out(stdout);

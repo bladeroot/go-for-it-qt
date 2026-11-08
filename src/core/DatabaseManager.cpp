@@ -183,6 +183,7 @@ void DatabaseManager::close() {
         QSqlDatabase::removeDatabase(m_connectionName);
     }
     m_dbPath.clear();
+    m_initFailed = false;
 }
 
 bool DatabaseManager::initialize(const QString& customDbPath) {
@@ -204,6 +205,7 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
     }
 
     if (m_dbPath == targetPath && isOpen()) {
+        m_initFailed = false;
         return true;
     }
 
@@ -221,6 +223,7 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
     QSqlDatabase database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
     database.setDatabaseName(m_dbPath);
     if (!database.open()) {
+        m_initFailed = true;
         return false;
     }
 
@@ -228,7 +231,13 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
         QFile::setPermissions(m_dbPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     }
 
-    return createSchema();
+    const bool schemaOk = createSchema();
+    if (!schemaOk) {
+        m_initFailed = true;
+        return false;
+    }
+    m_initFailed = false;
+    return true;
 }
 
 bool DatabaseManager::isOpen() const {
@@ -239,7 +248,7 @@ bool DatabaseManager::isOpen() const {
 }
 
 QSqlDatabase DatabaseManager::db() const {
-    if (!isOpen()) {
+    if (!isOpen() && !m_initFailed) {
         const_cast<DatabaseManager*>(this)->initialize();
     }
     return QSqlDatabase::database(m_connectionName);
@@ -252,6 +261,24 @@ bool DatabaseManager::createSchema() {
     q.exec(QStringLiteral("PRAGMA foreign_keys = ON;"));
     q.exec(QStringLiteral("PRAGMA journal_mode = WAL;"));
     q.exec(QStringLiteral("PRAGMA synchronous = NORMAL;"));
+
+    auto ensureColumn = [&q](const QString& table, const QString& colDef) -> bool {
+        const QString colName = colDef.section(QLatin1Char(' '), 0, 0);
+        if (!q.exec(QStringLiteral("PRAGMA table_info(%1);").arg(table))) {
+            return false;
+        }
+        bool found = false;
+        while (q.next()) {
+            if (q.value(1).toString().compare(colName, Qt::CaseInsensitive) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return q.exec(QStringLiteral("ALTER TABLE %1 ADD COLUMN %2;").arg(table, colDef));
+        }
+        return true;
+    };
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS lists ("
@@ -274,11 +301,11 @@ bool DatabaseManager::createSchema() {
             ");"))) {
         return false;
     }
-    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN api_token TEXT NOT NULL DEFAULT '';"));
-    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN auto_worklog INTEGER NOT NULL DEFAULT 1;"));
-    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN sync_status_to_remote INTEGER NOT NULL DEFAULT 0;"));
-    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN status_mapping TEXT NOT NULL DEFAULT '';"));
-    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN priority_mapping TEXT NOT NULL DEFAULT '';"));
+    if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("api_token TEXT NOT NULL DEFAULT ''"))) return false;
+    if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("auto_worklog INTEGER NOT NULL DEFAULT 1"))) return false;
+    if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("sync_status_to_remote INTEGER NOT NULL DEFAULT 0"))) return false;
+    if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("status_mapping TEXT NOT NULL DEFAULT ''"))) return false;
+    if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("priority_mapping TEXT NOT NULL DEFAULT ''"))) return false;
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tasks ("
@@ -301,24 +328,39 @@ bool DatabaseManager::createSchema() {
             ");"))) {
         return false;
     }
-    q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'todo';"));
-    q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN details TEXT NOT NULL DEFAULT '';"));
-    q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN comments_json TEXT NOT NULL DEFAULT '';"));
-    q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN is_viewed INTEGER NOT NULL DEFAULT 1;"));
-    q.exec(QStringLiteral("UPDATE tasks SET status = 'done' WHERE done = 1 AND status = 'todo';"));
-    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tasks_list_done_order ON tasks(list_id, done, sort_order);"));
+    if (!ensureColumn(QStringLiteral("tasks"), QStringLiteral("status TEXT NOT NULL DEFAULT 'todo'"))) return false;
+    if (!ensureColumn(QStringLiteral("tasks"), QStringLiteral("details TEXT NOT NULL DEFAULT ''"))) return false;
+    if (!ensureColumn(QStringLiteral("tasks"), QStringLiteral("comments_json TEXT NOT NULL DEFAULT ''"))) return false;
+    if (!ensureColumn(QStringLiteral("tasks"), QStringLiteral("is_viewed INTEGER NOT NULL DEFAULT 1"))) return false;
+    if (!q.exec(QStringLiteral("UPDATE tasks SET status = 'done' WHERE done = 1 AND status = 'todo';"))) return false;
+    if (!q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tasks_list_done_order ON tasks(list_id, done, sort_order);"))) return false;
+
     // Consolidate tracked timer and duration from duplicates before removing duplicate rows
-    database.transaction();
-    q.exec(QStringLiteral(
+    if (!database.transaction()) {
+        return false;
+    }
+    if (!q.exec(QStringLiteral(
         "UPDATE tasks "
         "SET timer_seconds = (SELECT SUM(t2.timer_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != ''), "
         "    duration_seconds = (SELECT MAX(t2.duration_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != ''), "
         "    jira_synced_seconds = (SELECT SUM(t2.jira_synced_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != '') "
         "WHERE id IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key HAVING COUNT(*) > 1);"
-    ));
-    q.exec(QStringLiteral("DELETE FROM tasks WHERE jira_key != '' AND id NOT IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key);"));
-    q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_list_jira_key ON tasks(list_id, jira_key) WHERE jira_key != '';"));
-    database.commit();
+    ))) {
+        database.rollback();
+        return false;
+    }
+    if (!q.exec(QStringLiteral("DELETE FROM tasks WHERE jira_key != '' AND id NOT IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key);"))) {
+        database.rollback();
+        return false;
+    }
+    if (!q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_list_jira_key ON tasks(list_id, jira_key) WHERE jira_key != '';"))) {
+        database.rollback();
+        return false;
+    }
+    if (!database.commit()) {
+        database.rollback();
+        return false;
+    }
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS activity_log ("
@@ -337,9 +379,9 @@ bool DatabaseManager::createSchema() {
         return false;
     }
 
-    q.exec(QStringLiteral("ALTER TABLE activity_log ADD COLUMN is_pomodoro_completed INTEGER NOT NULL DEFAULT 0;"));
-    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_activity_log_list ON activity_log(list_id, start_time_utc);"));
-    q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_activity_log_time ON activity_log(start_time_utc);"));
+    if (!ensureColumn(QStringLiteral("activity_log"), QStringLiteral("is_pomodoro_completed INTEGER NOT NULL DEFAULT 0"))) return false;
+    if (!q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_activity_log_list ON activity_log(list_id, start_time_utc);"))) return false;
+    if (!q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_activity_log_time ON activity_log(start_time_utc);"))) return false;
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS app_settings ("
