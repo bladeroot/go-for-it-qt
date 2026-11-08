@@ -1628,96 +1628,138 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
         path = QStringLiteral("/rest/api/3/search");
     }
 
-    QUrl url(baseUrl + path);
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("jql"), jql);
-    query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("100"));
-    query.addQueryItem(QStringLiteral("fields"), QStringLiteral("summary,description,comment,priority,status,project,timetracking"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    applyAuthHeader(req, entry, forceBearerAuth);
-
-    QNetworkReply* reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, entry, endpointStage, forceBearerAuth]() {
-        reply->deleteLater();
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray bodyBytes = reply->readAll();
-        const QByteArray seraphReason = reply->rawHeader("X-Seraph-Loginreason");
-        const bool seraphAuthFailed = seraphReason.contains("AUTHENTICATED_FAILED") || seraphReason.contains("AUTHENTICATION_DENIED");
-
-        if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
-            // 1. If Basic Auth failed with 401/403 or X-Seraph-Loginreason: AUTHENTICATED_FAILED, retry with Bearer PAT
-            if (!forceBearerAuth && !entry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
-                endSyncOperation();
-                fetchJiraIssues(entry, endpointStage, true);
-                return;
-            }
-            if (seraphAuthFailed) {
-                endSyncOperation();
-                const QString errMsg = tr("Jira authentication failed: please verify your Jira Email (e.g. corporate email) and API Token.");
-                setStatusMessage(errMsg);
-                emit syncFailed(entry.id, errMsg);
-                return;
-            }
-            // 2. If endpoint returned 400/404/405/410, try fallback search endpoint
-            if (endpointStage < 2 && (httpStatus == 400 || httpStatus == 404 || httpStatus == 405 || httpStatus == 410)) {
-                endSyncOperation();
-                fetchJiraIssues(entry, endpointStage + 1, forceBearerAuth);
-                return;
-            }
-
-            endSyncOperation();
-            QString serverDetail;
-            const QJsonDocument errDoc = QJsonDocument::fromJson(bodyBytes);
-            if (errDoc.isObject()) {
-                const QJsonArray errArr = errDoc.object().value(QStringLiteral("errorMessages")).toArray();
-                if (!errArr.isEmpty()) {
-                    serverDetail = errArr.first().toString();
-                } else if (errDoc.object().contains(QStringLiteral("message"))) {
-                    serverDetail = errDoc.object().value(QStringLiteral("message")).toString();
-                }
-            }
-            const QString errMsg = serverDetail.isEmpty()
-                ? tr("Jira sync error (%1): %2").arg(httpStatus).arg(reply->errorString())
-                : tr("Jira sync error (%1): %2").arg(httpStatus).arg(serverDetail);
-            setStatusMessage(errMsg);
-            emit syncFailed(entry.id, errMsg);
-            return;
-        }
-
-        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
-        bool pageLimitReached = false;
+    struct JiraSyncState {
+        QVector<RemoteIssueItem> allItems;
+        int startAt = 0;
+        QString nextPageToken;
+        int pagesFetched = 0;
+        bool limitReached = false;
         bool hasError = false;
         bool explicitZeroTotal = false;
-        if (!doc.isObject()) {
-            hasError = true;
-        } else {
-            const QJsonObject rootObj = doc.object();
-            if (rootObj.contains(QStringLiteral("errorMessages"))) {
-                hasError = true;
-            }
-            const int total = rootObj.value(QStringLiteral("total")).toInt(-1);
-            const int maxResults = rootObj.value(QStringLiteral("maxResults")).toInt(100);
-            const int startAt = rootObj.value(QStringLiteral("startAt")).toInt(0);
-            const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
-            if (rootObj.contains(QStringLiteral("isLast")) && !rootObj.value(QStringLiteral("isLast")).toBool(true)) {
-                pageLimitReached = true;
-            } else if (rootObj.contains(QStringLiteral("nextPageToken")) && !rootObj.value(QStringLiteral("nextPageToken")).toString().trimmed().isEmpty()) {
-                pageLimitReached = true;
-            } else if (issuesArr.size() >= maxResults || (total >= 0 && (startAt + issuesArr.size() < total))) {
-                pageLimitReached = true;
-            }
-            if (!hasError && issuesArr.isEmpty()) {
-                if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && rootObj.value(QStringLiteral("isLast")).toBool(false))) {
-                    explicitZeroTotal = true;
+    };
+    auto state = std::make_shared<JiraSyncState>();
+
+    auto fetchPage = std::make_shared<std::function<void()>>();
+    *fetchPage = [this, entry, baseUrl, path, jql, endpointStage, forceBearerAuth, state, fetchPage]() {
+        QUrl url(baseUrl + path);
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("jql"), jql);
+        query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("100"));
+        query.addQueryItem(QStringLiteral("fields"), QStringLiteral("summary,description,comment,priority,status,project,timetracking"));
+        if (!state->nextPageToken.isEmpty()) {
+            query.addQueryItem(QStringLiteral("nextPageToken"), state->nextPageToken);
+        } else if (state->startAt > 0) {
+            query.addQueryItem(QStringLiteral("startAt"), QString::number(state->startAt));
+        }
+        url.setQuery(query);
+
+        QNetworkRequest req(url);
+        applyAuthHeader(req, entry, forceBearerAuth);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, entry, endpointStage, forceBearerAuth, state, fetchPage]() {
+            reply->deleteLater();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray bodyBytes = reply->readAll();
+            const QByteArray seraphReason = reply->rawHeader("X-Seraph-Loginreason");
+            const bool seraphAuthFailed = seraphReason.contains("AUTHENTICATED_FAILED") || seraphReason.contains("AUTHENTICATION_DENIED");
+
+            if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
+                if (state->pagesFetched == 0) {
+                    if (!forceBearerAuth && !entry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
+                        endSyncOperation();
+                        fetchJiraIssues(entry, endpointStage, true);
+                        return;
+                    }
+                    if (seraphAuthFailed) {
+                        endSyncOperation();
+                        const QString errMsg = tr("Jira authentication failed: please verify your Jira Email (e.g. corporate email) and API Token.");
+                        setStatusMessage(errMsg);
+                        emit syncFailed(entry.id, errMsg);
+                        return;
+                    }
+                    if (endpointStage < 2 && (httpStatus == 400 || httpStatus == 404 || httpStatus == 405 || httpStatus == 410)) {
+                        endSyncOperation();
+                        fetchJiraIssues(entry, endpointStage + 1, forceBearerAuth);
+                        return;
+                    }
+
+                    endSyncOperation();
+                    QString serverDetail;
+                    const QJsonDocument errDoc = QJsonDocument::fromJson(bodyBytes);
+                    if (errDoc.isObject()) {
+                        const QJsonArray errArr = errDoc.object().value(QStringLiteral("errorMessages")).toArray();
+                        if (!errArr.isEmpty()) {
+                            serverDetail = errArr.first().toString();
+                        } else if (errDoc.object().contains(QStringLiteral("message"))) {
+                            serverDetail = errDoc.object().value(QStringLiteral("message")).toString();
+                        }
+                    }
+                    const QString errMsg = serverDetail.isEmpty()
+                        ? tr("Jira sync error (%1): %2").arg(httpStatus).arg(reply->errorString())
+                        : tr("Jira sync error (%1): %2").arg(httpStatus).arg(serverDetail);
+                    setStatusMessage(errMsg);
+                    emit syncFailed(entry.id, errMsg);
+                    return;
+                } else {
+                    state->hasError = true;
+                    processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                    return;
                 }
             }
-        }
 
-        const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("Jira"), pageLimitReached, hasError, explicitZeroTotal);
-    });
+            const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+            bool hasMore = false;
+            if (!doc.isObject()) {
+                state->hasError = true;
+            } else {
+                const QJsonObject rootObj = doc.object();
+                if (rootObj.contains(QStringLiteral("errorMessages"))) {
+                    state->hasError = true;
+                }
+                const int total = rootObj.value(QStringLiteral("total")).toInt(-1);
+                const int maxResults = rootObj.value(QStringLiteral("maxResults")).toInt(100);
+                const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
+                const bool isLast = rootObj.value(QStringLiteral("isLast")).toBool(true);
+                const QString nextToken = rootObj.value(QStringLiteral("nextPageToken")).toString().trimmed();
+
+                if (state->pagesFetched == 0 && !state->hasError && issuesArr.isEmpty()) {
+                    if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && rootObj.value(QStringLiteral("isLast")).toBool(false))) {
+                        state->explicitZeroTotal = true;
+                    }
+                }
+
+                if (!nextToken.isEmpty()) {
+                    hasMore = true;
+                    state->nextPageToken = nextToken;
+                } else if (rootObj.contains(QStringLiteral("isLast"))) {
+                    hasMore = !isLast;
+                } else if (total >= 0) {
+                    hasMore = (state->startAt + issuesArr.size() < total);
+                } else {
+                    hasMore = (issuesArr.size() >= maxResults && !issuesArr.isEmpty());
+                }
+                state->startAt += issuesArr.size();
+            }
+
+            const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
+            state->allItems.append(items);
+            state->pagesFetched++;
+
+            if (hasMore && !state->hasError) {
+                if (state->pagesFetched < 50) {
+                    (*fetchPage)();
+                    return;
+                } else {
+                    state->limitReached = true;
+                }
+            }
+
+            processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        });
+    };
+
+    (*fetchPage)();
 }
 
 void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
@@ -1734,39 +1776,77 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
         ? QStringLiteral("for: me #Unresolved sort by: updated desc")
         : entry.jiraJql.trimmed();
 
-    QUrl url(baseUrl + QStringLiteral("/api/issues"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("query"), ytQuery);
-    query.addQueryItem(QStringLiteral("$top"), QStringLiteral("100"));
-    query.addQueryItem(
-        QStringLiteral("fields"),
-        QStringLiteral("idReadable,summary,description,project(shortName),customFields(name,value(name,isResolved,minutes)),comments(author(fullName,login),created,text)")
-    );
-    url.setQuery(query);
+    struct YouTrackSyncState {
+        QVector<RemoteIssueItem> allItems;
+        int skip = 0;
+        int pagesFetched = 0;
+        bool limitReached = false;
+        bool hasError = false;
+    };
+    auto state = std::make_shared<YouTrackSyncState>();
 
-    QNetworkRequest req(url);
-    applyAuthHeader(req, entry);
-
-    QNetworkReply* reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
-        reply->deleteLater();
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-
-        if (reply->error() != QNetworkReply::NoError) {
-            endSyncOperation();
-            const QString errMsg = tr("YouTrack sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
-            setStatusMessage(errMsg);
-            emit syncFailed(entry.id, errMsg);
-            return;
+    auto fetchPage = std::make_shared<std::function<void()>>();
+    *fetchPage = [this, entry, baseUrl, ytQuery, state, fetchPage]() {
+        QUrl url(baseUrl + QStringLiteral("/api/issues"));
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("query"), ytQuery);
+        query.addQueryItem(QStringLiteral("$top"), QStringLiteral("100"));
+        if (state->skip > 0) {
+            query.addQueryItem(QStringLiteral("$skip"), QString::number(state->skip));
         }
+        query.addQueryItem(
+            QStringLiteral("fields"),
+            QStringLiteral("idReadable,summary,description,project(shortName),customFields(name,value(name,isResolved,minutes)),comments(author(fullName,login),created,text)")
+        );
+        url.setQuery(query);
 
-        const QByteArray bodyBytes = reply->readAll();
-        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
-        const bool hasError = !doc.isArray();
-        const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
-        const bool pageLimitReached = (items.size() >= 100);
-        processSyncedItems(entry, items, QStringLiteral("YouTrack"), pageLimitReached, hasError);
-    });
+        QNetworkRequest req(url);
+        applyAuthHeader(req, entry);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, entry, state, fetchPage]() {
+            reply->deleteLater();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+
+            if (reply->error() != QNetworkReply::NoError) {
+                if (state->pagesFetched == 0) {
+                    endSyncOperation();
+                    const QString errMsg = tr("YouTrack sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
+                    setStatusMessage(errMsg);
+                    emit syncFailed(entry.id, errMsg);
+                    return;
+                } else {
+                    state->hasError = true;
+                    processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError);
+                    return;
+                }
+            }
+
+            const QByteArray bodyBytes = reply->readAll();
+            const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+            if (!doc.isArray()) {
+                state->hasError = true;
+            }
+            const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
+            state->allItems.append(items);
+            state->pagesFetched++;
+            state->skip += items.size();
+
+            const bool hasMore = (items.size() >= 100);
+            if (hasMore && !state->hasError) {
+                if (state->pagesFetched < 50) {
+                    (*fetchPage)();
+                    return;
+                } else {
+                    state->limitReached = true;
+                }
+            }
+
+            processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError);
+        });
+    };
+
+    (*fetchPage)();
 }
 
 void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
@@ -1884,58 +1964,96 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
     startSyncOperation();
     setStatusMessage(tr("Syncing issues and pull requests from GitHub..."));
 
-    QUrl url(apiUrl + QStringLiteral("/search/issues"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("q"), queryStr);
-    query.addQueryItem(QStringLiteral("sort"), QStringLiteral("updated"));
-    query.addQueryItem(QStringLiteral("order"), QStringLiteral("desc"));
-    query.addQueryItem(QStringLiteral("per_page"), QStringLiteral("100"));
-    url.setQuery(query);
-
-    QNetworkRequest req(url);
-    applyAuthHeader(req, entry);
-
-    QNetworkReply* reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
-        reply->deleteLater();
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (reply->error() != QNetworkReply::NoError) {
-            endSyncOperation();
-            const QString errMsg = tr("GitHub sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
-            setStatusMessage(errMsg);
-            emit syncFailed(entry.id, errMsg);
-            return;
-        }
-
-        const QByteArray bodyBytes = reply->readAll();
-        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
-        bool pageLimitReached = false;
+    struct GitHubSyncState {
+        QVector<RemoteIssueItem> allItems;
+        int page = 1;
+        int pagesFetched = 0;
+        int totalCount = -1;
+        bool limitReached = false;
         bool hasError = false;
         bool explicitZeroTotal = false;
+    };
+    auto state = std::make_shared<GitHubSyncState>();
 
-        if (!doc.isObject()) {
-            hasError = true;
-        } else {
-            const QJsonObject rootObj = doc.object();
-            if (rootObj.contains(QStringLiteral("message"))) {
-                hasError = true;
-            }
-            if (rootObj.value(QStringLiteral("incomplete_results")).toBool(false)) {
-                pageLimitReached = true;
-            }
-            const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
-            const QJsonArray itemsArray = rootObj.value(QStringLiteral("items")).toArray();
-            if (itemsArray.size() >= 100 || (totalCount >= 0 && totalCount > itemsArray.size())) {
-                pageLimitReached = true;
-            }
-            if (totalCount == 0 && !hasError && !pageLimitReached && itemsArray.isEmpty()) {
-                explicitZeroTotal = true;
-            }
+    auto fetchPage = std::make_shared<std::function<void()>>();
+    *fetchPage = [this, entry, apiUrl, queryStr, state, fetchPage]() {
+        QUrl url(apiUrl + QStringLiteral("/search/issues"));
+        QUrlQuery query;
+        query.addQueryItem(QStringLiteral("q"), queryStr);
+        query.addQueryItem(QStringLiteral("sort"), QStringLiteral("updated"));
+        query.addQueryItem(QStringLiteral("order"), QStringLiteral("desc"));
+        query.addQueryItem(QStringLiteral("per_page"), QStringLiteral("100"));
+        if (state->page > 1) {
+            query.addQueryItem(QStringLiteral("page"), QString::number(state->page));
         }
+        url.setQuery(query);
 
-        const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("GitHub"), pageLimitReached, hasError, explicitZeroTotal);
-    });
+        QNetworkRequest req(url);
+        applyAuthHeader(req, entry);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, entry, state, fetchPage]() {
+            reply->deleteLater();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (reply->error() != QNetworkReply::NoError) {
+                if (state->pagesFetched == 0) {
+                    endSyncOperation();
+                    const QString errMsg = tr("GitHub sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
+                    setStatusMessage(errMsg);
+                    emit syncFailed(entry.id, errMsg);
+                    return;
+                } else {
+                    state->hasError = true;
+                    processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                    return;
+                }
+            }
+
+            const QByteArray bodyBytes = reply->readAll();
+            const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+            bool hasMore = false;
+
+            if (!doc.isObject()) {
+                state->hasError = true;
+            } else {
+                const QJsonObject rootObj = doc.object();
+                if (rootObj.contains(QStringLiteral("message"))) {
+                    state->hasError = true;
+                }
+                if (rootObj.value(QStringLiteral("incomplete_results")).toBool(false)) {
+                    state->limitReached = true;
+                }
+                const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
+                state->totalCount = totalCount;
+                const QJsonArray itemsArray = rootObj.value(QStringLiteral("items")).toArray();
+                if (state->pagesFetched == 0 && totalCount == 0 && !state->hasError && itemsArray.isEmpty()) {
+                    state->explicitZeroTotal = true;
+                }
+                if (itemsArray.size() >= 100 && (totalCount < 0 || state->allItems.size() + itemsArray.size() < totalCount)) {
+                    hasMore = true;
+                }
+            }
+
+            const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(bodyBytes);
+            state->allItems.append(items);
+            state->pagesFetched++;
+            state->page++;
+
+            if (hasMore && !state->hasError) {
+                // GitHub Search API has a hard ceiling of 1000 items (10 pages)
+                if (state->pagesFetched < 10) {
+                    (*fetchPage)();
+                    return;
+                } else {
+                    state->limitReached = true;
+                }
+            }
+
+            processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        });
+    };
+
+    (*fetchPage)();
 }
 
 void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
@@ -1988,49 +2106,56 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
         processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached, combinedState->hasError);
     };
 
-    // 1. Fetch Issues
-    {
-        QUrl url(baseUrl + issuesPath);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, entry);
-        QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, combinedState, checkDone]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                combinedState->hasError = true;
-                combinedState->errorMsg = tr("GitLab issues error: %1").arg(reply->errorString());
-            } else {
-                const auto parsed = parseGitLabIssuesJson(reply->readAll());
-                if (parsed.size() >= 100) combinedState->limitReached = true;
-                combinedState->items.append(parsed);
-            }
-            combinedState->completedRequests++;
-            checkDone();
-        });
-    }
-
-    // 2. Fetch Merge Requests
-    {
-        QUrl url(baseUrl + mrPath);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, entry);
-        QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, combinedState, checkDone]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                combinedState->hasError = true;
-                if (combinedState->errorMsg.isEmpty()) {
-                    combinedState->errorMsg = tr("GitLab merge requests error: %1").arg(reply->errorString());
+    auto fetchGitLabStream = [this, entry, baseUrl, combinedState, checkDone](const QString& path, bool isMr) {
+        auto fetchPage = std::make_shared<std::function<void(int)>>();
+        *fetchPage = [this, entry, baseUrl, path, isMr, combinedState, checkDone, fetchPage](int page) {
+            QString pageParam = path.contains(QLatin1Char('?'))
+                ? QStringLiteral("&page=%1").arg(page)
+                : QStringLiteral("?page=%1").arg(page);
+            QUrl url(baseUrl + path + pageParam);
+            QNetworkRequest req(url);
+            applyAuthHeader(req, entry);
+            QNetworkReply* reply = m_nam.get(req);
+            connect(reply, &QNetworkReply::finished, this, [this, reply, isMr, page, combinedState, checkDone, fetchPage]() {
+                reply->deleteLater();
+                if (reply->error() != QNetworkReply::NoError) {
+                    combinedState->hasError = true;
+                    if (combinedState->errorMsg.isEmpty()) {
+                        combinedState->errorMsg = isMr
+                            ? tr("GitLab merge requests error: %1").arg(reply->errorString())
+                            : tr("GitLab issues error: %1").arg(reply->errorString());
+                    }
+                    combinedState->completedRequests++;
+                    checkDone();
+                    return;
                 }
-            } else {
-                const auto parsed = parseGitLabMergeRequestsJson(reply->readAll());
-                if (parsed.size() >= 100) combinedState->limitReached = true;
+
+                const QByteArray bodyBytes = reply->readAll();
+                const auto parsed = isMr ? parseGitLabMergeRequestsJson(bodyBytes) : parseGitLabIssuesJson(bodyBytes);
                 combinedState->items.append(parsed);
-            }
-            combinedState->completedRequests++;
-            checkDone();
-        });
-    }
+
+                const QByteArray nextPageHdr = reply->rawHeader("x-next-page").trimmed();
+                const int nextPage = nextPageHdr.toInt();
+                const bool hasMore = (nextPage > 0) || (parsed.size() >= 100);
+
+                if (hasMore && !parsed.isEmpty()) {
+                    if (page < 50) {
+                        const int nextP = (nextPage > 0) ? nextPage : (page + 1);
+                        (*fetchPage)(nextP);
+                        return;
+                    } else {
+                        combinedState->limitReached = true;
+                    }
+                }
+                combinedState->completedRequests++;
+                checkDone();
+            });
+        };
+        (*fetchPage)(1);
+    };
+
+    fetchGitLabStream(issuesPath, false);
+    fetchGitLabStream(mrPath, true);
 }
 
 void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
@@ -2057,105 +2182,147 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
         queryStr.remove(0, 1);
     }
 
-    QUrl url(baseUrl + QStringLiteral("/issues.json?") + queryStr);
-    QNetworkRequest req(url);
-    applyAuthHeader(req, entry);
-
-    QNetworkReply* reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, entry, baseUrl]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            endSyncOperation();
-            const QString errMsg = tr("Redmine sync error: %1").arg(reply->errorString());
-            setStatusMessage(errMsg);
-            emit syncFailed(entry.id, errMsg);
-            return;
-        }
-
-        const QByteArray bodyBytes = reply->readAll();
-        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
-        bool pageLimitReached = false;
+    struct RedmineSyncState {
+        QVector<RemoteIssueItem> allItems;
+        int offset = 0;
+        int pagesFetched = 0;
+        int totalCount = -1;
+        bool limitReached = false;
         bool hasError = false;
         bool explicitZeroTotal = false;
-        if (!doc.isObject()) {
-            hasError = true;
-        } else {
-            const QJsonObject rootObj = doc.object();
-            const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
-            const int limit = rootObj.value(QStringLiteral("limit")).toInt(100);
-            const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
-            if (issuesArr.size() >= limit || (totalCount >= 0 && totalCount > issuesArr.size())) {
-                pageLimitReached = true;
-            }
-            if (totalCount == 0 && issuesArr.isEmpty()) {
-                explicitZeroTotal = true;
-            }
+    };
+    auto state = std::make_shared<RedmineSyncState>();
 
-            // Auto-learn status IDs from Redmine server statuses if closed ID is missing
-            bool hasClosedId = false;
-            for (auto it = entry.statusMapping.begin(); it != entry.statusMapping.end(); ++it) {
-                if (it.key().startsWith(QStringLiteral("_id_"))) {
-                    const QString stName = it.key().mid(4).toLower();
-                    if (stName == QStringLiteral("closed") || stName == QStringLiteral("resolved") || stName == QStringLiteral("done")) {
-                        hasClosedId = true;
-                        break;
-                    }
+    auto fetchPage = std::make_shared<std::function<void()>>();
+    *fetchPage = [this, entry, baseUrl, queryStr, state, fetchPage]() {
+        QString pagedQuery = queryStr;
+        if (state->offset > 0) {
+            pagedQuery += QStringLiteral("&offset=%1").arg(state->offset);
+        }
+        QUrl url(baseUrl + QStringLiteral("/issues.json?") + pagedQuery);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, entry);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, entry, baseUrl, state, fetchPage]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                if (state->pagesFetched == 0) {
+                    endSyncOperation();
+                    const QString errMsg = tr("Redmine sync error: %1").arg(reply->errorString());
+                    setStatusMessage(errMsg);
+                    emit syncFailed(entry.id, errMsg);
+                    return;
+                } else {
+                    state->hasError = true;
+                    processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                    return;
                 }
             }
-            if (!hasClosedId) {
-                QUrl statusUrl(baseUrl + QStringLiteral("/issue_statuses.json"));
-                QNetworkRequest statusReq(statusUrl);
-                applyAuthHeader(statusReq, entry, false);
-                QNetworkReply* stReply = m_nam.get(statusReq);
-                connect(stReply, &QNetworkReply::finished, this, [this, stReply, entry]() {
-                    stReply->deleteLater();
-                    if (stReply->error() != QNetworkReply::NoError) return;
-                    const QJsonDocument sDoc = QJsonDocument::fromJson(stReply->readAll());
-                    if (!sDoc.isObject()) return;
-                    const QJsonArray sArr = sDoc.object().value(QStringLiteral("issue_statuses")).toArray();
-                    QVariantMap newMapping = entry.statusMapping;
-                    bool changed = false;
-                    for (const auto& val : sArr) {
-                        const QJsonObject sObj = val.toObject();
-                        const QString name = sObj.value(QStringLiteral("name")).toString().trimmed();
-                        const int id = sObj.value(QStringLiteral("id")).toInt(0);
-                        if (!name.isEmpty() && id > 0) {
-                            const QString idKey = QStringLiteral("_id_") + name;
-                            if (!newMapping.contains(idKey)) {
-                                newMapping[idKey] = id;
-                                changed = true;
+
+            const QByteArray bodyBytes = reply->readAll();
+            const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+            bool hasMore = false;
+
+            if (!doc.isObject()) {
+                state->hasError = true;
+            } else {
+                const QJsonObject rootObj = doc.object();
+                const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
+                state->totalCount = totalCount;
+                const int limit = rootObj.value(QStringLiteral("limit")).toInt(100);
+                const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
+                if (state->pagesFetched == 0 && totalCount == 0 && issuesArr.isEmpty()) {
+                    state->explicitZeroTotal = true;
+                }
+
+                if (issuesArr.size() >= limit && (totalCount < 0 || state->allItems.size() + issuesArr.size() < totalCount)) {
+                    hasMore = true;
+                }
+                state->offset += issuesArr.size();
+
+                if (state->pagesFetched == 0) {
+                    // Auto-learn status IDs from Redmine server statuses if closed ID is missing
+                    bool hasClosedId = false;
+                    for (auto it = entry.statusMapping.begin(); it != entry.statusMapping.end(); ++it) {
+                        if (it.key().startsWith(QStringLiteral("_id_"))) {
+                            const QString stName = it.key().mid(4).toLower();
+                            if (stName == QStringLiteral("closed") || stName == QStringLiteral("resolved") || stName == QStringLiteral("done")) {
+                                hasClosedId = true;
+                                break;
                             }
                         }
                     }
-                    if (changed) {
-                        emit listStatusMappingUpdated(entry.id, newMapping);
+                    if (!hasClosedId) {
+                        QUrl statusUrl(baseUrl + QStringLiteral("/issue_statuses.json"));
+                        QNetworkRequest statusReq(statusUrl);
+                        applyAuthHeader(statusReq, entry, false);
+                        QNetworkReply* stReply = m_nam.get(statusReq);
+                        connect(stReply, &QNetworkReply::finished, this, [this, stReply, entry]() {
+                            stReply->deleteLater();
+                            if (stReply->error() != QNetworkReply::NoError) return;
+                            const QJsonDocument sDoc = QJsonDocument::fromJson(stReply->readAll());
+                            if (!sDoc.isObject()) return;
+                            const QJsonArray sArr = sDoc.object().value(QStringLiteral("issue_statuses")).toArray();
+                            QVariantMap newMapping = entry.statusMapping;
+                            bool changed = false;
+                            for (const auto& val : sArr) {
+                                const QJsonObject sObj = val.toObject();
+                                const QString name = sObj.value(QStringLiteral("name")).toString().trimmed();
+                                const int id = sObj.value(QStringLiteral("id")).toInt(0);
+                                if (!name.isEmpty() && id > 0) {
+                                    const QString idKey = QStringLiteral("_id_") + name;
+                                    if (!newMapping.contains(idKey)) {
+                                        newMapping[idKey] = id;
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            if (changed) {
+                                emit listStatusMappingUpdated(entry.id, newMapping);
+                            }
+                        });
                     }
-                });
-            }
 
-            // Auto-learn status IDs from returned issues for existing lists
-            bool mappingChanged = false;
-            QVariantMap updatedMapping = entry.statusMapping;
-            for (const auto& val : issuesArr) {
-                const QJsonObject statusObj = val.toObject().value(QStringLiteral("status")).toObject();
-                const QString sName = statusObj.value(QStringLiteral("name")).toString().trimmed();
-                const int sId = statusObj.value(QStringLiteral("id")).toInt(0);
-                if (!sName.isEmpty() && sId > 0) {
-                    const QString idKey = QStringLiteral("_id_") + sName;
-                    if (!updatedMapping.contains(idKey)) {
-                        updatedMapping[idKey] = sId;
-                        mappingChanged = true;
+                    // Auto-learn status IDs from returned issues for existing lists
+                    bool mappingChanged = false;
+                    QVariantMap updatedMapping = entry.statusMapping;
+                    for (const auto& val : issuesArr) {
+                        const QJsonObject statusObj = val.toObject().value(QStringLiteral("status")).toObject();
+                        const QString sName = statusObj.value(QStringLiteral("name")).toString().trimmed();
+                        const int sId = statusObj.value(QStringLiteral("id")).toInt(0);
+                        if (!sName.isEmpty() && sId > 0) {
+                            const QString idKey = QStringLiteral("_id_") + sName;
+                            if (!updatedMapping.contains(idKey)) {
+                                updatedMapping[idKey] = sId;
+                                mappingChanged = true;
+                            }
+                        }
+                    }
+                    if (mappingChanged) {
+                        emit listStatusMappingUpdated(entry.id, updatedMapping);
                     }
                 }
             }
-            if (mappingChanged) {
-                emit listStatusMappingUpdated(entry.id, updatedMapping);
-            }
-        }
 
-        const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("Redmine"), pageLimitReached, hasError, explicitZeroTotal);
-    });
+            const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(bodyBytes);
+            state->allItems.append(items);
+            state->pagesFetched++;
+
+            if (hasMore && !state->hasError) {
+                if (state->pagesFetched < 50) {
+                    (*fetchPage)();
+                    return;
+                } else {
+                    state->limitReached = true;
+                }
+            }
+
+            processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        });
+    };
+
+    (*fetchPage)();
 }
 
 void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
