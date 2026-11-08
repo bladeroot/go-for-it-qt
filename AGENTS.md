@@ -2,31 +2,33 @@
 
 ## Project Structure & Module Organization
 
-The project is a C++20/Qt 6 productivity application with two front ends. Core services, SQLite persistence, and models live in `src/core/`; `src/todotxt/` handles the Todo.txt line format; the terminal UI is in `src/tui/`. Entry points are `src/main.cpp` for the Qt Quick GUI and `src/main_tui.cpp` for the TUI. QML views are grouped under `qml/components/`, `qml/dialogs/`, and `qml/pages/`. Runtime icons, sounds, desktop metadata, man pages, and AppStream metadata belong in `data/`. Tests live in `tests/`, while distribution files are under `packaging/`, `debian/`, and `PKGBUILD`.
+This C++20/Qt 6 application has two front ends. Core services, SQLite persistence, and models live in `src/core/`; Todo.txt handling is in `src/todotxt/`; the terminal UI is in `src/tui/`. Entry points are `src/main.cpp` and `src/main_tui.cpp`. QML views are grouped under `qml/components/`, `qml/dialogs/`, and `qml/pages/`. Runtime assets belong in `data/`, tests in `tests/`, and distribution files in `packaging/`, `debian/`, and `PKGBUILD`.
 
 ## Build, Test, and Development Commands
 
-Use an out-of-tree build:
+Build outside the repository. Create a disposable directory under `/tmp`, then remove it after verification:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build -j$(nproc)
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+build_dir=$(mktemp -d /tmp/go-for-it-build.XXXXXX)
+cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build "$build_dir" -j2
+ctest --test-dir "$build_dir" --output-on-failure
+cmake -E remove_directory "$build_dir"
 ```
 
-Run `build/go-for-it-qt` for the GUI or `build/go-for-it-tui` for the terminal interface. Configure with `-DCMAKE_BUILD_TYPE=Release` for production builds. Install locally with `cmake --install build --prefix /usr/local`; avoid committing generated `build/` contents. Register new C++ files in `GOFI_CORE_SOURCES` and new QML files in the `QML_FILES` list in `CMakeLists.txt`.
+Run `$build_dir/go-for-it-qt` for the GUI or `$build_dir/go-for-it-tui` for the terminal interface before cleanup. Use `-DCMAKE_BUILD_TYPE=Release` for production builds. Never leave generated build artifacts in the working tree. Register new C++ files in `GOFI_CORE_SOURCES` and QML files in the `QML_FILES` list in `CMakeLists.txt`.
 
 ## Coding Style & Naming Conventions
 
-Match existing Qt/C++ style: four-space indentation, braces on the same line, `PascalCase` for classes, and `camelCase` for methods and variables. Keep headers and implementations paired as `ClassName.h` and `ClassName.cpp`, use `QStringLiteral` for fixed Qt strings, and place application types in the `gofi` namespace. Name QML components in `PascalCase.qml`; use lower-camel-case properties and IDs. No repository-wide formatter is configured, so preserve nearby formatting and keep changes focused.
+Use four-space indentation, same-line braces, `PascalCase` classes, and `camelCase` methods and variables. Pair `ClassName.h` with `ClassName.cpp`, use `QStringLiteral` for fixed Qt strings, and place application types in `gofi`. Name QML components `PascalCase.qml` and properties or IDs in lower camel case. No repository-wide formatter is configured; preserve nearby formatting.
 
 ## Testing Guidelines
 
-Tests use Qt Test and are registered through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, naming them `testBehaviorOrFeature`. Exercise model state, persistence, and parsing with deterministic data inside the existing test sandbox. Run one slot with `QT_QPA_PLATFORM=offscreen build/tst_todotxt testBehaviorOrFeature`. Always run the full offscreen CTest command before submitting; add regression coverage for bug fixes.
+Tests use Qt Test and are registered through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, naming them `testBehaviorOrFeature`. Exercise model state, persistence, parsing, rollback behavior, and signal side effects with deterministic data. Run one slot as `$build_dir/tst_todotxt testBehaviorOrFeature`. CMake sets the offscreen Qt platform for CTest. Always run the full suite and add regression coverage for bug fixes, including failure paths.
 
 ## Configuration & Safety
 
-Manual runs use persistent user settings and SQLite data. Pass `--db /tmp/goforit-test.db` while experimenting to avoid modifying the user's normal database. Guard new audio, D-Bus, process, or desktop integrations in test mode, following the existing service patterns.
+Manual runs use persistent user settings and SQLite data. Pass `--db /tmp/goforit-test.db` while experimenting to avoid modifying normal data. Keep multi-step SQLite changes transactional, check every database result, and do not trigger notifications or remote updates until local persistence succeeds. Guard audio, D-Bus, process, and desktop integrations in test mode.
 
 ## Commit & Pull Request Guidelines
 
