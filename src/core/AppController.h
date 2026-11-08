@@ -145,6 +145,8 @@ private:
     int findActiveTodoRowById(qint64 taskId) const;
     void applyLanguageTranslator();
     void updateAutoSyncTimer();
+    bool toggleTaskDoneSource(bool fromDoneList, int sourceRow);
+    bool changeTaskStatusSource(bool fromDoneList, int sourceRow, const QString& newStatus);
 
     SettingsManager m_settings;
     UkTranslator m_ukTranslator;

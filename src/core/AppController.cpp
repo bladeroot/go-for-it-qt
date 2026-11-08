@@ -346,17 +346,21 @@ void AppController::addNewTask(const QString& simpleText) {
 
 void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
-    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
     if (sourceRow < 0) return;
+    toggleTaskDoneSource(fromDoneList, sourceRow);
+}
+
+bool AppController::toggleTaskDoneSource(bool fromDoneList, int sourceRow) {
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    if (sourceRow < 0 || sourceRow >= store->rowCount()) return false;
 
     const QModelIndex idx = store->index(sourceRow, 0);
     const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
     const bool currentDone = store->data(idx, TaskStoreModel::DoneRole).toBool();
     const bool willBeDone = !currentDone;
 
-    // Pre-fetch metadata BEFORE mutating the model, because setData triggers taskDoneToggled
-    // which immediately removes the row from the store.
+    // Pre-fetch metadata BEFORE mutating the model
     const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
     const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
@@ -370,7 +374,10 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
         }
     }
 
-    store->setData(idx, willBeDone, TaskStoreModel::DoneRole);
+    if (!m_taskManager.toggleTaskDone(fromDoneList, sourceRow)) {
+        return false;
+    }
+
     m_notifications.notifyTaskEvent(
         tr("Task status changed"),
         QStringLiteral("%1 → %2").arg(desc, willBeDone ? tr("Done") : tr("To-Do"))
@@ -386,13 +393,19 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     if (willBeDone) {
         m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
     }
+    return true;
 }
 
 void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
-    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
     if (sourceRow < 0) return;
+    changeTaskStatusSource(fromDoneList, sourceRow, newStatus);
+}
+
+bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, const QString& newStatus) {
+    TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    if (sourceRow < 0 || sourceRow >= store->rowCount()) return false;
 
     const QModelIndex idx = store->index(sourceRow, 0);
     const QString desc = store->data(idx, TaskStoreModel::DescriptionRole).toString();
@@ -403,9 +416,9 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
-    const bool wasDone = (oldStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
-    const bool isCompleting = (newStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
-    const bool willMoveToDone = (!fromDoneList && !wasDone && isCompleting);
+    const bool wasClosed = TxtTask::isClosedStatus(oldStatus);
+    const bool willBeClosed = TxtTask::isClosedStatus(newStatus);
+    const bool willMoveToDone = (!fromDoneList && !wasClosed && willBeClosed);
 
     if (willMoveToDone && m_timer.isRunning()) {
         const qint64 timedTaskId = m_timer.activeTaskId();
@@ -415,28 +428,28 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
         }
     }
 
-    store->setTaskStatus(sourceRow, newStatus);
+    if (!m_taskManager.setTaskStatus(fromDoneList, sourceRow, newStatus)) {
+        return false;
+    }
+
     if (oldStatus != newStatus) {
         m_notifications.notifyTaskEvent(
             tr("Task status changed"),
             QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
         );
-        if (!remoteKey.isEmpty() && !effectiveListId.isEmpty() && wasDone != isCompleting) {
+        if (!remoteKey.isEmpty() && !effectiveListId.isEmpty() && wasClosed != willBeClosed) {
             for (const TodoListEntry& listEntry : m_listManager.entries()) {
                 if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite") && listEntry.syncStatusToRemote) {
-                    if (isCompleting) {
-                        m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, true, newStatus);
-                    } else if (newStatus.compare(QStringLiteral("todo"), Qt::CaseInsensitive) == 0) {
-                        m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, false, newStatus);
-                    }
+                    m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, willBeClosed, newStatus);
                     break;
                 }
             }
         }
-        if (isCompleting) {
+        if (willBeClosed && !wasClosed) {
             m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
         }
     }
+    return true;
 }
 
 void AppController::changeTaskPriority(bool fromDoneList, int proxyRow, const QString& priorityLetter) {
@@ -614,9 +627,7 @@ void AppController::markActiveTaskDone() {
         return;
     }
     const bool wasRunning = m_timer.isRunning();
-    m_timer.stop();
-    const QModelIndex idx = m_taskManager.todoModel()->index(m_activeTodoRow, 0);
-    m_taskManager.todoModel()->setData(idx, true, TaskStoreModel::DoneRole);
+    toggleTaskDoneSource(false, m_activeTodoRow);
 
     if (wasRunning && m_timer.hasActiveTask() && (m_timer.isBreakActive() || !m_settings.resetTimerOnTaskSwitch())) {
         m_timer.start();
