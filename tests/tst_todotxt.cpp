@@ -2982,11 +2982,19 @@ private slots:
 
                 QVector<TxtTask> batchTasks = DatabaseManager::instance().loadTasks(staleBatchListId, false);
                 QCOMPARE(batchTasks.size(), 2);
+                const qint64 originalFirstTaskId = batchTasks.at(0).id();
+                const qint64 originalSecondTaskId = batchTasks.at(1).id();
+                std::reverse(batchTasks.begin(), batchTasks.end());
                 TxtTask staleTask = TxtTask::fromSimpleTxt(QStringLiteral("Missing batch task"), false, false);
                 staleTask.setId(99999999);
                 batchTasks.insert(1, staleTask);
 
                 QVERIFY(!DatabaseManager::instance().replaceListTasksOrders(staleBatchListId, false, batchTasks));
+                const QVector<TxtTask> tasksAfterFailedReorder =
+                    DatabaseManager::instance().loadTasks(staleBatchListId, false);
+                QCOMPARE(tasksAfterFailedReorder.size(), 2);
+                QCOMPARE(tasksAfterFailedReorder.at(0).id(), originalFirstTaskId);
+                QCOMPARE(tasksAfterFailedReorder.at(1).id(), originalSecondTaskId);
             }
 
             // 8. Batch list reorder must reject stale list IDs
@@ -2999,8 +3007,32 @@ private slots:
                 missingList.id = QStringLiteral("missing-list-order-id");
                 missingList.name = QStringLiteral("Missing list order");
 
-                const QVector<TodoListEntry> entries{listA, missingList, listB};
+                QSqlQuery orderBefore(dbConn);
+                orderBefore.prepare(QStringLiteral("SELECT id, sort_order FROM lists WHERE id IN (:a, :b)"));
+                orderBefore.bindValue(QStringLiteral(":a"), staleListA);
+                orderBefore.bindValue(QStringLiteral(":b"), staleListB);
+                QVERIFY(orderBefore.exec());
+                QHash<QString, int> originalOrders;
+                while (orderBefore.next()) {
+                    originalOrders.insert(orderBefore.value(0).toString(), orderBefore.value(1).toInt());
+                }
+                QCOMPARE(originalOrders.size(), 2);
+
+                const QVector<TodoListEntry> entries{listB, missingList, listA};
                 QVERIFY(!DatabaseManager::instance().updateListsOrder(entries));
+
+                QSqlQuery orderAfter(dbConn);
+                orderAfter.prepare(QStringLiteral("SELECT id, sort_order FROM lists WHERE id IN (:a, :b)"));
+                orderAfter.bindValue(QStringLiteral(":a"), staleListA);
+                orderAfter.bindValue(QStringLiteral(":b"), staleListB);
+                QVERIFY(orderAfter.exec());
+                int verifiedLists = 0;
+                while (orderAfter.next()) {
+                    const QString id = orderAfter.value(0).toString();
+                    QCOMPARE(orderAfter.value(1).toInt(), originalOrders.value(id));
+                    ++verifiedLists;
+                }
+                QCOMPARE(verifiedLists, 2);
             }
 
             // 9. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
