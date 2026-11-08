@@ -1,0 +1,10 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/translations">
+        <file alias="uk.json">translations/uk.json</file>
+        <file alias="de.json">translations/de.json</file>
+        <file alias="fr.json">translations/fr.json</file>
+        <file alias="es.json">translations/es.json</file>
+        <file alias="it.json">translations/it.json</file>
+    </qresource>
+</RCC>

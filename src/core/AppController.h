@@ -45,6 +45,7 @@ class AppController : public QObject {
     Q_PROPERTY(int activeTodoRow READ activeTodoRow WRITE setActiveTodoRow NOTIFY activeTodoRowChanged)
     Q_PROPERTY(int unviewedTodoCount READ unviewedTodoCount NOTIFY todoCountsChanged)
     Q_PROPERTY(int totalTodoCount READ totalTodoCount NOTIFY totalTodoCountChanged)
+    Q_PROPERTY(QVariantList availableLanguages READ availableLanguages NOTIFY languageChanged)
 
 public:
     explicit AppController(const QString& logFilePath = {},
@@ -113,6 +114,10 @@ public:
     Q_INVOKABLE void openTaskInBrowser(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void openUrlExternally(const QUrl& url);
     Q_INVOKABLE void checkDueReminders();
+    Q_INVOKABLE void reloadTranslations();
+    [[nodiscard]] QVariantList availableLanguages() const;
+    [[nodiscard]] QStringList availableLanguageCodes() const;
+    [[nodiscard]] QString languageDisplayName(const QString& code) const;
 
 signals:
     void showingOverviewChanged();

@@ -311,18 +311,11 @@ Dialog {
                     Label { text: qsTr("Language:"); Layout.fillWidth: true }
                     ComboBox {
                         id: langCombo
-                        model: [
-                            { id: "system", label: qsTr("System (Auto)") },
-                            { id: "uk", label: "Українська (Ukrainian)" },
-                            { id: "de", label: "Deutsch (German)" },
-                            { id: "fr", label: "Français (French)" },
-                            { id: "es", label: "Español (Spanish)" },
-                            { id: "it", label: "Italiano (Italian)" },
-                            { id: "en", label: "English" }
-                        ]
+                        model: app.availableLanguages
                         textRole: "label"
                         valueRole: "id"
-                        Component.onCompleted: {
+                        function updateSelection() {
+                            if (!model || model.length === 0) return
                             const cur = app.settings.language
                             let found = 0
                             for (let i = 0; i < model.length; ++i) {
@@ -333,8 +326,17 @@ Dialog {
                             }
                             currentIndex = found
                         }
+                        Component.onCompleted: updateSelection()
+                        Connections {
+                            target: app
+                            function onLanguageChanged() {
+                                langCombo.updateSelection()
+                            }
+                        }
                         onActivated: function(idx) {
-                            app.settings.language = model[idx].id
+                            if (model && idx >= 0 && idx < model.length) {
+                                app.settings.language = model[idx].id
+                            }
                         }
                     }
                 }

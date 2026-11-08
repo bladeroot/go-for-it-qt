@@ -55,6 +55,7 @@ set(GOFI_CORE_SOURCES
     src/core/SettingsManager.cpp
     src/core/UkTranslator.h
     src/core/UkTranslator.cpp
+    data/translations.qrc
     src/core/ShortcutManager.h
     src/core/ShortcutManager.cpp
     src/core/ActivityLog.h
@@ -179,6 +180,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/sounds/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/go-for-it-qt/sounds
     COMPONENT Runtime
     FILES_MATCHING PATTERN "*.ogg"
+)
+
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/translations/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/go-for-it-qt/translations
+    COMPONENT Runtime
+    FILES_MATCHING PATTERN "*.json"
 )
 
 foreach(ICON_SIZE 16x16 24x24 32x32 48x48 64x64 128x128)

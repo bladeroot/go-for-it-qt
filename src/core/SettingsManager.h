@@ -107,6 +107,8 @@ public:
     void setLanguage(const QString& lang);
     [[nodiscard]] QString effectiveLanguage() const;
     [[nodiscard]] bool isUkrainianActive() const;
+    void setSupportedLanguages(const QStringList& languages);
+    [[nodiscard]] QStringList supportedLanguages() const { return m_supportedLanguages; }
 
     [[nodiscard]] int colorScheme() const;
     void setColorScheme(int scheme);
@@ -237,6 +239,7 @@ private:
 
     mutable QSettings m_settings;
     Schedule m_schedule;
+    QStringList m_supportedLanguages;
 };
 
 } // namespace gofi

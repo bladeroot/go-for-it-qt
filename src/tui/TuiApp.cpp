@@ -963,17 +963,13 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
             m_inputCursor = static_cast<int>(m_inputBuffer.size());
             m_mode = Mode::EditSettingValue;
         } else if (m_settingsRow == 9) {
-            static const QStringList langs = {
-                QStringLiteral("system"),
-                QStringLiteral("uk"),
-                QStringLiteral("de"),
-                QStringLiteral("fr"),
-                QStringLiteral("es"),
-                QStringLiteral("it"),
-                QStringLiteral("en")
-            };
+            const QStringList langs = m_app->availableLanguageCodes();
             const int idx = langs.indexOf(s->language());
-            s->setLanguage(langs.at((idx + 1) % langs.size()));
+            if (idx >= 0 && !langs.isEmpty()) {
+                s->setLanguage(langs.at((idx + 1) % langs.size()));
+            } else {
+                s->setLanguage(langs.isEmpty() ? QStringLiteral("system") : langs.first());
+            }
         } else if (m_settingsRow == 10) {
             m_inputBuffer = QString::number(s->autoSyncIntervalMinutes());
             m_inputCursor = static_cast<int>(m_inputBuffer.size());
@@ -1914,7 +1910,7 @@ void TuiApp::render() {
             tr("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? tr("[ON]") : tr("[OFF]")),
             tr("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
             tr("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
-            tr("Language (Enter to cycle)       : [%1] (system/uk/de/fr/es/it/en)").arg(s->language()),
+            tr("Language (Enter to cycle)       : [%1] (%2)").arg(s->language(), m_app->languageDisplayName(s->language())),
             tr("Auto-Sync Jira/YouTrack (min)   : %1 min").arg(s->autoSyncIntervalMinutes()),
             tr("Sound On New/Changed Tasks      : %1").arg(s->notifyTaskChangesSound() ? tr("[ON]") : tr("[OFF]")),
             tr("Popup On New/Changed Tasks      : %1").arg(s->notifyTaskChangesPopup() ? tr("[ON]") : tr("[OFF]")),

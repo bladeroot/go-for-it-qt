@@ -30,6 +30,8 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_systemHooks(this, &m_settings, &m_timer, this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
+    m_ukTranslator.reloadTranslations();
+    m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
     applyLanguageTranslator();
     connect(&m_settings, &SettingsManager::languageChanged, this, [this]() {
         applyLanguageTranslator();
@@ -688,6 +690,25 @@ void AppController::applyLanguageTranslator() {
         m_ukTranslator.setLanguageCode(eff);
         QCoreApplication::installTranslator(&m_ukTranslator);
     }
+}
+
+void AppController::reloadTranslations() {
+    m_ukTranslator.reloadTranslations();
+    m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
+    applyLanguageTranslator();
+    emit languageChanged();
+}
+
+QVariantList AppController::availableLanguages() const {
+    return m_ukTranslator.availableLanguagesModel();
+}
+
+QStringList AppController::availableLanguageCodes() const {
+    return m_ukTranslator.availableLanguageCodes();
+}
+
+QString AppController::languageDisplayName(const QString& code) const {
+    return m_ukTranslator.languageDisplayName(code);
 }
 
 void AppController::updateAutoSyncTimer() {

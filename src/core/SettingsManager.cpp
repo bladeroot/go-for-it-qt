@@ -138,19 +138,55 @@ void SettingsManager::setLanguage(const QString& lang) {
     emit languageChanged();
 }
 
+void SettingsManager::setSupportedLanguages(const QStringList& languages) {
+    m_supportedLanguages = languages;
+}
+
 QString SettingsManager::effectiveLanguage() const {
     const QString lang = language().trimmed().toLower();
-    for (const QString& code : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
-                                QStringLiteral("es"), QStringLiteral("it"), QStringLiteral("en")}) {
-        if (lang == code || lang.startsWith(code + QLatin1Char('_')) || lang.startsWith(code + QLatin1Char('-'))) {
-            return code;
+    if (lang == QStringLiteral("en")) return QStringLiteral("en");
+
+    if (!lang.isEmpty() && lang != QStringLiteral("system")) {
+        if (m_supportedLanguages.isEmpty()) {
+            return lang;
         }
+        for (const QString& code : m_supportedLanguages) {
+            if (code == QStringLiteral("system") || code == QStringLiteral("en")) continue;
+            if (lang == code || lang.startsWith(code + QLatin1Char('_')) || lang.startsWith(code + QLatin1Char('-'))) {
+                return code;
+            }
+        }
+        return lang;
     }
+
+    const auto checkCode = [this](const QString& target) -> QString {
+        if (target.isEmpty()) return {};
+        const QString tBase = target.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+        for (const QString& code : m_supportedLanguages) {
+            if (code == QStringLiteral("system") || code == QStringLiteral("en")) continue;
+            if (target == code || tBase == code || target.startsWith(code + QLatin1Char('_')) || target.startsWith(code + QLatin1Char('-'))) {
+                return code;
+            }
+        }
+        return {};
+    };
+
     const QString sysName = QLocale::system().name().toLower();
-    for (const QString& code : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
-                                QStringLiteral("es"), QStringLiteral("it")}) {
-        if (sysName == code || sysName.startsWith(code + QLatin1Char('_')) || sysName.startsWith(code + QLatin1Char('-'))) {
-            return code;
+    if (!m_supportedLanguages.isEmpty()) {
+        QString matched = checkCode(sysName);
+        if (!matched.isEmpty()) return matched;
+
+        for (const QString& uiLang : QLocale::system().uiLanguages()) {
+            matched = checkCode(uiLang.toLower());
+            if (!matched.isEmpty()) return matched;
+        }
+    } else {
+        const QString sysBase = sysName.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+        for (const QString& code : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
+                                    QStringLiteral("es"), QStringLiteral("it")}) {
+            if (sysName == code || sysBase == code || sysName.startsWith(code + QLatin1Char('_')) || sysName.startsWith(code + QLatin1Char('-'))) {
+                return code;
+            }
         }
     }
     return QStringLiteral("en");

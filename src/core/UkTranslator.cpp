@@ -1,8 +1,11 @@
 #include "UkTranslator.h"
+
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QStandardPaths>
 
 namespace gofi {
@@ -10,758 +13,38 @@ namespace gofi {
 UkTranslator::UkTranslator(QObject* parent)
     : QTranslator(parent)
 {
-    m_dicts[QStringLiteral("uk")] = {
-        // Common & Navigation
-        {QStringLiteral("Go for It Qt — Lists"), QStringLiteral("Go for It Qt — Списки")},
-        {QStringLiteral("Lists"), QStringLiteral("Списки")},
-        {QStringLiteral("Tasks"), QStringLiteral("Задачі")},
-        {QStringLiteral("Timer"), QStringLiteral("Таймер")},
-        {QStringLiteral("Done"), QStringLiteral("Виконані")},
-        {QStringLiteral("To-Do"), QStringLiteral("До виконання")},
-        {QStringLiteral("In Progress"), QStringLiteral("У роботі")},
-        {QStringLiteral("Paused"), QStringLiteral("На паузі")},
-        {QStringLiteral("Canceled"), QStringLiteral("Скасовані")},
-        {QStringLiteral("Canceled / Rejected"), QStringLiteral("Скасовано / Відхилено")},
-        {QStringLiteral("All"), QStringLiteral("Усі")},
-        {QStringLiteral("Menu"), QStringLiteral("Меню")},
-        {QStringLiteral("Settings"), QStringLiteral("Налаштування")},
-        {QStringLiteral("Clear Done List"), QStringLiteral("Очистити виконані")},
-        {QStringLiteral("Contribute / Donate"), QStringLiteral("Підтримати проєкт")},
-        {QStringLiteral("About"), QStringLiteral("Про програму")},
-        {QStringLiteral("About Go for It Qt"), QStringLiteral("Про Go for It Qt")},
-        {QStringLiteral("Contributions and Support"), QStringLiteral("Внесок та підтримка")},
-        {QStringLiteral("Close"), QStringLiteral("Закрити")},
-        {QStringLiteral("Cancel"), QStringLiteral("Скасувати")},
-        {QStringLiteral("Default"), QStringLiteral("Системна")},
-        {QStringLiteral("Light"), QStringLiteral("Світла")},
-        {QStringLiteral("Dark"), QStringLiteral("Темна")},
-        {QStringLiteral("Language:"), QStringLiteral("Мова інтерфейсу:")},
-        {QStringLiteral("System (Auto)"), QStringLiteral("Системна (Авто)")},
+    reloadTranslations();
+}
 
-        // SelectionPage & Lists
-        {QStringLiteral("Add list"), QStringLiteral("Додати список")},
-        {QStringLiteral("Edit list properties"), QStringLiteral("Редагувати властивості списку")},
-        {QStringLiteral("Delete list"), QStringLiteral("Видалити список")},
-        {QStringLiteral("Currently, no lists are configured.\nAdd one below!"), QStringLiteral("Наразі немає жодного списку.\nДодайте новий нижче!")},
-        {QStringLiteral("New to-do list"), QStringLiteral("Новий список задач")},
-        {QStringLiteral("Edit to-do list properties"), QStringLiteral("Властивості списку задач")},
-        {QStringLiteral("General & Sync"), QStringLiteral("Основне та синхронізація")},
-        {QStringLiteral("Statuses"), QStringLiteral("Статуси")},
-        {QStringLiteral("List type / Provider:"), QStringLiteral("Тип списку / Провайдер:")},
-        {QStringLiteral("Local List (SQLite)"), QStringLiteral("Локальний список (SQLite)")},
-        {QStringLiteral("Jira (Cloud / Data Center)"), QStringLiteral("Jira (Cloud / Data Center)")},
-        {QStringLiteral("JetBrains YouTrack"), QStringLiteral("JetBrains YouTrack")},
-        {QStringLiteral("List name:"), QStringLiteral("Назва списку:")},
-        {QStringLiteral("e.g. Work / Sprint Tasks"), QStringLiteral("напр., Робота / Спринт")},
-        {QStringLiteral("Connection"), QStringLiteral("Підключення")},
-        {QStringLiteral("Server URL:"), QStringLiteral("URL сервера:")},
-        {QStringLiteral("Email / Username (leave empty for Bearer PAT):"), QStringLiteral("Email / Логін (порожньо для Bearer PAT):")},
-        {QStringLiteral("API Token / Personal Access Token:"), QStringLiteral("API-токен / Personal Access Token:")},
-        {QStringLiteral("Permanent Token (perm:...):"), QStringLiteral("Постійний токен (perm:...):")},
-        {QStringLiteral("JQL Filter (optional):"), QStringLiteral("JQL-фільтр (необов'язково):")},
-        {QStringLiteral("YouTrack Search Query (optional):"), QStringLiteral("Пошуковий запит YouTrack (необов'язково):")},
-        {QStringLiteral("Automatically log Pomodoro work time (Worklog)"), QStringLiteral("Автоматично логувати час Pomodoro (Worklog)")},
-        {QStringLiteral("Record creation date of tasks"), QStringLiteral("Записувати дату створення задач")},
-        {QStringLiteral("Also export timer usage to external CSV file"), QStringLiteral("Також експортувати лог таймера у зовнішній CSV-файл")},
-        {QStringLiteral("Load Statuses from "), QStringLiteral("Завантажити статуси з ")},
-        {QStringLiteral("Loading statuses..."), QStringLiteral("Завантаження статусів...")},
-        {QStringLiteral("Loaded %1 statuses."), QStringLiteral("Завантажено статусів: %1.")},
-        {QStringLiteral("Map remote statuses to local views (To-Do, In Progress, Paused, Done, Canceled / Rejected). Synced issues automatically land in the mapped status view."),
-         QStringLiteral("Зіставте статуси трекера з локальними списками (До виконання, У роботі, На паузі, Виконані, Скасовані). Синхронізовані задачі автоматично потраплятимуть у відповідні вкладки.")},
-        {QStringLiteral("Click 'Load Statuses' above to fetch and customize status mappings."),
-         QStringLiteral("Натисніть «Завантажити статуси» вище, щоб отримати та налаштувати відповідність статусів.")},
-        {QStringLiteral("Use global default timer settings"), QStringLiteral("Використовувати глобальні налаштування таймера")},
+void UkTranslator::reloadTranslations() {
+    m_dicts.clear();
+    m_availableLanguages.clear();
 
-        // TaskListPage & TaskListView
-        {QStringLiteral("Go to overview"), QStringLiteral("До списків")},
-        {QStringLiteral("Filter"), QStringLiteral("Фільтр")},
-        {QStringLiteral("Hide Filter"), QStringLiteral("Сховати фільтр")},
-        {QStringLiteral("Sort Tasks"), QStringLiteral("Сортувати задачі")},
-        {QStringLiteral("Sync with "), QStringLiteral("Синхронізувати з ")},
-        {QStringLiteral("Sync issues with "), QStringLiteral("Синхронізувати задачі з ")},
-        {QStringLiteral("↻ Sync"), QStringLiteral("↻ Синхр.")},
-        {QStringLiteral("Syncing with %1..."), QStringLiteral("Синхронізація з %1...")},
-        {QStringLiteral("Filter by word, +project, @context, priority:a-c..."), QStringLiteral("Фільтр за словом, +проєктом, @контекстом, priority:a-c...")},
-        {QStringLiteral("Add new task (e.g. (A) Write code +Project @context duration:25m)..."), QStringLiteral("Нова задача (напр. (A) Написати код +Проєкт @контекст duration:25m)...")},
-        {QStringLiteral("No completed or canceled tasks in this view."), QStringLiteral("У цій вкладці немає виконаних або скасованих задач.")},
-        {QStringLiteral("No tasks in this status view."), QStringLiteral("У цій вкладці немає задач.")},
-        {QStringLiteral("Change task status"), QStringLiteral("Змінити статус задачі")},
-        {QStringLiteral("View description & comments"), QStringLiteral("Опис та коментарі (Markdown)")},
-        {QStringLiteral("Edit task"), QStringLiteral("Редагувати задачу")},
-        {QStringLiteral("Delete task"), QStringLiteral("Видалити задачу")},
+    // 1. Built-in Qt Resources (:/translations)
+    loadTranslationsFromDirectory(QStringLiteral(":/translations"));
 
-        // TaskDetailsDialog (Markdown Viewer & Comments)
-        {QStringLiteral("Task Details & Markdown Viewer"), QStringLiteral("Деталі задачі та переглядач Markdown")},
-        {QStringLiteral("Markdown Description"), QStringLiteral("Опис (Markdown)")},
-        {QStringLiteral("Comments (%1)"), QStringLiteral("Коментарі (%1)")},
-        {QStringLiteral("👁 Preview MD"), QStringLiteral("👁 Перегляд MD")},
-        {QStringLiteral("✎ Edit MD"), QStringLiteral("✎ Редагувати MD")},
-        {QStringLiteral("📂 Open .md..."), QStringLiteral("📂 Відкрити .md...")},
-        {QStringLiteral("Open and view a local Markdown (.md) file"), QStringLiteral("Відкрити та переглянути локальний Markdown (.md) файл")},
-        {QStringLiteral("Open Markdown (.md) File"), QStringLiteral("Відкрити файл Markdown (.md)")},
-        {QStringLiteral("Markdown files (*.md *.markdown *.txt)"), QStringLiteral("Файли Markdown (*.md *.markdown *.txt)")},
-        {QStringLiteral("All files (*)"), QStringLiteral("Усі файли (*)")},
-        {QStringLiteral("Viewing file: %1"), QStringLiteral("Перегляд файлу: %1")},
-        {QStringLiteral("*No description yet — click **✎ Edit MD** or **📂 Open .md...** above.*"),
-         QStringLiteral("*Опис порожній — натисніть **✎ Редагувати MD** або **📂 Відкрити .md...** вище.*")},
-        {QStringLiteral("Write task description or notes in Markdown (# Heading, **bold**, `code`, - list)..."),
-         QStringLiteral("Введіть опис задачі або нотатки у форматі Markdown (# Заголовок, **жирний**, `код`, - список)...")},
-        {QStringLiteral("Author"), QStringLiteral("Автор")},
-        {QStringLiteral("No comments yet — write a comment below."), QStringLiteral("Коментарів ще немає — додайте перший коментар нижче.")},
-        {QStringLiteral("Write a comment in Markdown (syncs to Jira / YouTrack)..."), QStringLiteral("Напишіть коментар у Markdown (синхронізується з Jira / YouTrack)...")},
-        {QStringLiteral("💬 Post Comment"), QStringLiteral("💬 Додати коментар")},
-        {QStringLiteral("You"), QStringLiteral("Ви")},
+    // 2. Application share directory and dev paths
+    if (QCoreApplication::instance()) {
+        const QString appDir = QCoreApplication::applicationDirPath();
+        loadTranslationsFromDirectory(appDir + QStringLiteral("/../share/go-for-it-qt/translations"));
+        loadTranslationsFromDirectory(appDir + QStringLiteral("/data/translations"));
+    }
 
-        // TimerView
-        {QStringLiteral("Take a Break!"), QStringLiteral("Час перерви!")},
-        {QStringLiteral("Active Task:"), QStringLiteral("Активна задача:")},
-        {QStringLiteral("Relax."), QStringLiteral("Відпочиньте.")},
-        {QStringLiteral("You have nothing to do."), QStringLiteral("Немає активних задач.")},
-        {QStringLiteral("Mute"), QStringLiteral("Вимкнути звук")},
-        {QStringLiteral("Unmute"), QStringLiteral("Увімкнути звук")},
-        {QStringLiteral("Skip"), QStringLiteral("Пропустити")},
-        {QStringLiteral("Skip the remainder of the break"), QStringLiteral("Пропустити залишок перерви")},
-        {QStringLiteral("Skip to the break"), QStringLiteral("Перейти до перерви")},
-        {QStringLiteral("Pause"), QStringLiteral("Пауза")},
-        {QStringLiteral("Start"), QStringLiteral("Старт")},
-        {QStringLiteral("Task duration (min)"), QStringLiteral("Тривалість роботи (хв)")},
-        {QStringLiteral("Break duration (min)"), QStringLiteral("Тривалість перерви (хв)")},
-        {QStringLiteral("+ Add Interval"), QStringLiteral("+ Додати інтервал")},
+    // 3. System data locations (/usr/share, /usr/local/share, etc.)
+    const QStringList sysDataDirs = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
+    for (const QString& d : sysDataDirs) {
+        loadTranslationsFromDirectory(d + QStringLiteral("/go-for-it-qt/translations"));
+    }
 
-        // SettingsDialog
-        {QStringLiteral("Notifications"), QStringLiteral("Сповіщення")},
-        {QStringLiteral("Appearance"), QStringLiteral("Вигляд")},
-        {QStringLiteral("Shortcuts"), QStringLiteral("Клавіші")},
-        {QStringLiteral("Plugins"), QStringLiteral("Плагіни")},
-        {QStringLiteral("Storage"), QStringLiteral("Сховище")},
-        {QStringLiteral("Behavior"), QStringLiteral("Поведінка")},
-        {QStringLiteral("Placement of new tasks:"), QStringLiteral("Розміщення нових задач:")},
-        {QStringLiteral("Bottom of the list"), QStringLiteral("У кінці списку")},
-        {QStringLiteral("Top of the list"), QStringLiteral("На початку списку")},
-        {QStringLiteral("Timer mode:"), QStringLiteral("Режим таймера:")},
-        {QStringLiteral("Simple"), QStringLiteral("Простий")},
-        {QStringLiteral("Pomodoro"), QStringLiteral("Помодоро")},
-        {QStringLiteral("Custom"), QStringLiteral("Власний розклад")},
-        {QStringLiteral("Task duration (minutes):"), QStringLiteral("Тривалість задачі (хвилини):")},
-        {QStringLiteral("Break duration (minutes):"), QStringLiteral("Тривалість перерви (хвилини):")},
-        {QStringLiteral("Long break duration (minutes):"), QStringLiteral("Тривалість довгої перерви (хвилини):")},
-        {QStringLiteral("Have a long break after short breaks:"), QStringLiteral("Довга перерва після коротких перерв:")},
-        {QStringLiteral("Resume task after the break"), QStringLiteral("Продовжувати задачу після перерви")},
-        {QStringLiteral("Reset timer after switching tasks"), QStringLiteral("Скидати таймер при перемиканні задачі")},
-        {QStringLiteral("General"), QStringLiteral("Загальні")},
-        {QStringLiteral("Reminder before task ends (seconds):"), QStringLiteral("Нагадування до кінця задачі (секунди):")},
-        {QStringLiteral("Notification Sounds"), QStringLiteral("Звуки сповіщень")},
-        {QStringLiteral("Reminder sound:"), QStringLiteral("Звук нагадування:")},
-        {QStringLiteral("Start of break sound:"), QStringLiteral("Звук початку перерви:")},
-        {QStringLiteral("End of break sound:"), QStringLiteral("Звук закінчення перерви:")},
-        {QStringLiteral("Singing bowl"), QStringLiteral("Тибетська чаша")},
-        {QStringLiteral("Aluminium bowl"), QStringLiteral("Алюмінієва чаша")},
-        {QStringLiteral("Bell"), QStringLiteral("Дзвіночок")},
-        {QStringLiteral("Loud bell"), QStringLiteral("Гучний дзвін")},
-        {QStringLiteral("Silent"), QStringLiteral("Без звуку")},
-        {QStringLiteral("Use small toolbar icons"), QStringLiteral("Маленькі іконки панелі інструментів")},
-        {QStringLiteral("Appearance of the activity switcher:"), QStringLiteral("Вигляд перемикача вкладок:")},
-        {QStringLiteral("Text"), QStringLiteral("Текст")},
-        {QStringLiteral("Icons"), QStringLiteral("Іконки")},
-        {QStringLiteral("Use a header bar"), QStringLiteral("Використовувати компактний заголовок")},
-        {QStringLiteral("Theme"), QStringLiteral("Тема оформлення")},
-        {QStringLiteral("Color scheme:"), QStringLiteral("Кольорова схема:")},
-        {QStringLiteral("Disabled"), QStringLiteral("Вимкнено")},
-        {QStringLiteral("Disable shortcut"), QStringLiteral("Вимкнути комбінацію")},
-        {QStringLiteral("Reset Defaults"), QStringLiteral("Скинути за замовчуванням")},
-        {QStringLiteral("Desktop Integration Plugins"), QStringLiteral("Інтеграція з робочим столом")},
-        {QStringLiteral("System Tray / AppIndicator (panel timer & quick controls)"), QStringLiteral("Системний трей / AppIndicator (таймер і керування в панелі)")},
-        {QStringLiteral("Launcher / Dock Indicator (Unity LauncherEntry badge & progress)"), QStringLiteral("Індикатор на іконці в доці (Unity LauncherEntry)")},
-        {QStringLiteral("SQLite Database Location"), QStringLiteral("Розташування бази даних SQLite")},
-        {QStringLiteral("All lists, tasks, descriptions, comments, Jira/YouTrack settings, and timer logs are stored in this SQLite file:"),
-         QStringLiteral("Усі списки, задачі, описи, коментарі, налаштування Jira/YouTrack та логи таймера зберігаються в цьому файлі SQLite:")},
-        {QStringLiteral("Move / Apply"), QStringLiteral("Перенести / Застосувати")},
-        {QStringLiteral("Database location updated successfully."), QStringLiteral("Розташування бази даних успішно оновлено.")},
-        {QStringLiteral("Failed to update database location."), QStringLiteral("Не вдалося змінити розташування бази даних.")},
-        {QStringLiteral("Backup & Restore Database"), QStringLiteral("Резервне копіювання та відновлення")},
-        {QStringLiteral("Export"), QStringLiteral("Експорт")},
-        {QStringLiteral("Import"), QStringLiteral("Імпорт")},
-        {QStringLiteral("Backup exported to: "), QStringLiteral("Резервну копію збережено у: ")},
-        {QStringLiteral("Failed to export backup."), QStringLiteral("Не вдалося створити резервну копію.")},
-        {QStringLiteral("Backup imported successfully."), QStringLiteral("Резервну копію успішно імпортовано.")},
-        {QStringLiteral("Failed to import backup."), QStringLiteral("Не вдалося імпортувати резервну копію.")},
-        {QStringLiteral("Configuration File (INI)"), QStringLiteral("Файл конфігурації (INI)")},
+    // 4. User data location (~/.local/share/go-for-it-qt/translations)
+    const QString appDataTranslations = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/translations");
+    loadTranslationsFromDirectory(appDataTranslations);
 
-        // About & Contribute
-        {QStringLiteral("A stylish to-do list with built-in productivity timer, SQLite storage, and Jira / YouTrack integration."),
-         QStringLiteral("Стильний список задач із вбудованим Pomodoro-таймером, сховищем SQLite та інтеграцією з Jira / YouTrack.")},
-        {QStringLiteral("Author (Go for It Qt): Yurii Myronchuk (@bladeroot)\nBased on Go-For-It! by Jonathan Moerman & Manuel Kehl\nArtwork: Micah Ilbery\nLicense: GNU GPL v3"),
-         QStringLiteral("Автор (Go for It Qt): Юрій Мирончук (@bladeroot)\nНа основі Go-For-It! від Jonathan Moerman та Manuel Kehl\nДизайн іконок: Micah Ilbery\nЛіцензія: GNU GPL v3")},
-        {QStringLiteral("Thank you for supporting Go for It Qt!"), QStringLiteral("Дякуємо за підтримку Go for It Qt!")},
-        {QStringLiteral("Submitting code, bug reports, translations or documentation is a great way of contributing to the project:"),
-         QStringLiteral("Ви можете підтримати проєкт кодом, повідомленнями про помилки, перекладами або документацією:")},
-
-        // Shortcuts descriptions
-        {QStringLiteral("Move to left screen"), QStringLiteral("Перейти на вкладку ліворуч")},
-        {QStringLiteral("Move to right screen"), QStringLiteral("Перейти на вкладку праворуч")},
-        {QStringLiteral("Go back to the to-do list"), QStringLiteral("Повернутися до списку задач")},
-        {QStringLiteral("Add new task / list"), QStringLiteral("Додати нову задачу / список")},
-        {QStringLiteral("Edit the properties of a list or task"), QStringLiteral("Редагувати властивості списку або задачі")},
-        {QStringLiteral("Filter tasks"), QStringLiteral("Фільтрувати задачі")},
-        {QStringLiteral("Sort tasks"), QStringLiteral("Сортувати задачі")},
-        {QStringLiteral("Start / Stop the timer"), QStringLiteral("Старт / Стоп таймера")},
-        {QStringLiteral("Skip the break or skip to the break"), QStringLiteral("Пропустити перерву або перейти до перерви")},
-        {QStringLiteral("Mark the active task as complete"), QStringLiteral("Позначити активну задачу виконаною")},
-        {QStringLiteral("Move to next task / row"), QStringLiteral("Перейти до наступної задачі / рядка")},
-        {QStringLiteral("Move to previous task / row"), QStringLiteral("Перейти до попередньої задачі / рядка")},
-        {QStringLiteral("Move selected row up"), QStringLiteral("Перемістити вибраний рядок вгору")},
-        {QStringLiteral("Move selected row down"), QStringLiteral("Перемістити вибраний рядок вниз")},
-
-        // Notifications & Tray
-        {QStringLiteral("Take a Break"), QStringLiteral("Час перерви")},
-        {QStringLiteral("Relax and stop thinking about your current task for a while :-)"), QStringLiteral("Відпочиньте і відволічіться від поточної задачі :-)")},
-        {QStringLiteral("The Break is Over"), QStringLiteral("Перерву закінчено")},
-        {QStringLiteral("Your current task is: %1"), QStringLiteral("Ваша поточна задача: %1")},
-        {QStringLiteral("Prepare for your break"), QStringLiteral("Приготуйтеся до перерви")},
-        {QStringLiteral("You have %1 seconds left"), QStringLiteral("Залишилося %1 секунд")},
-        {QStringLiteral("Task duration exceeded"), QStringLiteral("Час на задачу вичерпано")},
-        {QStringLiteral("Consider switching to a different task"), QStringLiteral("Рекомендуємо перейти до іншої задачі")},
-        {QStringLiteral("Open Go for It Qt"), QStringLiteral("Відкрити Go for It Qt")},
-        {QStringLiteral("No task has been selected"), QStringLiteral("Задачу не вибрано")},
-        {QStringLiteral("Mark the task as complete"), QStringLiteral("Позначити задачу виконаною")},
-        {QStringLiteral("Switch to next task"), QStringLiteral("Наступна задача")},
-        {QStringLiteral("Switch to the previous task"), QStringLiteral("Попередня задача")},
-        {QStringLiteral("Start the timer"), QStringLiteral("Запустити таймер")},
-        {QStringLiteral("Stop the timer"), QStringLiteral("Зупинити таймер")},
-
-        // IssueTrackerService & TUI messages
-        {QStringLiteral("Syncing issues from Jira..."), QStringLiteral("Синхронізація задач із Jira...")},
-        {QStringLiteral("Syncing issues from YouTrack..."), QStringLiteral("Синхронізація задач із YouTrack...")},
-        {QStringLiteral("Synced %1 issues from Jira."), QStringLiteral("Синхронізовано задач із Jira: %1.")},
-        {QStringLiteral("Synced %1 issues from YouTrack."), QStringLiteral("Синхронізовано задач із YouTrack: %1.")},
-        {QStringLiteral("Synced %1 issues from %2."), QStringLiteral("Синхронізовано задач із %2: %1.")},
-        {QStringLiteral("Synced %1 issues from %2 (maximum page limit reached; older items omitted)."),
-         QStringLiteral("Синхронізовано задач із %2: %1 (досягнуто ліміту сторінки; старіші елементи пропущено).")},
-        {QStringLiteral("Sync task completion back to tracker"), QStringLiteral("Синхронізувати завершення задач із трекером")},
-        {QStringLiteral("8. Sync Status Back to Tracker  : %1"), QStringLiteral("8. Синхронізувати статус із трекером : %1")},
-        {QStringLiteral("Failed to update status for %1 on %2 (%3): %4"), QStringLiteral("Не вдалося оновити статус для %1 на %2 (%3): %4")},
-        {QStringLiteral("Updated %1 on %2: closed"), QStringLiteral("Оновлено %1 на %2: закрито")},
-        {QStringLiteral("Updated %1 on %2: open"), QStringLiteral("Оновлено %1 на %2: відкрито")},
-        {QStringLiteral(" ⚠️ Insecure HTTP!"), QStringLiteral(" ⚠️ Незахищений HTTP!")},
-        {QStringLiteral("GitHub sync without an API token requires a repository, user, or organization in the query field (e.g. repo:owner/project, user:username, or org:name)."),
-         QStringLiteral("Синхронізація з GitHub без API-токена вимагає репозиторію, користувача або організації в полі запиту (напр. repo:owner/project, user:username або org:name).")},
-        {QStringLiteral("Jira authentication failed: please verify your Jira Email (e.g. corporate email) and API Token."),
-         QStringLiteral("Помилка авторизації Jira: перевірте ваш Jira Email (напр. корпоративний) та API-токен.")},
-        {QStringLiteral("Updated description on Jira issue %1."), QStringLiteral("Оновлено опис задачі Jira %1.")},
-        {QStringLiteral("Updated description on YouTrack issue %1."), QStringLiteral("Оновлено опис задачі YouTrack %1.")},
-        {QStringLiteral("Posted comment to Jira issue %1."), QStringLiteral("Опубліковано коментар до задачі Jira %1.")},
-        {QStringLiteral("Posted comment to YouTrack issue %1."), QStringLiteral("Опубліковано коментар до задачі YouTrack %1.")},
-        {QStringLiteral("Logged %1m to Jira issue %2"), QStringLiteral("Залоговано %1 хв у задачу Jira %2")},
-        {QStringLiteral("Logged %1m to YouTrack issue %2"), QStringLiteral("Залоговано %1 хв у задачу YouTrack %2")},
-        {QStringLiteral("No active task"), QStringLiteral("Немає активної задачі")},
-        {QStringLiteral("Task deleted."), QStringLiteral("Задачу видалено.")},
-        {QStringLiteral("Selected active Pomodoro task."), QStringLiteral("Вибрано активну задачу для Pomodoro.")},
-        {QStringLiteral("Added task: %1"), QStringLiteral("Додано задачу: %1")},
-        {QStringLiteral("Updated task."), QStringLiteral("Задачу оновлено.")},
-        {QStringLiteral("Updated task description."), QStringLiteral("Опис задачі оновлено.")},
-        {QStringLiteral("Status changed to '%1'."), QStringLiteral("Статус змінено на «%1».")},
-        {QStringLiteral("Switched to list '%1' (%2)."), QStringLiteral("Перемкнуто на список «%1» (%2).")},
-        {QStringLiteral("Tasks sorted by priority."), QStringLiteral("Задачі відсортовано за пріоритетом.")},
-        {QStringLiteral("Cleared completed tasks."), QStringLiteral("Виконані задачі очищено.")},
-        {QStringLiteral("Search filter cleared."), QStringLiteral("Пошуковий фільтр очищено.")},
-        {QStringLiteral("Comment added & queued for Jira/YouTrack sync."), QStringLiteral("Коментар додано та відправлено в Jira/YouTrack.")},
-        {QStringLiteral("Markdown description saved (%1 bytes)."), QStringLiteral("Markdown-опис збережено (%1 байт).")},
-        {QStringLiteral("Markdown edit canceled."), QStringLiteral("Редагування Markdown скасовано.")},
-        {QStringLiteral("Vim keys: j/k move, Space toggle done, s status, o add, i edit, t timer, r sync, L lists, / search, : cmd, ? help"),
-         QStringLiteral("Клавіші Vim: j/k рух, Space виконано, s статус, o додати, i ред., E опис, C комент., v MD, t таймер, r синхр., L списки, O налашт., ? довідка")},
-        {QStringLiteral("⟳ Syncing..."), QStringLiteral("⟳ Синхронізація...")},
-        {QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]"), QStringLiteral("[L:Списки] [O:Налашт.] [v:MD] [r:Синхр.] [?:Довідка]")},
-        {QStringLiteral("♦ BREAK RUNNING"), QStringLiteral("♦ ПЕРЕРВА ТРИВАЄ")},
-        {QStringLiteral("▶ WORK RUNNING"), QStringLiteral("▶ РОБОТА ТРИВАЄ")},
-        {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ ПЕРЕРВА НА ПАУЗІ")},
-        {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ ТАЙМЕР ГОТОВИЙ")},
-        {QStringLiteral(" 1:All Open "), QStringLiteral(" 1:Усі відкриті ")},
-        {QStringLiteral(" 2:To-Do "), QStringLiteral(" 2:До виконання ")},
-        {QStringLiteral(" 3:In Progress "), QStringLiteral(" 3:У роботі ")},
-        {QStringLiteral(" 4:Paused "), QStringLiteral(" 4:На паузі ")},
-        {QStringLiteral(" 5:Done "), QStringLiteral(" 5:Виконані ")},
-        {QStringLiteral(" 6:Canceled "), QStringLiteral(" 6:Скасовані ")},
-        {QStringLiteral("  ⚙ SETTINGS (j/k move, Enter/Space/h/l change, q/Esc close):"),
-         QStringLiteral("  ⚙ НАЛАШТУВАННЯ (j/k рух, Enter/Space/h/l змінити, q/Esc закрити):")},
-        {QStringLiteral("Pomodoro Work Duration (min)    : %1 min"), QStringLiteral("Тривалість роботи Pomodoro (хв) : %1 хв")},
-        {QStringLiteral("Pomodoro Break Duration (min)   : %1 min"), QStringLiteral("Тривалість перерви Pomodoro (хв): %1 хв")},
-        {QStringLiteral("Reminder Before End (sec)       : %1 sec"), QStringLiteral("Нагадування до кінця (сек)      : %1 сек")},
-        {QStringLiteral("Mute Sound Notifications        : %1"), QStringLiteral("Вимкнути звукові сповіщення     : %1")},
-        {QStringLiteral("GUI Dark Theme                  : %1"), QStringLiteral("Темна тема інтерфейсу (GUI)     : %1")},
-        {QStringLiteral("Add New Tasks On Top            : %1"), QStringLiteral("Нові задачі на початку списку   : %1")},
-        {QStringLiteral("Reset Timer On Task Switch      : %1"), QStringLiteral("Скидати таймер при зміні задачі : %1")},
-        {QStringLiteral("Move SQLite Database Path       : %1"), QStringLiteral("Шлях до бази даних SQLite       : %1")},
-        {QStringLiteral("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
-         QStringLiteral("Експорт резервної копії SQLite  : [Натисніть Enter для експорту .db]")},
-        {QStringLiteral("Language (Enter to cycle)       : [%1] (system / uk / en)"),
-         QStringLiteral("Мова інтерфейсу (Enter змінити) : [%1] (system / uk / en)")},
-        {QStringLiteral("[ON]"), QStringLiteral("[УВІМК]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[ВИМК]")},
-        {QStringLiteral("(empty)"), QStringLiteral("(порожньо)")},
-        {QStringLiteral("(active)"), QStringLiteral("(активний)")},
-        {QStringLiteral("  ✎ EDIT LIST CONFIGURATION (j/k move, Enter/Space edit, q/Esc cancel):"),
-         QStringLiteral("  ✎ НАЛАШТУВАННЯ СПИСКУ (j/k рух, Enter/Space змінити, q/Esc скасувати):")},
-        {QStringLiteral("1. List Name                    : %1"), QStringLiteral("1. Назва списку                 : %1")},
-        {QStringLiteral("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack)"), QStringLiteral("2. Провайдер (Enter перемкнути) : [%1] (SQLite / Jira / YouTrack)")},
-        {QStringLiteral("3. Server URL                   : %1"), QStringLiteral("3. URL сервера                  : %1")},
-        {QStringLiteral("4. Jira Email / Username        : %1"), QStringLiteral("4. Jira Email / Логін           : %1")},
-        {QStringLiteral("5. API Token / Permanent Token  : %1"), QStringLiteral("5. API-токен / Постійний токен  : %1")},
-        {QStringLiteral("6. JQL / Search Query           : %1"), QStringLiteral("6. JQL / Пошуковий запит        : %1")},
-        {QStringLiteral("7. Auto-log Pomodoro Worklog    : %1"), QStringLiteral("7. Авто-логування часу Pomodoro : %1")},
-        {QStringLiteral("8. Sync Status Back to Tracker  : %1"), QStringLiteral("8. Синхронізувати статус із трекером : %1")},
-        {QStringLiteral("8. >>> [ SAVE & ACTIVATE LIST ] <<<"), QStringLiteral("8. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<")},
-        {QStringLiteral("9. >>> [ SAVE & ACTIVATE LIST ] <<<"), QStringLiteral("9. >>> [ ЗБЕРЕГТИ ТА АКТИВУВАТИ СПИСОК ] <<<")},
-        {QStringLiteral("  📋 LISTS (j/k move, Enter select, a:Add new, e:Edit Jira/YouTrack, d:Delete, Esc close):"),
-         QStringLiteral("  📋 СПИСКИ (j/k рух, Enter вибрати, a:Додати, e:Редагувати Jira/YouTrack, d:Видалити, Esc закрити):")},
-        {QStringLiteral("   (No tasks in this view — press 'o' to add a task or 'r' to sync Jira/YouTrack)"),
-         QStringLiteral("   (У цій вкладці немає задач — натисніть 'o' щоб додати або 'r' для синхронізації Jira/YouTrack)")},
-        {QStringLiteral("── Preview (p: toggle, E: edit description, Ctrl+e/Ctrl+y: scroll) "),
-         QStringLiteral("── Опис задачі (p: сховати, E: ред. опис, C: коментар, Ctrl+e/Ctrl+y: скрол) ")},
-        {QStringLiteral("  (No detailed description — press 'E' to add, 'v' for full MD viewer)"),
-         QStringLiteral("  (Детальний опис відсутній — натисніть 'E' щоб додати, 'v' для повного MD-перегляду)")},
-        {QStringLiteral("  ── Comments (%1) ──"), QStringLiteral("  ── Коментарі (%1) ──")},
-        {QStringLiteral("  (No task selected)"), QStringLiteral("  (Задачу не вибрано)")},
-        {QStringLiteral(" 📖 MARKDOWN VIEWER: %1  (j/k/d/u/g/G scroll, E edit desc, C add comment, q/Esc close)"),
-         QStringLiteral(" 📖 ПЕРЕГЛЯДАЧ MARKDOWN: %1  (j/k/d/u/g/G скрол, E ред. опис, C додати коментар, q/Esc закрити)")},
-        {QStringLiteral("*No description provided (press `E` to edit description).*"),
-         QStringLiteral("*Опис відсутній (натисніть `E`, щоб редагувати опис).*")},
-        {QStringLiteral("New task: "), QStringLiteral("Нова задача: ")},
-        {QStringLiteral("Edit task: "), QStringLiteral("Редагувати задачу: ")},
-        {QStringLiteral("Edit description: "), QStringLiteral("Редагувати опис: ")},
-        {QStringLiteral("Enter value: "), QStringLiteral("Введіть значення: ")},
-        {QStringLiteral("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel"),
-         QStringLiteral("Змінити статус: [1/t] До виконання  [2/i] У роботі  [3/p] На паузі  [4/d] Виконано  [5/c] Скасовано  [Esc] Відміна")},
-        {QStringLiteral("  VIM NAVIGATION & ACTIONS"), QStringLiteral("  НАВІГАЦІЯ ТА ДІЇ VIM")},
-        {QStringLiteral("  j / k / gg / G / Ctrl+d / Ctrl+u  Move cursor down / up / top / bottom / half-page"),
-         QStringLiteral("  j / k / gg / G / Ctrl+d / Ctrl+u  Рух курсора вниз / вгору / на початок / в кінець / півсторінки")},
-        {QStringLiteral("  J / K (Shift+j / Shift+k)         Move selected task down / up in order"),
-         QStringLiteral("  J / K (Shift+j / Shift+k)         Перемістити вибрану задачу вниз / вгору у списку")},
-        {QStringLiteral("  h / l or 1..6 or gt / gT          Switch status tab (All Open, To-Do, In Progress, Paused, Done, Canceled)"),
-         QStringLiteral("  h / l або 1..6 або gt / gT        Перемкнути вкладку статусу (Усі, До виконання, У роботі, На паузі, Виконані, Скасовані)")},
-        {QStringLiteral("  Space or x                        Toggle task Done / To-Do"),
-         QStringLiteral("  Space або x                       Позначити задачу виконаною / невиконаною")},
-        {QStringLiteral("  s                                 Open Status Picker (1:To-Do, 2:In Progress, 3:Paused, 4:Done, 5:Canceled)"),
-         QStringLiteral("  s                                 Вибір статусу (1:До виконання, 2:У роботі, 3:На паузі, 4:Виконано, 5:Скасовано)")},
-        {QStringLiteral("  o / a                             Add new task (INSERT mode)"),
-         QStringLiteral("  o / a                             Додати нову задачу (режим INSERT)")},
-        {QStringLiteral("  i / e / cw                        Edit selected task title inline"),
-         QStringLiteral("  i / e / cw                        Редагувати заголовок вибраної задачі")},
-        {QStringLiteral("  E (Shift+e) / C (Shift+c)         Edit task description (E) or Add comment (C) in Vim & sync to Jira/YouTrack"),
-         QStringLiteral("  E (Shift+e) / C (Shift+c)         Редагувати опис (E) або Додати коментар (C) у Vim із синхр. в Jira/YouTrack")},
-        {QStringLiteral("  dd                                Delete selected task"),
-         QStringLiteral("  dd                                Видалити вибрану задачу")},
-        {QStringLiteral("  Enter                             Set selected task as active Pomodoro task"),
-         QStringLiteral("  Enter                             Зробити вибрану задачу активною для Pomodoro")},
-        {QStringLiteral("  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)"),
-         QStringLiteral("  t / S / B / R                     Старт/Пауза таймера (t), Пропустити фазу (B), Скинути таймер (R)")},
-        {QStringLiteral("  r / Ctrl+r                        Sync current list with Jira / YouTrack"),
-         QStringLiteral("  r / Ctrl+r                        Синхронізувати поточний список із Jira / YouTrack")},
-        {QStringLiteral("  L (a:Add, e:Edit, d:Delete)       Open List Manager (create/edit SQLite, Jira, YouTrack lists)"),
-         QStringLiteral("  L (a:Додати, e:Ред., d:Видалити)  Менеджер списків (створення/редагування SQLite, Jira, YouTrack)")},
-        {QStringLiteral("  O or :set / :settings             Open Global Settings (Timer, Notifications, Storage/DB Backup)"),
-         QStringLiteral("  O або :set / :settings            Глобальні налаштування (Таймер, Сповіщення, Мова, Сховище SQLite)")},
-        {QStringLiteral("  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file"),
-         QStringLiteral("  v / M або :md <file.md>           Повноекранний переглядач Markdown для задачі або .md файлу")},
-        {QStringLiteral("  p / Ctrl+e / Ctrl+y               Toggle preview pane (p), scroll description/comments (Ctrl+e/y)"),
-         QStringLiteral("  p / Ctrl+e / Ctrl+y               Показати/сховати панель опису (p), скрол опису/коментарів (Ctrl+e/y)")},
-        {QStringLiteral("  / and :                           Search tasks (/) or Ex commands (:sync, :sort, :clear, :list, :noh, :q)"),
-         QStringLiteral("  / та :                            Пошук задач (/) або Ex-команди (:sync, :sort, :clear, :list, :noh, :q)")},
-        {QStringLiteral("Syncing list '%1'..."), QStringLiteral("Синхронізація списку «%1»...")},
-        {QStringLiteral("Syncing '%1'..."), QStringLiteral("Синхронізація «%1»...")},
-        {QStringLiteral("Removed list '%1'."), QStringLiteral("Список «%1» видалено.")},
-        {QStringLiteral("Saved and activated list '%1'."), QStringLiteral("Збережено та активовано список «%1».")},
-        {QStringLiteral("Database moved to: %1"), QStringLiteral("Базу даних перенесено у: %1")},
-        {QStringLiteral("Failed to move database to: %1"), QStringLiteral("Не вдалося перенести базу даних у: %1")},
-        {QStringLiteral("Backup exported to: %1"), QStringLiteral("Резервну копію збережено у: %1")},
-        {QStringLiteral("Failed to export backup to: %1"), QStringLiteral("Не вдалося зберегти резервну копію у: %1")},
-        {QStringLiteral("Empty comment ignored."), QStringLiteral("Порожній коментар проігноровано.")},
-        {QStringLiteral("Auto-sync Jira / YouTrack (minutes, 0 = off):"), QStringLiteral("Автооновлення Jira / YouTrack (хв, 0 = вимк):")},
-        {QStringLiteral("Start minimized"), QStringLiteral("Відкривати згорнутим")},
-        {QStringLiteral("Start minimized to system tray"), QStringLiteral("Відкривати у системний трей")},
-        {QStringLiteral("Notify with sound on new tasks or status changes"), QStringLiteral("Повідомляти про нові задачі чи зміну статусу звуком")},
-        {QStringLiteral("Notify with system popup on new tasks or status changes"), QStringLiteral("Повідомляти про нові задачі чи зміну статусу у спливаючих сповіщеннях")},
-        {QStringLiteral("New tasks (%1):"), QStringLiteral("Нові задачі (%1):")},
-        {QStringLiteral("Status changed (%1):"), QStringLiteral("Змінено статус (%1):")},
-        {QStringLiteral("Updates in '%1'"), QStringLiteral("Оновлення у списку «%1»")},
-        {QStringLiteral("New task added"), QStringLiteral("Додано нову задачу")},
-        {QStringLiteral("Task status changed"), QStringLiteral("Статус задачі змінено")},
-        {QStringLiteral("Language (Enter to cycle)       : [%1] (system/uk/de/fr/es/it/en)"),
-         QStringLiteral("Мова інтерфейсу (Enter змінити) : [%1] (system/uk/de/fr/es/it/en)")},
-        {QStringLiteral("Auto-Sync Jira/YouTrack (min)   : %1 min"), QStringLiteral("Автооновлення Jira/YouTrack     : %1 хв")},
-        {QStringLiteral("Sound On New/Changed Tasks      : %1"), QStringLiteral("Звук при нових/зміні статусу    : %1")},
-        {QStringLiteral("Popup On New/Changed Tasks      : %1"), QStringLiteral("Спливаючі сповіщення про зміни  : %1")},
-        {QStringLiteral("GUI Start Minimized             : %1"), QStringLiteral("Відкривати GUI згорнутим        : %1")},
-        {QStringLiteral("GUI Start In System Tray        : %1"), QStringLiteral("Відкривати GUI у системний трей : %1")},
-        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("До виконання: %1 не переглянуто / %2 всього")},
-        {QStringLiteral("Unviewed task"), QStringLiteral("Непереглянута задача")},
-        {QStringLiteral("unread"), QStringLiteral("не переглянуто")},
-        {QStringLiteral("total"), QStringLiteral("всього")},
-        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:До виконання (%1/%2) ")},
-        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:До виконання (%1) ")}
-    };
-
-    // German (de)
-    m_dicts[QStringLiteral("de")] = {
-        {QStringLiteral("Go for It Qt — Lists"), QStringLiteral("Go for It Qt — Listen")},
-        {QStringLiteral("Lists"), QStringLiteral("Listen")},
-        {QStringLiteral("Tasks"), QStringLiteral("Aufgaben")},
-        {QStringLiteral("Timer"), QStringLiteral("Timer")},
-        {QStringLiteral("Done"), QStringLiteral("Erledigt")},
-        {QStringLiteral("To-Do"), QStringLiteral("Offen")},
-        {QStringLiteral("In Progress"), QStringLiteral("In Arbeit")},
-        {QStringLiteral("Paused"), QStringLiteral("Pausiert")},
-        {QStringLiteral("Canceled"), QStringLiteral("Abgebrochen")},
-        {QStringLiteral("Canceled / Rejected"), QStringLiteral("Abgebrochen / Abgelehnt")},
-        {QStringLiteral("All"), QStringLiteral("Alle")},
-        {QStringLiteral("Menu"), QStringLiteral("Menü")},
-        {QStringLiteral("Settings"), QStringLiteral("Einstellungen")},
-        {QStringLiteral("Clear Done List"), QStringLiteral("Erledigte löschen")},
-        {QStringLiteral("Contribute / Donate"), QStringLiteral("Unterstützen / Spenden")},
-        {QStringLiteral("About"), QStringLiteral("Über")},
-        {QStringLiteral("Close"), QStringLiteral("Schließen")},
-        {QStringLiteral("Cancel"), QStringLiteral("Abbrechen")},
-        {QStringLiteral("Default"), QStringLiteral("Standard")},
-        {QStringLiteral("Light"), QStringLiteral("Hell")},
-        {QStringLiteral("Dark"), QStringLiteral("Dunkel")},
-        {QStringLiteral("Language:"), QStringLiteral("Sprache:")},
-        {QStringLiteral("System (Auto)"), QStringLiteral("System (Automatisch)")},
-        {QStringLiteral("Add list"), QStringLiteral("Liste hinzufügen")},
-        {QStringLiteral("Edit list properties"), QStringLiteral("Listeneigenschaften bearbeiten")},
-        {QStringLiteral("Delete list"), QStringLiteral("Liste löschen")},
-        {QStringLiteral("Go to overview"), QStringLiteral("Zur Übersicht")},
-        {QStringLiteral("Filter"), QStringLiteral("Filter")},
-        {QStringLiteral("Hide Filter"), QStringLiteral("Filter ausblenden")},
-        {QStringLiteral("Sort Tasks"), QStringLiteral("Aufgaben sortieren")},
-        {QStringLiteral("↻ Sync"), QStringLiteral("↻ Synchr.")},
-        {QStringLiteral("Syncing with %1..."), QStringLiteral("Synchronisiere mit %1...")},
-        {QStringLiteral("Behavior"), QStringLiteral("Verhalten")},
-        {QStringLiteral("Notifications"), QStringLiteral("Benachrichtigungen")},
-        {QStringLiteral("Appearance"), QStringLiteral("Erscheinungsbild")},
-        {QStringLiteral("Shortcuts"), QStringLiteral("Tastenkürzel")},
-        {QStringLiteral("Plugins"), QStringLiteral("Plugins")},
-        {QStringLiteral("Storage"), QStringLiteral("Speicher")},
-        {QStringLiteral("Placement of new tasks:"), QStringLiteral("Platzierung neuer Aufgaben:")},
-        {QStringLiteral("Bottom of the list"), QStringLiteral("Am Ende der Liste")},
-        {QStringLiteral("Top of the list"), QStringLiteral("Am Anfang der Liste")},
-        {QStringLiteral("Auto-sync Jira / YouTrack (minutes, 0 = off):"), QStringLiteral("Auto-Sync Jira / YouTrack (Minuten, 0 = aus):")},
-        {QStringLiteral("Start minimized"), QStringLiteral("Minimiert starten")},
-        {QStringLiteral("Start minimized to system tray"), QStringLiteral("Im System-Tray starten")},
-        {QStringLiteral("Notify with sound on new tasks or status changes"), QStringLiteral("Ton bei neuen Aufgaben oder Statusänderungen")},
-        {QStringLiteral("Notify with system popup on new tasks or status changes"), QStringLiteral("System-Popup bei neuen Aufgaben oder Statusänderungen")},
-        {QStringLiteral("Timer mode:"), QStringLiteral("Timer-Modus:")},
-        {QStringLiteral("Simple"), QStringLiteral("Einfach")},
-        {QStringLiteral("Pomodoro"), QStringLiteral("Pomodoro")},
-        {QStringLiteral("Custom"), QStringLiteral("Benutzerdefiniert")},
-        {QStringLiteral("Task duration (minutes):"), QStringLiteral("Aufgabendauer (Minuten):")},
-        {QStringLiteral("Break duration (minutes):"), QStringLiteral("Pausendauer (Minuten):")},
-        {QStringLiteral("Long break duration (minutes):"), QStringLiteral("Lange Pause (Minuten):")},
-        {QStringLiteral("Resume task after the break"), QStringLiteral("Aufgabe nach der Pause fortsetzen")},
-        {QStringLiteral("Reset timer after switching tasks"), QStringLiteral("Timer beim Aufgabenwechsel zurücksetzen")},
-        {QStringLiteral("Take a Break!"), QStringLiteral("Zeit für eine Pause!")},
-        {QStringLiteral("Active Task:"), QStringLiteral("Aktive Aufgabe:")},
-        {QStringLiteral("Pause"), QStringLiteral("Pause")},
-        {QStringLiteral("Start"), QStringLiteral("Start")},
-        {QStringLiteral("Skip"), QStringLiteral("Überspringen")},
-        {QStringLiteral("No active task"), QStringLiteral("Keine aktive Aufgabe")},
-        {QStringLiteral("New tasks (%1):"), QStringLiteral("Neue Aufgaben (%1):")},
-        {QStringLiteral("Status changed (%1):"), QStringLiteral("Status geändert (%1):")},
-        {QStringLiteral("Updates in '%1'"), QStringLiteral("Aktualisierungen in '%1'")},
-        {QStringLiteral("New task added"), QStringLiteral("Neue Aufgabe hinzugefügt")},
-        {QStringLiteral("Task status changed"), QStringLiteral("Aufgabenstatus geändert")},
-        {QStringLiteral(" 1:All Open "), QStringLiteral(" 1:Alle Offenen ")},
-        {QStringLiteral(" 2:To-Do "), QStringLiteral(" 2:Offen ")},
-        {QStringLiteral(" 3:In Progress "), QStringLiteral(" 3:In Arbeit ")},
-        {QStringLiteral(" 4:Paused "), QStringLiteral(" 4:Pausiert ")},
-        {QStringLiteral(" 5:Done "), QStringLiteral(" 5:Erledigt ")},
-        {QStringLiteral(" 6:Canceled "), QStringLiteral(" 6:Abgebrochen ")},
-        {QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]"), QStringLiteral("[L:Listen] [O:Einst.] [v:MD] [r:Sync] [?:Hilfe]")},
-        {QStringLiteral("♦ BREAK RUNNING"), QStringLiteral("♦ PAUSE LÄUFT")},
-        {QStringLiteral("▶ WORK RUNNING"), QStringLiteral("▶ ARBEIT LÄUFT")},
-        {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ PAUSE ANGEHALTEN")},
-        {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ TIMER BEREIT")},
-        {QStringLiteral("[ON]"), QStringLiteral("[EIN]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[AUS]")},
-        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("Zu erledigen: %1 ungelesen / %2 gesamt")},
-        {QStringLiteral("Unviewed task"), QStringLiteral("Ungelesene Aufgabe")},
-        {QStringLiteral("unread"), QStringLiteral("ungelesen")},
-        {QStringLiteral("total"), QStringLiteral("gesamt")},
-        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Offen (%1/%2) ")},
-        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Offen (%1) ")}
-    };
-
-    // French (fr)
-    m_dicts[QStringLiteral("fr")] = {
-        {QStringLiteral("Go for It Qt — Lists"), QStringLiteral("Go for It Qt — Listes")},
-        {QStringLiteral("Lists"), QStringLiteral("Listes")},
-        {QStringLiteral("Tasks"), QStringLiteral("Tâches")},
-        {QStringLiteral("Timer"), QStringLiteral("Minuteur")},
-        {QStringLiteral("Done"), QStringLiteral("Terminé")},
-        {QStringLiteral("To-Do"), QStringLiteral("À faire")},
-        {QStringLiteral("In Progress"), QStringLiteral("En cours")},
-        {QStringLiteral("Paused"), QStringLiteral("En pause")},
-        {QStringLiteral("Canceled"), QStringLiteral("Annulé")},
-        {QStringLiteral("Canceled / Rejected"), QStringLiteral("Annulé / Rejeté")},
-        {QStringLiteral("All"), QStringLiteral("Toutes")},
-        {QStringLiteral("Menu"), QStringLiteral("Menu")},
-        {QStringLiteral("Settings"), QStringLiteral("Paramètres")},
-        {QStringLiteral("Clear Done List"), QStringLiteral("Effacer les tâches terminées")},
-        {QStringLiteral("Contribute / Donate"), QStringLiteral("Contribuer / Faire un don")},
-        {QStringLiteral("About"), QStringLiteral("À propos")},
-        {QStringLiteral("Close"), QStringLiteral("Fermer")},
-        {QStringLiteral("Cancel"), QStringLiteral("Annuler")},
-        {QStringLiteral("Default"), QStringLiteral("Par défaut")},
-        {QStringLiteral("Light"), QStringLiteral("Clair")},
-        {QStringLiteral("Dark"), QStringLiteral("Sombre")},
-        {QStringLiteral("Language:"), QStringLiteral("Langue :")},
-        {QStringLiteral("System (Auto)"), QStringLiteral("Système (Auto)")},
-        {QStringLiteral("Add list"), QStringLiteral("Ajouter une liste")},
-        {QStringLiteral("Edit list properties"), QStringLiteral("Modifier la liste")},
-        {QStringLiteral("Delete list"), QStringLiteral("Supprimer la liste")},
-        {QStringLiteral("Go to overview"), QStringLiteral("Voir les listes")},
-        {QStringLiteral("Filter"), QStringLiteral("Filtrer")},
-        {QStringLiteral("Hide Filter"), QStringLiteral("Masquer le filtre")},
-        {QStringLiteral("Sort Tasks"), QStringLiteral("Trier les tâches")},
-        {QStringLiteral("↻ Sync"), QStringLiteral("↻ Sync")},
-        {QStringLiteral("Syncing with %1..."), QStringLiteral("Synchronisation avec %1...")},
-        {QStringLiteral("Behavior"), QStringLiteral("Comportement")},
-        {QStringLiteral("Notifications"), QStringLiteral("Notifications")},
-        {QStringLiteral("Appearance"), QStringLiteral("Apparence")},
-        {QStringLiteral("Shortcuts"), QStringLiteral("Raccourcis")},
-        {QStringLiteral("Plugins"), QStringLiteral("Extensions")},
-        {QStringLiteral("Storage"), QStringLiteral("Stockage")},
-        {QStringLiteral("Placement of new tasks:"), QStringLiteral("Position des nouvelles tâches :")},
-        {QStringLiteral("Bottom of the list"), QStringLiteral("En bas de la liste")},
-        {QStringLiteral("Top of the list"), QStringLiteral("En haut de la liste")},
-        {QStringLiteral("Auto-sync Jira / YouTrack (minutes, 0 = off):"), QStringLiteral("Auto-sync Jira / YouTrack (minutes, 0 = désactivé) :")},
-        {QStringLiteral("Start minimized"), QStringLiteral("Démarrer réduit")},
-        {QStringLiteral("Start minimized to system tray"), QStringLiteral("Démarrer dans la barre système (tray)")},
-        {QStringLiteral("Notify with sound on new tasks or status changes"), QStringLiteral("Son pour les nouvelles tâches ou changements de statut")},
-        {QStringLiteral("Notify with system popup on new tasks or status changes"), QStringLiteral("Notification système pour les nouvelles tâches ou changements de statut")},
-        {QStringLiteral("Timer mode:"), QStringLiteral("Mode du minuteur :")},
-        {QStringLiteral("Simple"), QStringLiteral("Simple")},
-        {QStringLiteral("Pomodoro"), QStringLiteral("Pomodoro")},
-        {QStringLiteral("Custom"), QStringLiteral("Personnalisé")},
-        {QStringLiteral("Task duration (minutes):"), QStringLiteral("Durée du travail (minutes) :")},
-        {QStringLiteral("Break duration (minutes):"), QStringLiteral("Durée de la pause (minutes) :")},
-        {QStringLiteral("Long break duration (minutes):"), QStringLiteral("Durée de la pause longue (minutes) :")},
-        {QStringLiteral("Resume task after the break"), QStringLiteral("Reprendre la tâche après la pause")},
-        {QStringLiteral("Reset timer after switching tasks"), QStringLiteral("Réinitialiser le minuteur au changement de tâche")},
-        {QStringLiteral("Take a Break!"), QStringLiteral("Faites une pause !")},
-        {QStringLiteral("Active Task:"), QStringLiteral("Tâche active :")},
-        {QStringLiteral("Pause"), QStringLiteral("Pause")},
-        {QStringLiteral("Start"), QStringLiteral("Démarrer")},
-        {QStringLiteral("Skip"), QStringLiteral("Passer")},
-        {QStringLiteral("No active task"), QStringLiteral("Aucune tâche active")},
-        {QStringLiteral("New tasks (%1):"), QStringLiteral("Nouvelles tâches (%1) :")},
-        {QStringLiteral("Status changed (%1):"), QStringLiteral("Statut modifié (%1) :")},
-        {QStringLiteral("Updates in '%1'"), QStringLiteral("Mises à jour dans '%1'")},
-        {QStringLiteral("New task added"), QStringLiteral("Nouvelle tâche ajoutée")},
-        {QStringLiteral("Task status changed"), QStringLiteral("Statut de la tâche modifié")},
-        {QStringLiteral(" 1:All Open "), QStringLiteral(" 1:Toutes ouvertes ")},
-        {QStringLiteral(" 2:To-Do "), QStringLiteral(" 2:À faire ")},
-        {QStringLiteral(" 3:In Progress "), QStringLiteral(" 3:En cours ")},
-        {QStringLiteral(" 4:Paused "), QStringLiteral(" 4:En pause ")},
-        {QStringLiteral(" 5:Done "), QStringLiteral(" 5:Terminé ")},
-        {QStringLiteral(" 6:Canceled "), QStringLiteral(" 6:Annulé ")},
-        {QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]"), QStringLiteral("[L:Listes] [O:Param.] [v:MD] [r:Sync] [?:Aide]")},
-        {QStringLiteral("♦ BREAK RUNNING"), QStringLiteral("♦ PAUSE EN COURS")},
-        {QStringLiteral("▶ WORK RUNNING"), QStringLiteral("▶ TRAVAIL EN COURS")},
-        {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ PAUSE SUSPENDUE")},
-        {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ MINUTEUR PRÊT")},
-        {QStringLiteral("[ON]"), QStringLiteral("[OUI]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[NON]")},
-        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("À faire : %1 non lu / %2 au total")},
-        {QStringLiteral("Unviewed task"), QStringLiteral("Tâche non lue")},
-        {QStringLiteral("unread"), QStringLiteral("non lu")},
-        {QStringLiteral("total"), QStringLiteral("au total")},
-        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:À faire (%1/%2) ")},
-        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:À faire (%1) ")}
-    };
-
-    // Spanish (es)
-    m_dicts[QStringLiteral("es")] = {
-        {QStringLiteral("Go for It Qt — Lists"), QStringLiteral("Go for It Qt — Listas")},
-        {QStringLiteral("Lists"), QStringLiteral("Listas")},
-        {QStringLiteral("Tasks"), QStringLiteral("Tareas")},
-        {QStringLiteral("Timer"), QStringLiteral("Temporizador")},
-        {QStringLiteral("Done"), QStringLiteral("Hecho")},
-        {QStringLiteral("To-Do"), QStringLiteral("Por hacer")},
-        {QStringLiteral("In Progress"), QStringLiteral("En curso")},
-        {QStringLiteral("Paused"), QStringLiteral("En pausa")},
-        {QStringLiteral("Canceled"), QStringLiteral("Cancelado")},
-        {QStringLiteral("Canceled / Rejected"), QStringLiteral("Cancelado / Rechazado")},
-        {QStringLiteral("All"), QStringLiteral("Todas")},
-        {QStringLiteral("Menu"), QStringLiteral("Menú")},
-        {QStringLiteral("Settings"), QStringLiteral("Ajustes")},
-        {QStringLiteral("Clear Done List"), QStringLiteral("Limpiar completadas")},
-        {QStringLiteral("Contribute / Donate"), QStringLiteral("Contribuir / Donar")},
-        {QStringLiteral("About"), QStringLiteral("Acerca de")},
-        {QStringLiteral("Close"), QStringLiteral("Cerrar")},
-        {QStringLiteral("Cancel"), QStringLiteral("Cancelar")},
-        {QStringLiteral("Default"), QStringLiteral("Predeterminado")},
-        {QStringLiteral("Light"), QStringLiteral("Claro")},
-        {QStringLiteral("Dark"), QStringLiteral("Oscuro")},
-        {QStringLiteral("Language:"), QStringLiteral("Idioma:")},
-        {QStringLiteral("System (Auto)"), QStringLiteral("Sistema (Auto)")},
-        {QStringLiteral("Add list"), QStringLiteral("Añadir lista")},
-        {QStringLiteral("Edit list properties"), QStringLiteral("Editar lista")},
-        {QStringLiteral("Delete list"), QStringLiteral("Eliminar lista")},
-        {QStringLiteral("Go to overview"), QStringLiteral("Ir a listas")},
-        {QStringLiteral("Filter"), QStringLiteral("Filtrar")},
-        {QStringLiteral("Hide Filter"), QStringLiteral("Ocultar filtro")},
-        {QStringLiteral("Sort Tasks"), QStringLiteral("Ordenar tareas")},
-        {QStringLiteral("↻ Sync"), QStringLiteral("↻ Sincr.")},
-        {QStringLiteral("Syncing with %1..."), QStringLiteral("Sincronizando con %1...")},
-        {QStringLiteral("Behavior"), QStringLiteral("Comportamiento")},
-        {QStringLiteral("Notifications"), QStringLiteral("Notificaciones")},
-        {QStringLiteral("Appearance"), QStringLiteral("Apariencia")},
-        {QStringLiteral("Shortcuts"), QStringLiteral("Atajos")},
-        {QStringLiteral("Plugins"), QStringLiteral("Complementos")},
-        {QStringLiteral("Storage"), QStringLiteral("Almacenamiento")},
-        {QStringLiteral("Placement of new tasks:"), QStringLiteral("Ubicación de nuevas tareas:")},
-        {QStringLiteral("Bottom of the list"), QStringLiteral("Al final de la lista")},
-        {QStringLiteral("Top of the list"), QStringLiteral("Al principio de la lista")},
-        {QStringLiteral("Auto-sync Jira / YouTrack (minutes, 0 = off):"), QStringLiteral("Auto-sincronizar Jira / YouTrack (min, 0 = apagado):")},
-        {QStringLiteral("Start minimized"), QStringLiteral("Iniciar minimizado")},
-        {QStringLiteral("Start minimized to system tray"), QStringLiteral("Iniciar en la bandeja del sistema")},
-        {QStringLiteral("Notify with sound on new tasks or status changes"), QStringLiteral("Notificar con sonido nuevas tareas o cambios de estado")},
-        {QStringLiteral("Notify with system popup on new tasks or status changes"), QStringLiteral("Notificar con aviso del sistema nuevas tareas o cambios de estado")},
-        {QStringLiteral("Timer mode:"), QStringLiteral("Modo de temporizador:")},
-        {QStringLiteral("Simple"), QStringLiteral("Simple")},
-        {QStringLiteral("Pomodoro"), QStringLiteral("Pomodoro")},
-        {QStringLiteral("Custom"), QStringLiteral("Personalizado")},
-        {QStringLiteral("Task duration (minutes):"), QStringLiteral("Duración de tarea (minutos):")},
-        {QStringLiteral("Break duration (minutes):"), QStringLiteral("Duración de descanso (minutos):")},
-        {QStringLiteral("Long break duration (minutes):"), QStringLiteral("Descanso largo (minutos):")},
-        {QStringLiteral("Resume task after the break"), QStringLiteral("Reanudar tarea tras el descanso")},
-        {QStringLiteral("Reset timer after switching tasks"), QStringLiteral("Reiniciar temporizador al cambiar de tarea")},
-        {QStringLiteral("Take a Break!"), QStringLiteral("¡Toma un descanso!")},
-        {QStringLiteral("Active Task:"), QStringLiteral("Tarea activa:")},
-        {QStringLiteral("Pause"), QStringLiteral("Pausa")},
-        {QStringLiteral("Start"), QStringLiteral("Iniciar")},
-        {QStringLiteral("Skip"), QStringLiteral("Saltar")},
-        {QStringLiteral("No active task"), QStringLiteral("Sin tarea activa")},
-        {QStringLiteral("New tasks (%1):"), QStringLiteral("Nuevas tareas (%1):")},
-        {QStringLiteral("Status changed (%1):"), QStringLiteral("Estado cambiado (%1):")},
-        {QStringLiteral("Updates in '%1'"), QStringLiteral("Actualizaciones en '%1'")},
-        {QStringLiteral("New task added"), QStringLiteral("Nueva tarea añadida")},
-        {QStringLiteral("Task status changed"), QStringLiteral("Estado de tarea cambiado")},
-        {QStringLiteral(" 1:All Open "), QStringLiteral(" 1:Abiertas ")},
-        {QStringLiteral(" 2:To-Do "), QStringLiteral(" 2:Por hacer ")},
-        {QStringLiteral(" 3:In Progress "), QStringLiteral(" 3:En curso ")},
-        {QStringLiteral(" 4:Paused "), QStringLiteral(" 4:En pausa ")},
-        {QStringLiteral(" 5:Done "), QStringLiteral(" 5:Hecho ")},
-        {QStringLiteral(" 6:Canceled "), QStringLiteral(" 6:Cancelado ")},
-        {QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]"), QStringLiteral("[L:Listas] [O:Ajustes] [v:MD] [r:Sinc] [?:Ayuda]")},
-        {QStringLiteral("♦ BREAK RUNNING"), QStringLiteral("♦ DESCANSO ACTIVO")},
-        {QStringLiteral("▶ WORK RUNNING"), QStringLiteral("▶ TRABAJO ACTIVO")},
-        {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ DESCANSO EN PAUSA")},
-        {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ TEMPORIZADOR LISTO")},
-        {QStringLiteral("[ON]"), QStringLiteral("[SÍ]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[NO]")},
-        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("Por hacer: %1 no leída(s) / %2 en total")},
-        {QStringLiteral("Unviewed task"), QStringLiteral("Tarea no leída")},
-        {QStringLiteral("unread"), QStringLiteral("no leída(s)")},
-        {QStringLiteral("total"), QStringLiteral("en total")},
-        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Por hacer (%1/%2) ")},
-        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Por hacer (%1) ")}
-    };
-
-    // Italian (it)
-    m_dicts[QStringLiteral("it")] = {
-        {QStringLiteral("Go for It Qt — Lists"), QStringLiteral("Go for It Qt — Elenchi")},
-        {QStringLiteral("Lists"), QStringLiteral("Elenchi")},
-        {QStringLiteral("Tasks"), QStringLiteral("Attività")},
-        {QStringLiteral("Timer"), QStringLiteral("Timer")},
-        {QStringLiteral("Done"), QStringLiteral("Completate")},
-        {QStringLiteral("To-Do"), QStringLiteral("Da fare")},
-        {QStringLiteral("In Progress"), QStringLiteral("In corso")},
-        {QStringLiteral("Paused"), QStringLiteral("In pausa")},
-        {QStringLiteral("Canceled"), QStringLiteral("Annullate")},
-        {QStringLiteral("Canceled / Rejected"), QStringLiteral("Annullate / Rifiutate")},
-        {QStringLiteral("All"), QStringLiteral("Tutte")},
-        {QStringLiteral("Menu"), QStringLiteral("Menu")},
-        {QStringLiteral("Settings"), QStringLiteral("Impostazioni")},
-        {QStringLiteral("Clear Done List"), QStringLiteral("Cancella completate")},
-        {QStringLiteral("Contribute / Donate"), QStringLiteral("Contribuisci / Dona")},
-        {QStringLiteral("About"), QStringLiteral("Informazioni")},
-        {QStringLiteral("Close"), QStringLiteral("Chiudi")},
-        {QStringLiteral("Cancel"), QStringLiteral("Annulla")},
-        {QStringLiteral("Default"), QStringLiteral("Predefinito")},
-        {QStringLiteral("Light"), QStringLiteral("Chiaro")},
-        {QStringLiteral("Dark"), QStringLiteral("Scuro")},
-        {QStringLiteral("Language:"), QStringLiteral("Lingua:")},
-        {QStringLiteral("System (Auto)"), QStringLiteral("Sistema (Auto)")},
-        {QStringLiteral("Add list"), QStringLiteral("Aggiungi elenco")},
-        {QStringLiteral("Edit list properties"), QStringLiteral("Modifica elenco")},
-        {QStringLiteral("Delete list"), QStringLiteral("Elimina elenco")},
-        {QStringLiteral("Go to overview"), QStringLiteral("Vai agli elenchi")},
-        {QStringLiteral("Filter"), QStringLiteral("Filtra")},
-        {QStringLiteral("Hide Filter"), QStringLiteral("Nascondi filtro")},
-        {QStringLiteral("Sort Tasks"), QStringLiteral("Ordina attività")},
-        {QStringLiteral("↻ Sync"), QStringLiteral("↻ Sincr.")},
-        {QStringLiteral("Syncing with %1..."), QStringLiteral("Sincronizzazione con %1...")},
-        {QStringLiteral("Behavior"), QStringLiteral("Comportamento")},
-        {QStringLiteral("Notifications"), QStringLiteral("Notifiche")},
-        {QStringLiteral("Appearance"), QStringLiteral("Aspetto")},
-        {QStringLiteral("Shortcuts"), QStringLiteral("Scorciatoie")},
-        {QStringLiteral("Plugins"), QStringLiteral("Plugin")},
-        {QStringLiteral("Storage"), QStringLiteral("Archiviazione")},
-        {QStringLiteral("Placement of new tasks:"), QStringLiteral("Posizione nuove attività:")},
-        {QStringLiteral("Bottom of the list"), QStringLiteral("In fondo all'elenco")},
-        {QStringLiteral("Top of the list"), QStringLiteral("In cima all'elenco")},
-        {QStringLiteral("Auto-sync Jira / YouTrack (minutes, 0 = off):"), QStringLiteral("Auto-sync Jira / YouTrack (minuti, 0 = off):")},
-        {QStringLiteral("Start minimized"), QStringLiteral("Avvia ridotto a icona")},
-        {QStringLiteral("Start minimized to system tray"), QStringLiteral("Avvia nel vassoio di sistema (tray)")},
-        {QStringLiteral("Notify with sound on new tasks or status changes"), QStringLiteral("Notifica sonora per nuove attività o cambi di stato")},
-        {QStringLiteral("Notify with system popup on new tasks or status changes"), QStringLiteral("Notifica di sistema per nuove attività o cambi di stato")},
-        {QStringLiteral("Timer mode:"), QStringLiteral("Modalità timer:")},
-        {QStringLiteral("Simple"), QStringLiteral("Semplice")},
-        {QStringLiteral("Pomodoro"), QStringLiteral("Pomodoro")},
-        {QStringLiteral("Custom"), QStringLiteral("Personalizzato")},
-        {QStringLiteral("Task duration (minutes):"), QStringLiteral("Durata attività (minuti):")},
-        {QStringLiteral("Break duration (minutes):"), QStringLiteral("Durata pausa (minuti):")},
-        {QStringLiteral("Long break duration (minutes):"), QStringLiteral("Pausa lunga (minuti):")},
-        {QStringLiteral("Resume task after the break"), QStringLiteral("Riprendi attività dopo la pausa")},
-        {QStringLiteral("Reset timer after switching tasks"), QStringLiteral("Reimposta timer al cambio di attività")},
-        {QStringLiteral("Take a Break!"), QStringLiteral("Fai una pausa!")},
-        {QStringLiteral("Active Task:"), QStringLiteral("Attività attiva:")},
-        {QStringLiteral("Pause"), QStringLiteral("Pausa")},
-        {QStringLiteral("Start"), QStringLiteral("Avvia")},
-        {QStringLiteral("Skip"), QStringLiteral("Salta")},
-        {QStringLiteral("No active task"), QStringLiteral("Nessuna attività attiva")},
-        {QStringLiteral("New tasks (%1):"), QStringLiteral("Nuove attività (%1):")},
-        {QStringLiteral("Status changed (%1):"), QStringLiteral("Stato modificato (%1):")},
-        {QStringLiteral("Updates in '%1'"), QStringLiteral("Aggiornamenti in '%1'")},
-        {QStringLiteral("New task added"), QStringLiteral("Nuova attività aggiunta")},
-        {QStringLiteral("Task status changed"), QStringLiteral("Stato attività modificato")},
-        {QStringLiteral(" 1:All Open "), QStringLiteral(" 1:Tutte aperte ")},
-        {QStringLiteral(" 2:To-Do "), QStringLiteral(" 2:Da fare ")},
-        {QStringLiteral(" 3:In Progress "), QStringLiteral(" 3:In corso ")},
-        {QStringLiteral(" 4:Paused "), QStringLiteral(" 4:In pausa ")},
-        {QStringLiteral(" 5:Done "), QStringLiteral(" 5:Completate ")},
-        {QStringLiteral(" 6:Canceled "), QStringLiteral(" 6:Annullate ")},
-        {QStringLiteral("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]"), QStringLiteral("[L:Elenchi] [O:Impost.] [v:MD] [r:Sync] [?:Aiuto]")},
-        {QStringLiteral("♦ BREAK RUNNING"), QStringLiteral("♦ PAUSA IN CORSO")},
-        {QStringLiteral("▶ WORK RUNNING"), QStringLiteral("▶ LAVORO IN CORSO")},
-        {QStringLiteral("♦ BREAK PAUSED"), QStringLiteral("♦ PAUSA SOSPESA")},
-        {QStringLiteral("‖ TIMER READY"), QStringLiteral("‖ TIMER PRONTO")},
-        {QStringLiteral("[ON]"), QStringLiteral("[ON]")},
-        {QStringLiteral("[OFF]"), QStringLiteral("[OFF]")},
-        {QStringLiteral("To-Do: %1 unread / %2 total"), QStringLiteral("Da fare: %1 non lette / %2 in totale")},
-        {QStringLiteral("Unviewed task"), QStringLiteral("Attività non letta")},
-        {QStringLiteral("unread"), QStringLiteral("non lette")},
-        {QStringLiteral("total"), QStringLiteral("in totale")},
-        {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Da fare (%1/%2) ")},
-        {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Da fare (%1) ")}
-    };
-
+    // 5. Environment variable override
     const QString customDir = QString::fromUtf8(qgetenv("GOFI_TRANSLATIONS_DIR"));
     if (!customDir.isEmpty()) {
         loadTranslationsFromDirectory(customDir);
     }
-    const QString appDataTranslations = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/translations");
-    loadTranslationsFromDirectory(appDataTranslations);
 }
 
 bool UkTranslator::loadTranslationsFromJson(const QString& filePath, const QString& langCode) {
@@ -770,9 +53,16 @@ bool UkTranslator::loadTranslationsFromJson(const QString& filePath, const QStri
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     if (!doc.isObject()) return false;
     const QJsonObject obj = doc.object();
-    auto& targetDict = m_dicts[langCode.trimmed().toLower()];
+    const QString code = langCode.trimmed().toLower();
+    if (code.isEmpty()) return false;
+
+    auto& targetDict = m_dicts[code];
     for (auto it = obj.begin(); it != obj.end(); ++it) {
         targetDict[it.key()] = it.value().toString();
+    }
+    const QString baseCode = code.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+    if (!m_availableLanguages.contains(baseCode) && baseCode != QStringLiteral("en")) {
+        m_availableLanguages.append(baseCode);
     }
     return true;
 }
@@ -781,9 +71,10 @@ void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
     if (dirPath.isEmpty()) return;
     QDir dir(dirPath);
     if (!dir.exists()) return;
-    const QStringList files = dir.entryList({QStringLiteral("*.json")}, QDir::Files);
+    const QStringList files = dir.entryList(QDir::Files);
     for (const QString& file : files) {
-        const QString lang = file.section(QLatin1Char('.'), 0, 0).toLower();
+        if (!file.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) continue;
+        const QString lang = file.left(file.lastIndexOf(QLatin1Char('.'))).toLower();
         loadTranslationsFromJson(dir.filePath(file), lang);
         if (lang.contains(QLatin1Char('_'))) {
             loadTranslationsFromJson(dir.filePath(file), lang.section(QLatin1Char('_'), 0, 0));
@@ -795,6 +86,128 @@ void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
 
 void UkTranslator::setLanguageCode(const QString& code) {
     m_langCode = code.trimmed().toLower();
+}
+
+bool UkTranslator::hasLanguage(const QString& code) const {
+    const QString c = code.trimmed().toLower();
+    if (c.isEmpty()) return false;
+    if (m_dicts.contains(c) && !m_dicts.value(c).isEmpty()) return true;
+    if (c.contains(QLatin1Char('_')) || c.contains(QLatin1Char('-'))) {
+        const QString base = c.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+        return m_dicts.contains(base) && !m_dicts.value(base).isEmpty();
+    }
+    return false;
+}
+
+QString UkTranslator::languageDisplayName(const QString& code) const {
+    const QString c = code.trimmed().toLower();
+    if (c == QStringLiteral("system")) {
+        return tr("System (Auto)");
+    }
+    if (c == QStringLiteral("en")) {
+        return QStringLiteral("English");
+    }
+    QLocale loc(c);
+    QString native = loc.nativeLanguageName();
+    if (!native.isEmpty()) {
+        native[0] = native[0].toUpper();
+    }
+    const QString eng = QLocale::languageToString(loc.language());
+    if (!native.isEmpty() && !eng.isEmpty() && native.compare(eng, Qt::CaseInsensitive) != 0 && eng != QStringLiteral("C")) {
+        return QStringLiteral("%1 (%2)").arg(native, eng);
+    }
+    if (!native.isEmpty()) {
+        return native;
+    }
+    if (!eng.isEmpty() && eng != QStringLiteral("C")) {
+        return eng;
+    }
+    return c;
+}
+
+QVariantList UkTranslator::availableLanguagesModel() const {
+    QVariantList list;
+
+    // 1. System (Auto)
+    QVariantMap sysItem;
+    sysItem[QStringLiteral("id")] = QStringLiteral("system");
+    sysItem[QStringLiteral("label")] = tr("System (Auto)");
+    list.append(sysItem);
+
+    // 2. Ukrainian (prioritize uk first if present)
+    QStringList codes = m_availableLanguages;
+    codes.sort();
+    if (codes.contains(QStringLiteral("uk"))) {
+        codes.removeAll(QStringLiteral("uk"));
+        codes.prepend(QStringLiteral("uk"));
+    }
+
+    for (const QString& code : codes) {
+        if (code == QStringLiteral("en")) continue;
+        QVariantMap item;
+        item[QStringLiteral("id")] = code;
+        item[QStringLiteral("label")] = languageDisplayName(code);
+        list.append(item);
+    }
+
+    // 3. English (base default)
+    QVariantMap enItem;
+    enItem[QStringLiteral("id")] = QStringLiteral("en");
+    enItem[QStringLiteral("label")] = QStringLiteral("English");
+    list.append(enItem);
+
+    return list;
+}
+
+QStringList UkTranslator::availableLanguageCodes() const {
+    QStringList list;
+    list.append(QStringLiteral("system"));
+    QStringList codes = m_availableLanguages;
+    codes.sort();
+    if (codes.contains(QStringLiteral("uk"))) {
+        codes.removeAll(QStringLiteral("uk"));
+        codes.prepend(QStringLiteral("uk"));
+    }
+    for (const QString& code : codes) {
+        if (code != QStringLiteral("en") && !list.contains(code)) {
+            list.append(code);
+        }
+    }
+    if (!list.contains(QStringLiteral("en"))) {
+        list.append(QStringLiteral("en"));
+    }
+    return list;
+}
+
+QString UkTranslator::resolveEffectiveLanguage(const QString& requestedCode) const {
+    const QString norm = requestedCode.trimmed().toLower();
+    if (norm == QStringLiteral("en")) {
+        return QStringLiteral("en");
+    }
+
+    if (!norm.isEmpty() && norm != QStringLiteral("system")) {
+        if (hasLanguage(norm)) return norm;
+        if (norm.contains(QLatin1Char('_')) || norm.contains(QLatin1Char('-'))) {
+            const QString base = norm.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+            if (hasLanguage(base)) return base;
+        }
+        return norm;
+    }
+
+    // System resolution
+    const QString sysName = QLocale::system().name().toLower();
+    if (hasLanguage(sysName)) return sysName;
+    const QString sysBase = sysName.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+    if (hasLanguage(sysBase)) return sysBase;
+
+    for (const QString& uiLang : QLocale::system().uiLanguages()) {
+        const QString uiLower = uiLang.toLower();
+        if (hasLanguage(uiLower)) return uiLower;
+        const QString uiBase = uiLower.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
+        if (hasLanguage(uiBase)) return uiBase;
+    }
+
+    return QStringLiteral("en");
 }
 
 QString UkTranslator::translate(const char* context,

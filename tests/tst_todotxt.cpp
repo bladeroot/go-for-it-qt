@@ -1674,6 +1674,35 @@ private slots:
             QCOMPARE(translator.translate("TxtListEditDialog", "Sync task completion back to tracker"),
                      QStringLiteral("Synchronisiere Aufgabenabschluss zuruck zum Tracker"));
             QFile::remove(tempJsonPath);
+
+            // Test dynamic language addition via directory (e.g. ru.json)
+            const QString customTransDir = m_testSandbox.filePath(QStringLiteral("dynamic_translations"));
+            QDir().mkpath(customTransDir);
+            const QString ruJsonPath = customTransDir + QStringLiteral("/ru.json");
+            QFile ruFile(ruJsonPath);
+            QVERIFY(ruFile.open(QIODevice::WriteOnly));
+            ruFile.write(R"({"Settings": "Настройки", "Tasks": "Задачи"})");
+            ruFile.close();
+
+            translator.loadTranslationsFromDirectory(customTransDir);
+            QVERIFY(translator.hasLanguage(QStringLiteral("ru")));
+            QVERIFY(translator.availableLanguageCodes().contains(QStringLiteral("ru")));
+            QVERIFY(translator.languageDisplayName(QStringLiteral("ru")).contains(QStringLiteral("Русский"), Qt::CaseInsensitive));
+
+            // Verify effective language resolution
+            QCOMPARE(translator.resolveEffectiveLanguage(QStringLiteral("ru")), QStringLiteral("ru"));
+            translator.setLanguageCode(QStringLiteral("ru"));
+            QCOMPARE(translator.translate("SettingsDialog", "Settings"), QStringLiteral("Настройки"));
+            QCOMPARE(translator.translate("TaskListPage", "Tasks"), QStringLiteral("Задачи"));
+
+            // Verify SettingsManager integration with dynamic languages
+            SettingsManager sm;
+            sm.setSupportedLanguages(translator.availableLanguageCodes());
+            sm.setLanguage(QStringLiteral("ru"));
+            QCOMPARE(sm.effectiveLanguage(), QStringLiteral("ru"));
+
+            QFile::remove(ruJsonPath);
+            QDir().rmdir(customTransDir);
         }
 
         // Test 10: Explicit Reproduction of User Case A & Case B from scratchpad
