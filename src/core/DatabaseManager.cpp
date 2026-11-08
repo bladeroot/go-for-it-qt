@@ -1073,6 +1073,45 @@ bool DatabaseManager::deleteTask(qint64 taskId) {
     return q.exec() && q.numRowsAffected() > 0;
 }
 
+bool DatabaseManager::deleteTaskAndReorder(qint64 taskId, const QString& listId, bool done, const QVector<TxtTask>& remainingTasks) {
+    if (taskId < 0) return false;
+    QSqlDatabase database = db();
+    if (!database.transaction()) {
+        return false;
+    }
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral("DELETE FROM tasks WHERE id = :id"));
+    q.bindValue(QStringLiteral(":id"), taskId);
+    if (!q.exec() || q.numRowsAffected() <= 0) {
+        database.rollback();
+        return false;
+    }
+
+    QSqlQuery reorderQ(database);
+    reorderQ.prepare(QStringLiteral(
+        "UPDATE tasks SET sort_order = :order WHERE id = :id AND list_id = :list_id AND done = :done"
+    ));
+    for (int i = 0; i < remainingTasks.size(); ++i) {
+        const TxtTask& t = remainingTasks.at(i);
+        if (t.id() < 0) continue;
+        reorderQ.bindValue(QStringLiteral(":order"), i);
+        reorderQ.bindValue(QStringLiteral(":id"), t.id());
+        reorderQ.bindValue(QStringLiteral(":list_id"), listId);
+        reorderQ.bindValue(QStringLiteral(":done"), done ? 1 : 0);
+        if (!reorderQ.exec()) {
+            database.rollback();
+            return false;
+        }
+    }
+
+    if (!database.commit()) {
+        database.rollback();
+        return false;
+    }
+    return true;
+}
+
 bool DatabaseManager::deleteDoneTasks(const QStringList& listIds) {
     QSqlDatabase database = db();
     if (!database.transaction()) {

@@ -2930,7 +2930,33 @@ private slots:
                 QCOMPARE(orderQ.value(0).toInt(), 1);
             }
 
-            // 5. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
+            // 5. Deleting a task must compact orders before a subsequent append
+            {
+                const QString deleteOrderListId = ctrl.listManager()->addList(QStringLiteral("Delete Order Compaction"));
+                TaskManager deleteOrderManager;
+                deleteOrderManager.setActiveList(deleteOrderListId, false, false);
+                deleteOrderManager.addNewTask(QStringLiteral("Delete order A"), false, false);
+                deleteOrderManager.addNewTask(QStringLiteral("Delete order B"), false, false);
+                deleteOrderManager.addNewTask(QStringLiteral("Delete order C"), false, false);
+                QCOMPARE(deleteOrderManager.todoModel()->rowCount(), 3);
+
+                QVERIFY(deleteOrderManager.todoModel()->removeAt(0));
+                deleteOrderManager.addNewTask(QStringLiteral("Delete order D"), false, false);
+
+                QSqlQuery orderQ(dbConn);
+                orderQ.prepare(QStringLiteral(
+                    "SELECT COUNT(*), COUNT(DISTINCT sort_order), MIN(sort_order), MAX(sort_order) "
+                    "FROM tasks WHERE list_id = :list_id AND done = 0"
+                ));
+                orderQ.bindValue(QStringLiteral(":list_id"), deleteOrderListId);
+                QVERIFY(orderQ.exec() && orderQ.next());
+                QCOMPARE(orderQ.value(0).toInt(), 3);
+                QCOMPARE(orderQ.value(1).toInt(), 3);
+                QCOMPARE(orderQ.value(2).toInt(), 0);
+                QCOMPARE(orderQ.value(3).toInt(), 2);
+            }
+
+            // 6. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
             {
                 ctrl.setActiveTodoRow(0);
                 ctrl.timer()->start();
@@ -2974,7 +3000,7 @@ private slots:
                 QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
             }
 
-            // 6. Timer persistence failure must not stop/log the active session or duplicate errors
+            // 7. Timer persistence failure must not stop/log the active session or duplicate errors
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3020,7 +3046,7 @@ private slots:
                 }
             }
 
-            // 7. Failed deletion of the active task must not stop/log its timer
+            // 8. Failed deletion of the active task must not stop/log its timer
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3055,7 +3081,7 @@ private slots:
                 }
             }
 
-            // 8. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            // 9. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
             {
                 auto& db = DatabaseManager::instance();
                 const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
@@ -3117,7 +3143,7 @@ private slots:
                 failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
-            // 9. markActivityWorklogSynced() validation
+            // 10. markActivityWorklogSynced() validation
             {
                 auto& db = DatabaseManager::instance();
                 // Invalid IDs or non-existent log IDs must return false
@@ -3125,7 +3151,7 @@ private slots:
                 QVERIFY(!db.markActivityWorklogSynced(999999));
             }
 
-            // 10. loadTask distinction between not-found and query failure
+            // 11. loadTask distinction between not-found and query failure
             {
                 auto& db = DatabaseManager::instance();
                 bool queryError = true;

@@ -87,6 +87,7 @@ public:
     bool moveTaskDoneAndReorder(const TxtTask& task, int newOrder, const QMap<QString, QVector<TxtTask>>& remainingPerList, bool remainingDone);
     bool updateTaskTimer(qint64 taskId, quint32 timerSeconds, quint32 jiraSyncedSeconds = 0);
     bool deleteTask(qint64 taskId);
+    bool deleteTaskAndReorder(qint64 taskId, const QString& listId, bool done, const QVector<TxtTask>& remainingTasks);
     bool deleteDoneTasks(const QString& listId);
     bool deleteDoneTasks(const QStringList& listIds);
     bool replaceListTasksOrders(const QString& listId, bool done, const QVector<TxtTask>& tasks);

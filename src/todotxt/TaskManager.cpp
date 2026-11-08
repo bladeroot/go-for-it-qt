@@ -30,10 +30,10 @@ TaskManager::TaskManager(QObject* parent)
     });
 
     m_todoStore.setRemoveTaskHandler([this](int row, qint64 taskId) {
-        return deleteTaskFromDatabase(row, taskId);
+        return deleteTaskFromDatabase(false, row, taskId);
     });
     m_doneStore.setRemoveTaskHandler([this](int row, qint64 taskId) {
-        return deleteTaskFromDatabase(row, taskId);
+        return deleteTaskFromDatabase(true, row, taskId);
     });
 
     connect(&m_todoStore, &TaskStoreModel::tasksReordered, this, &TaskManager::onTodoTasksReordered);
@@ -319,13 +319,29 @@ bool TaskManager::updateTaskTimerInDatabase(int row, const TxtTask& task) {
     return true;
 }
 
-bool TaskManager::deleteTaskFromDatabase(int row, qint64 taskId) {
-    Q_UNUSED(row)
+bool TaskManager::deleteTaskFromDatabase(bool isDone, int row, qint64 taskId) {
     if (m_movingBetweenStores) {
         return true;
     }
+    TaskStoreModel& store = isDone ? m_doneStore : m_todoStore;
+    if (row < 0 || row >= store.rowCount()) {
+        return false;
+    }
+    const TxtTask task = store.taskAt(row);
+    const QString targetListId = !task.listId().isEmpty() ? task.listId() : m_listId;
+
+    QVector<TxtTask> remainingTasks;
+    for (int i = 0; i < store.rowCount(); ++i) {
+        if (i == row) continue;
+        const TxtTask t = store.taskAt(i);
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (lid == targetListId) {
+            remainingTasks.append(t);
+        }
+    }
+
     if (taskId >= 0) {
-        if (!DatabaseManager::instance().deleteTask(taskId)) {
+        if (!DatabaseManager::instance().deleteTaskAndReorder(taskId, targetListId, isDone, remainingTasks)) {
             emit errorOccurred(tr("Failed to delete task from database."));
             return false;
         }
