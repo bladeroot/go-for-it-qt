@@ -70,7 +70,7 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
     connect(m_app->timer(), &TaskTimer::breakActiveChanged, this, &TuiApp::render);
     connect(m_app->issueTracker(), &IssueTrackerService::syncingChanged, this, &TuiApp::render);
     connect(m_app->issueTracker(), &IssueTrackerService::statusMessageChanged, this, [this]() {
-        m_statusMessage = m_app->issueTracker()->lastStatusMessage();
+        m_statusMessage = sanitizeTerminalText(m_app->issueTracker()->lastStatusMessage());
         render();
     });
     connect(m_app->todoProxyModel(), &QAbstractItemModel::modelReset, this, &TuiApp::render);
@@ -1779,7 +1779,7 @@ void TuiApp::render() {
         + QStringLiteral("]");
     // Total prefix columns: 1 (" ") + 20 (state) + 2 ("  ") + 7 (clock) + 1 (" ") + 18 (progBar) + 4 (" │ ") = 53
     const int availActiveCols = qMax(8, m_cols - 54);
-    QString rawActiveDesc = timer->hasActiveTask() ? timer->activeTaskDescription() : tr("No active task");
+    QString rawActiveDesc = timer->hasActiveTask() ? sanitizeTerminalText(timer->activeTaskDescription()) : tr("No active task");
     rawActiveDesc.replace(QLatin1Char('\r'), QLatin1Char(' '));
     rawActiveDesc.replace(QLatin1Char('\n'), QLatin1Char(' '));
     const QString activeTaskTitle = truncateVisible(rawActiveDesc, availActiveCols);
@@ -1981,7 +1981,7 @@ void TuiApp::render() {
                 const QString activeTag = isCur ? (FG_CYAN + tr(" (active)") + ESC_RESET) : QString();
 
                 const QString line = QStringLiteral("%1 %2 %3 %4 %5")
-                    .arg(cursor, check, provBadge, e.name, activeTag);
+                    .arg(cursor, check, provBadge, sanitizeTerminalText(e.name), activeTag);
                 out += (isSel ? (BG_SELECTED + FG_WHITE + ESC_BOLD) : FG_WHITE)
                     + padRight(line, m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
@@ -2072,7 +2072,7 @@ void TuiApp::render() {
                 const QString badge = !key.isEmpty() ? QStringLiteral("[%1] ").arg(key) : QString();
                 lines.append(QStringLiteral("  • %1%2 (%3, %4 sessions)")
                     .arg(badge,
-                         tm.value(QStringLiteral("description")).toString(),
+                         sanitizeTerminalText(tm.value(QStringLiteral("description")).toString()),
                          tm.value(QStringLiteral("formattedTime")).toString(),
                          QString::number(tm.value(QStringLiteral("sessions")).toInt())));
             }
@@ -2354,7 +2354,7 @@ void TuiApp::render() {
             + tr("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")
             + ESC_RESET + QStringLiteral("\033[K");
     } else {
-        out += FG_GRAY + truncateVisible(m_statusMessage, m_cols - 1) + ESC_RESET + QStringLiteral("\033[K");
+        out += FG_GRAY + truncateVisible(sanitizeTerminalText(m_statusMessage), m_cols - 1) + ESC_RESET + QStringLiteral("\033[K");
     }
 
     const QByteArray frameBytes = out.toUtf8();

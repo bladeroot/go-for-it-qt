@@ -11,6 +11,7 @@
 #include "todotxt/TaskStoreModel.h"
 #include "todotxt/TxtTask.h"
 #include "tui/TuiApp.h"
+#include <QSqlQuery>
 #include <QtTest>
 
 using namespace gofi;
@@ -1340,6 +1341,50 @@ private slots:
         duplicateTask.setJiraKey(QStringLiteral("TEST-100"));
         const qint64 dupId = db.insertTask(list1.id, duplicateTask, 99);
         QCOMPARE(dupId, -1);
+
+        // Test deduplication consolidating timer_seconds, duration_seconds, and jira_synced_seconds
+        {
+            {
+                QSqlDatabase testSqlDb = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+                QSqlQuery q(testSqlDb);
+                q.exec(QStringLiteral("DROP INDEX IF EXISTS idx_tasks_list_jira_key;"));
+                q.exec(QStringLiteral(
+                    "INSERT INTO tasks (list_id, description, done, status, priority, duration_seconds, timer_seconds, jira_key, jira_synced_seconds) "
+                    "VALUES ('list1', 'Dup Task 1', 0, 'todo', 2, 500, 1000, 'DEDUP-1', 400);"
+                ));
+                q.exec(QStringLiteral(
+                    "INSERT INTO tasks (list_id, description, done, status, priority, duration_seconds, timer_seconds, jira_key, jira_synced_seconds) "
+                    "VALUES ('list1', 'Dup Task 2', 0, 'todo', 2, 1200, 4400, 'DEDUP-1', 600);"
+                ));
+            }
+
+            // Re-initialize which runs consolidation and re-creates unique index
+            db.close();
+            QVERIFY(db.initialize(testDb));
+
+            QSqlQuery qVerify(QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn")));
+            qVerify.prepare(QStringLiteral("SELECT count(*), timer_seconds, duration_seconds, jira_synced_seconds FROM tasks WHERE list_id = 'list1' AND jira_key = 'DEDUP-1'"));
+            QVERIFY(qVerify.exec() && qVerify.next());
+            QCOMPARE(qVerify.value(0).toInt(), 1); // Only 1 survivor
+            QCOMPARE(qVerify.value(1).toUInt(), 5400U); // 1000 + 4400 = 5400
+            QCOMPARE(qVerify.value(2).toUInt(), 1200U); // max(500, 1200) = 1200
+            QCOMPARE(qVerify.value(3).toUInt(), 1000U); // 400 + 600 = 1000
+        }
+
+        // Test GitHub sync without token and without repo fails cleanly
+        {
+            TodoListEntry ghList;
+            ghList.id = QStringLiteral("gh_public");
+            ghList.provider = QStringLiteral("GitHub");
+            ghList.jiraUrl = QStringLiteral("https://github.com");
+            ghList.apiToken = QString();
+            ghList.jiraJql = QString();
+
+            IssueTrackerService svc;
+            QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+            svc.syncListIssues(ghList);
+            QCOMPARE(failSpy.count(), 1);
+        }
 
         db.close();
         QFile::remove(testDb);

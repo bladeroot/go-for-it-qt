@@ -205,7 +205,9 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
     if (reqUrl.scheme().compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0 && !entry.apiToken.trimmed().isEmpty()) {
         const QString host = reqUrl.host();
         if (host != QStringLiteral("localhost") && host != QStringLiteral("127.0.0.1")) {
-            qWarning() << "Security warning: Transmitting API token over unencrypted HTTP to" << host;
+            const QString warnMsg = QStringLiteral("Security warning: Transmitting API token over unencrypted HTTP to %1!").arg(host);
+            qWarning() << warnMsg;
+            setStatusMessage(warnMsg);
         }
     }
 
@@ -1644,6 +1646,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
         if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
             // 1. If Basic Auth failed with 401/403 or X-Seraph-Loginreason: AUTHENTICATED_FAILED, retry with Bearer PAT
             if (!forceBearerAuth && !entry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
+                endSyncOperation();
                 fetchJiraIssues(entry, endpointStage, true);
                 return;
             }
@@ -1656,6 +1659,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
             }
             // 2. If endpoint returned 400/404/405/410, try fallback search endpoint
             if (endpointStage < 2 && (httpStatus == 400 || httpStatus == 404 || httpStatus == 405 || httpStatus == 410)) {
+                endSyncOperation();
                 fetchJiraIssues(entry, endpointStage + 1, forceBearerAuth);
                 return;
             }
@@ -1731,7 +1735,8 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
 
 void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                                              const QVector<RemoteIssueItem>& items,
-                                             const QString& providerName)
+                                             const QString& providerName,
+                                             bool pageLimitReached)
 {
     DatabaseManager& db = DatabaseManager::instance();
     QStringList newIssues;
@@ -1751,14 +1756,17 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
             item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
         );
         if (isNew) {
-            newIssues.append(item.description);
+            if (!TxtTask::isClosedStatus(localStatus)) {
+                newIssues.append(item.description);
+            }
         } else if (!oldStatus.isEmpty() && oldStatus != localStatus) {
             statusChanges.append(QStringLiteral("%1: %2 → %3").arg(item.key, oldStatus, localStatus));
         }
     }
 
     endSyncOperation();
-    if (items.size() >= 100) {
+    const bool limitReached = pageLimitReached || (items.size() >= 100);
+    if (limitReached) {
         setStatusMessage(tr("Synced %1 issues from %2 (maximum page limit reached; older items omitted).").arg(items.size()).arg(providerName));
     } else {
         setStatusMessage(tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName));
@@ -1772,17 +1780,31 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
 void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
     const QString apiUrl = gitHubApiBaseUrl(entry.jiraUrl);
 
-    startSyncOperation();
-    setStatusMessage(tr("Syncing issues and pull requests from GitHub..."));
-
     QString queryStr = entry.jiraJql.trimmed();
     if (queryStr.isEmpty()) {
-        queryStr = entry.apiToken.trimmed().isEmpty() ? QStringLiteral("sort:updated-desc") : QStringLiteral("involves:@me");
-    } else if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:"))) {
-        if (queryStr.contains(QLatin1Char('/'))) {
-            queryStr = QStringLiteral("repo:") + queryStr;
+        if (entry.apiToken.trimmed().isEmpty()) {
+            const QString errMsg = tr("GitHub sync without an API token requires a repository in the query field (e.g. repo:owner/project).");
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
+        }
+        queryStr = QStringLiteral("is:open involves:@me");
+    } else {
+        if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:"))) {
+            if (queryStr.contains(QLatin1Char('/'))) {
+                queryStr = QStringLiteral("repo:") + queryStr;
+            }
+        }
+        if (entry.apiToken.trimmed().isEmpty() && !queryStr.contains(QStringLiteral("repo:"))) {
+            const QString errMsg = tr("GitHub sync without an API token requires a repository in the query field (e.g. repo:owner/project).");
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
         }
     }
+
+    startSyncOperation();
+    setStatusMessage(tr("Syncing issues and pull requests from GitHub..."));
 
     QUrl url(apiUrl + QStringLiteral("/search/issues"));
     QUrlQuery query;
@@ -1826,11 +1848,11 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     QString mrPath;
     if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
         const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(projectSpec));
-        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=all&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
-        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=all&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
+        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
+        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
     } else {
-        issuesPath = QStringLiteral("/api/v4/issues?state=all&scope=all&order_by=updated_at&sort=desc&per_page=100");
-        mrPath = QStringLiteral("/api/v4/merge_requests?state=all&scope=all&order_by=updated_at&sort=desc&per_page=100");
+        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=all&order_by=updated_at&sort=desc&per_page=100");
+        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=all&order_by=updated_at&sort=desc&per_page=100");
         if (!projectSpec.isEmpty()) {
             issuesPath += QLatin1Char('&') + projectSpec;
             mrPath += QLatin1Char('&') + projectSpec;
@@ -1842,6 +1864,7 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
         int completedRequests = 0;
         bool hasError = false;
         QString errorMsg;
+        bool limitReached = false;
     };
     auto combinedState = std::make_shared<CombinedSyncState>();
 
@@ -1853,7 +1876,7 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
             emit syncFailed(entry.id, combinedState->errorMsg);
             return;
         }
-        processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"));
+        processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached);
     };
 
     // 1. Fetch Issues
@@ -1868,7 +1891,9 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
                 combinedState->hasError = true;
                 combinedState->errorMsg = tr("GitLab issues error: %1").arg(reply->errorString());
             } else {
-                combinedState->items.append(parseGitLabIssuesJson(reply->readAll()));
+                const auto parsed = parseGitLabIssuesJson(reply->readAll());
+                if (parsed.size() >= 100) combinedState->limitReached = true;
+                combinedState->items.append(parsed);
             }
             combinedState->completedRequests++;
             checkDone();
@@ -1889,7 +1914,9 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
                     combinedState->errorMsg = tr("GitLab merge requests error: %1").arg(reply->errorString());
                 }
             } else {
-                combinedState->items.append(parseGitLabMergeRequestsJson(reply->readAll()));
+                const auto parsed = parseGitLabMergeRequestsJson(reply->readAll());
+                if (parsed.size() >= 100) combinedState->limitReached = true;
+                combinedState->items.append(parsed);
             }
             combinedState->completedRequests++;
             checkDone();
@@ -1911,7 +1938,7 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
 
     QString queryStr = entry.jiraJql.trimmed();
     if (queryStr.isEmpty()) {
-        queryStr = QStringLiteral("assigned_to_id=me&status_id=*&limit=100&sort=updated_on:desc");
+        queryStr = QStringLiteral("assigned_to_id=me&status_id=open&limit=100&sort=updated_on:desc");
     } else {
         if (!queryStr.contains(QStringLiteral("limit="))) {
             queryStr += QStringLiteral("&limit=100");

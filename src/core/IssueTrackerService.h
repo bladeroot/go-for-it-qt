@@ -114,7 +114,7 @@ signals:
 private:
     static QString normalizeBaseUrl(const QString& rawUrl);
     static QString gitHubApiBaseUrl(const QString& rawBaseUrl);
-    static void applyAuthHeader(QNetworkRequest& req, const TodoListEntry& entry, bool forceBearerAuth = false);
+    void applyAuthHeader(QNetworkRequest& req, const TodoListEntry& entry, bool forceBearerAuth = false);
     void setSyncing(bool value);
 
     void fetchJiraIssues(const TodoListEntry& entry, int endpointStage = 0, bool forceBearerAuth = false);
@@ -124,7 +124,7 @@ private:
     void fetchRedmineIssues(const TodoListEntry& entry);
     void fetchTodoistTasks(const TodoListEntry& entry);
     void fetchNextcloudTasks(const TodoListEntry& entry);
-    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName);
+    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false);
 
     void startSyncOperation();
     void endSyncOperation();

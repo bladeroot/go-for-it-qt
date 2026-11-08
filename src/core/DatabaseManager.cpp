@@ -192,9 +192,7 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
         const QString configuredPath = boot.value(QStringLiteral("Storage/databasePath")).toString().trimmed();
         if (!configuredPath.isEmpty()) {
             targetPath = configuredPath;
-            const QString dirPath = QFileInfo(targetPath).dir().path();
-            QDir().mkpath(dirPath);
-            QFile::setPermissions(dirPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+            QFileInfo(targetPath).dir().mkpath(QStringLiteral("."));
         } else {
             const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
             QDir().mkpath(dataDir);
@@ -307,6 +305,14 @@ bool DatabaseManager::createSchema() {
     q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN is_viewed INTEGER NOT NULL DEFAULT 1;"));
     q.exec(QStringLiteral("UPDATE tasks SET status = 'done' WHERE done = 1 AND status = 'todo';"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tasks_list_done_order ON tasks(list_id, done, sort_order);"));
+    // Consolidate tracked timer and duration from duplicates before removing duplicate rows
+    q.exec(QStringLiteral(
+        "UPDATE tasks "
+        "SET timer_seconds = (SELECT SUM(t2.timer_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != ''), "
+        "    duration_seconds = (SELECT MAX(t2.duration_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != ''), "
+        "    jira_synced_seconds = (SELECT SUM(t2.jira_synced_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != '') "
+        "WHERE id IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key HAVING COUNT(*) > 1);"
+    ));
     q.exec(QStringLiteral("DELETE FROM tasks WHERE jira_key != '' AND id NOT IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key);"));
     q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_list_jira_key ON tasks(list_id, jira_key) WHERE jira_key != '';"));
 
@@ -470,17 +476,22 @@ bool DatabaseManager::importDatabaseBackup(const QString& sourceFilePath) {
     QFile::remove(rollbackWal);
     QFile::remove(rollbackShm);
 
-    const bool hasBackup = QFile::copy(targetPath, rollbackDb);
-    if (QFile::exists(targetPath + QStringLiteral("-wal"))) {
-        QFile::copy(targetPath + QStringLiteral("-wal"), rollbackWal);
+    const bool hasExisting = QFile::exists(targetPath);
+    bool hasBackup = false;
+    if (hasExisting) {
+        hasBackup = QFile::rename(targetPath, rollbackDb);
+        if (!hasBackup) {
+            // Atomic rename failed (e.g. permission issue), abort to protect live DB
+            initialize(targetPath);
+            return false;
+        }
+        if (QFile::exists(targetPath + QStringLiteral("-wal"))) {
+            QFile::rename(targetPath + QStringLiteral("-wal"), rollbackWal);
+        }
+        if (QFile::exists(targetPath + QStringLiteral("-shm"))) {
+            QFile::rename(targetPath + QStringLiteral("-shm"), rollbackShm);
+        }
     }
-    if (QFile::exists(targetPath + QStringLiteral("-shm"))) {
-        QFile::copy(targetPath + QStringLiteral("-shm"), rollbackShm);
-    }
-
-    QFile::remove(targetPath);
-    QFile::remove(targetPath + QStringLiteral("-wal"));
-    QFile::remove(targetPath + QStringLiteral("-shm"));
 
     bool copyOk = QFile::copy(cleanSrc, targetPath);
     bool initOk = false;
@@ -501,9 +512,9 @@ bool DatabaseManager::importDatabaseBackup(const QString& sourceFilePath) {
         QFile::remove(targetPath + QStringLiteral("-wal"));
         QFile::remove(targetPath + QStringLiteral("-shm"));
         if (hasBackup) {
-            QFile::copy(rollbackDb, targetPath);
-            if (QFile::exists(rollbackWal)) QFile::copy(rollbackWal, targetPath + QStringLiteral("-wal"));
-            if (QFile::exists(rollbackShm)) QFile::copy(rollbackShm, targetPath + QStringLiteral("-shm"));
+            QFile::rename(rollbackDb, targetPath);
+            if (QFile::exists(rollbackWal)) QFile::rename(rollbackWal, targetPath + QStringLiteral("-wal"));
+            if (QFile::exists(rollbackShm)) QFile::rename(rollbackShm, targetPath + QStringLiteral("-shm"));
             QFile::setPermissions(targetPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         }
         initialize(targetPath);
