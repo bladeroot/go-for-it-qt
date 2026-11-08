@@ -42,9 +42,9 @@ signals:
     void refreshed();
 
 private slots:
-    void onTodoTaskDoneToggled(int row, const gofi::TxtTask& task);
-    void onDoneTaskDoneToggled(int row, const gofi::TxtTask& task);
-    void onTaskUpdated(int row, const gofi::TxtTask& task);
+    void onTodoTaskDoneToggled(int row, const gofi::TxtTask& task, bool* success = nullptr);
+    void onDoneTaskDoneToggled(int row, const gofi::TxtTask& task, bool* success = nullptr);
+    void onTaskUpdated(int row, const gofi::TxtTask& task, bool* success = nullptr);
     void onTaskRemoved(qint64 taskId);
     void onTodoTasksReordered();
     void onDoneTasksReordered();

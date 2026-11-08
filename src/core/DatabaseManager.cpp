@@ -1080,7 +1080,11 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     ));
     check.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     check.bindValue(QStringLiteral(":jira_key"), nonNullString(issueKey));
-    if (check.exec() && check.next()) {
+    if (!check.exec()) {
+        qWarning() << "DatabaseManager::upsertRemoteIssueTask check query failed:" << check.lastError().text();
+        return false;
+    }
+    if (check.next()) {
         const qint64 existingId = check.value(0).toLongLong();
         const quint32 existingDur = check.value(1).toUInt();
         const QString existingDetails = check.value(2).toString();
@@ -1108,12 +1112,15 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
             maxOrderQ.prepare(QStringLiteral("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks WHERE list_id = :list_id AND done = :done"));
             maxOrderQ.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
             maxOrderQ.bindValue(QStringLiteral(":done"), isDone ? 1 : 0);
-            if (maxOrderQ.exec() && maxOrderQ.next()) {
-                targetOrder = maxOrderQ.value(0).toInt();
-            } else {
-                targetOrder = 0;
+            if (!maxOrderQ.exec() || !maxOrderQ.next()) {
+                qWarning() << "DatabaseManager::upsertRemoteIssueTask targetOrder maxOrderQ failed:" << maxOrderQ.lastError().text();
+                return false;
             }
+            targetOrder = maxOrderQ.value(0).toInt();
         }
+
+        QSqlQuery sp(database);
+        const bool useSavepoint = sp.exec(QStringLiteral("SAVEPOINT upsert_remote_task"));
 
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
@@ -1134,6 +1141,11 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":comments_json"), nonNullString(commentsJson));
         upd.bindValue(QStringLiteral(":id"), existingId);
         if (!upd.exec() || upd.numRowsAffected() <= 0) {
+            if (useSavepoint) {
+                QSqlQuery rb(database);
+                rb.exec(QStringLiteral("ROLLBACK TO SAVEPOINT upsert_remote_task"));
+                rb.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"));
+            }
             return false;
         }
 
@@ -1145,7 +1157,19 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
             compactQ.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
             compactQ.bindValue(QStringLiteral(":wasDone"), wasDone ? 1 : 0);
             compactQ.bindValue(QStringLiteral(":oldOrder"), oldOrder);
-            compactQ.exec();
+            if (!compactQ.exec()) {
+                if (useSavepoint) {
+                    QSqlQuery rb(database);
+                    rb.exec(QStringLiteral("ROLLBACK TO SAVEPOINT upsert_remote_task"));
+                    rb.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"));
+                }
+                return false;
+            }
+        }
+
+        if (useSavepoint) {
+            QSqlQuery rel(database);
+            rel.exec(QStringLiteral("RELEASE SAVEPOINT upsert_remote_task"));
         }
 
         return true;
@@ -1157,10 +1181,11 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     maxOrderQ.prepare(QStringLiteral("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tasks WHERE list_id = :list_id AND done = :done"));
     maxOrderQ.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     maxOrderQ.bindValue(QStringLiteral(":done"), isDone ? 1 : 0);
-    int nextOrder = 0;
-    if (maxOrderQ.exec() && maxOrderQ.next()) {
-        nextOrder = maxOrderQ.value(0).toInt();
+    if (!maxOrderQ.exec() || !maxOrderQ.next()) {
+        qWarning() << "DatabaseManager::upsertRemoteIssueTask new task maxOrderQ failed:" << maxOrderQ.lastError().text();
+        return false;
     }
+    const int nextOrder = maxOrderQ.value(0).toInt();
 
     TxtTask newTask = TxtTask::fromDatabase(
         -1,

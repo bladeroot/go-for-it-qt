@@ -76,10 +76,10 @@ signals:
     void unviewedTodoCountChanged();
     void totalTodoCountChanged();
     void taskDataChanged();
-    void taskUpdated(int row, gofi::TxtTask task);
+    void taskUpdated(int row, gofi::TxtTask task, bool* success = nullptr);
     void taskRemoved(qint64 taskId);
     void tasksReordered();
-    void taskDoneToggled(int row, gofi::TxtTask task);
+    void taskDoneToggled(int row, gofi::TxtTask task, bool* success = nullptr);
     void taskBecameInvalid(int row);
 
 private:

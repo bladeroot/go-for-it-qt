@@ -88,72 +88,127 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
     case DoneRole: {
         const bool newDone = value.toBool();
         if (t.isDone() == newDone) return false;
-        t.setDone(newDone);
-        emit taskDoneToggled(index.row(), t);
+        TxtTask updatedTask = t;
+        updatedTask.setDone(newDone);
+        bool ok = true;
+        emit taskDoneToggled(index.row(), updatedTask, &ok);
+        if (!ok) {
+            return false;
+        }
+        if (index.row() < m_tasks.size() && m_tasks[index.row()].id() == updatedTask.id()) {
+            m_tasks[index.row()].setDone(newDone);
+        }
         return true;
     }
     case StatusRole: {
         const QString newStatus = value.toString().trimmed().toLower();
         if (newStatus.isEmpty() || t.status() == newStatus) return false;
         const bool oldDone = t.isDone();
-        t.setStatus(newStatus);
-        if (oldDone != t.isDone()) {
-            emit taskDoneToggled(index.row(), t);
+        const bool willBeDone = TxtTask::isClosedStatus(newStatus);
+        if (oldDone != willBeDone) {
+            TxtTask updatedTask = t;
+            updatedTask.setStatus(newStatus);
+            bool ok = true;
+            emit taskDoneToggled(index.row(), updatedTask, &ok);
+            if (!ok) {
+                return false;
+            }
+            if (index.row() < m_tasks.size() && m_tasks[index.row()].id() == updatedTask.id()) {
+                m_tasks[index.row()].setStatus(newStatus);
+            }
+            return true;
         } else {
+            TxtTask backup = t;
+            t.setStatus(newStatus);
+            bool ok = true;
+            emit taskUpdated(index.row(), t, &ok);
+            if (!ok) {
+                t = backup;
+                return false;
+            }
             emit dataChanged(index, index, {DoneRole, StatusRole, CompletionDateRole});
-            emit taskUpdated(index.row(), t);
             emit taskDataChanged();
+            emit unviewedTodoCountChanged();
+            emit totalTodoCountChanged();
+            return true;
         }
-        emit unviewedTodoCountChanged();
-        emit totalTodoCountChanged();
-        return true;
     }
     case IsViewedRole: {
         const bool v = value.toBool();
         if (t.isViewed() == v) return false;
+        const bool oldViewed = t.isViewed();
         t.setViewed(v);
+        bool ok = true;
+        emit taskUpdated(index.row(), t, &ok);
+        if (!ok) {
+            t.setViewed(oldViewed);
+            return false;
+        }
         emit dataChanged(index, index, {IsViewedRole});
-        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         emit unviewedTodoCountChanged();
         return true;
     }
     case SimpleTextRole:
     case DescriptionRole: {
+        TxtTask backup = t;
         t.updateFromSimpleTxt(value.toString());
         if (!t.isValid()) {
             emit taskBecameInvalid(index.row());
             return true;
         }
+        bool ok = true;
+        emit taskUpdated(index.row(), t, &ok);
+        if (!ok) {
+            t = backup;
+            return false;
+        }
         emit dataChanged(index, index, {DescriptionRole, SimpleTextRole, PriorityRole, PriorityStringRole, DurationRole, TokensRole, RichTextRole, DueDateRole, DueDateStringRole, IsOverdueRole, IsDueTodayRole, IsDueThisWeekRole});
-        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
     case TimerValueRole: {
         const quint32 sec = value.toUInt();
         if (t.timerValue() == sec) return false;
+        const quint32 oldSec = t.timerValue();
         t.setTimerValue(sec);
+        bool ok = true;
+        emit taskUpdated(index.row(), t, &ok);
+        if (!ok) {
+            t.setTimerValue(oldSec);
+            return false;
+        }
         emit dataChanged(index, index, {TimerValueRole});
-        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
     case DetailsRole: {
         const QString d = value.toString();
         if (t.details() == d) return false;
+        const QString oldDetails = t.details();
         t.setDetails(d);
+        bool ok = true;
+        emit taskUpdated(index.row(), t, &ok);
+        if (!ok) {
+            t.setDetails(oldDetails);
+            return false;
+        }
         emit dataChanged(index, index, {DetailsRole});
-        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
     case PriorityRole: {
         const quint8 prio = static_cast<quint8>(value.toUInt());
         if (t.priority() == prio) return false;
+        const quint8 oldPrio = t.priority();
         t.setPriority(prio);
+        bool ok = true;
+        emit taskUpdated(index.row(), t, &ok);
+        if (!ok) {
+            t.setPriority(oldPrio);
+            return false;
+        }
         emit dataChanged(index, index, {PriorityRole, PriorityStringRole, SimpleTextRole});
-        emit taskUpdated(index.row(), t);
         emit taskDataChanged();
         return true;
     }
