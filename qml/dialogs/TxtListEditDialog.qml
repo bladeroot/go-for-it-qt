@@ -150,6 +150,7 @@ Dialog {
         apiTokenField.text = ""
         jiraJqlField.text = ""
         autoWorklogCheck.checked = true
+        syncStatusToRemoteCheck.checked = false
         rebuildStatusMappingModel({})
         rebuildPriorityMappingModel({})
         statusFetchLabel.text = ""
@@ -183,6 +184,7 @@ Dialog {
         apiTokenField.text = cfg.apiToken || ""
         jiraJqlField.text = cfg.jiraJql || ""
         autoWorklogCheck.checked = cfg.autoWorklog !== undefined ? cfg.autoWorklog : true
+        syncStatusToRemoteCheck.checked = cfg.syncStatusToRemote !== undefined ? cfg.syncStatusToRemote : false
         rebuildStatusMappingModel(cfg.statusMapping || ({}))
         rebuildPriorityMappingModel(cfg.priorityMapping || ({}))
         statusFetchLabel.text = ""
@@ -209,6 +211,7 @@ Dialog {
             apiToken: apiTokenField.text.trim(),
             jiraJql: jiraJqlField.text.trim(),
             autoWorklog: autoWorklogCheck.checked,
+            syncStatusToRemote: syncStatusToRemoteCheck.checked,
             statusMapping: exportStatusMappingObject(),
             priorityMapping: exportPriorityMappingObject(),
             activityLogPath: logUsageCheck.checked ? logFilePathField.text.trim() : "",
@@ -368,6 +371,13 @@ Dialog {
                             id: autoWorklogCheck
                             text: qsTr("Automatically log Pomodoro work time (Worklog)")
                             checked: true
+                        }
+
+                        CheckBox {
+                            id: syncStatusToRemoteCheck
+                            text: qsTr("Sync task completion back to tracker")
+                            checked: false
+                            visible: listEditDialog.selectedProvider !== "SQLite"
                         }
                     }
 

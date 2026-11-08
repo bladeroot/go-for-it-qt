@@ -110,6 +110,7 @@ QVariantMap ListManagerModel::getListConfig(const QString& listId) const {
             {QStringLiteral("jiraJql"), QString()},
             {QStringLiteral("apiToken"), QString()},
             {QStringLiteral("autoWorklog"), true},
+            {QStringLiteral("syncStatusToRemote"), false},
             {QStringLiteral("statusMapping"), QVariantMap()},
             {QStringLiteral("priorityMapping"), QVariantMap()}
         };
@@ -128,6 +129,7 @@ QVariantMap ListManagerModel::getListConfig(const QString& listId) const {
         {QStringLiteral("jiraJql"), e.jiraJql},
         {QStringLiteral("apiToken"), e.apiToken},
         {QStringLiteral("autoWorklog"), e.autoWorklog},
+        {QStringLiteral("syncStatusToRemote"), e.syncStatusToRemote},
         {QStringLiteral("statusMapping"), e.statusMapping},
         {QStringLiteral("priorityMapping"), e.priorityMapping}
     };
@@ -191,6 +193,7 @@ QString ListManagerModel::saveListConfig(const QVariantMap& config, const QStrin
     entry.jiraJql = config.value(QStringLiteral("jiraJql")).toString().trimmed();
     entry.apiToken = config.value(QStringLiteral("apiToken")).toString().trimmed();
     entry.autoWorklog = config.value(QStringLiteral("autoWorklog"), true).toBool();
+    entry.syncStatusToRemote = config.value(QStringLiteral("syncStatusToRemote"), false).toBool();
     entry.statusMapping = config.value(QStringLiteral("statusMapping")).toMap();
     entry.priorityMapping = config.value(QStringLiteral("priorityMapping")).toMap();
 
@@ -275,6 +278,7 @@ QVariantMap ListManagerModel::entryAt(int row) const {
         {QStringLiteral("jiraJql"), e.jiraJql},
         {QStringLiteral("apiToken"), e.apiToken},
         {QStringLiteral("autoWorklog"), e.autoWorklog},
+        {QStringLiteral("syncStatusToRemote"), e.syncStatusToRemote},
         {QStringLiteral("statusMapping"), e.statusMapping},
         {QStringLiteral("priorityMapping"), e.priorityMapping}
     };

@@ -5,6 +5,7 @@
 #include <QNetworkReply>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QUrlQuery>
 
@@ -1683,8 +1684,26 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
             return;
         }
 
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+        bool pageLimitReached = false;
+        bool hasError = false;
+        if (!doc.isObject()) {
+            hasError = true;
+        } else {
+            const QJsonObject rootObj = doc.object();
+            if (rootObj.contains(QStringLiteral("errorMessages"))) {
+                hasError = true;
+            }
+            const int total = rootObj.value(QStringLiteral("total")).toInt(-1);
+            const int maxResults = rootObj.value(QStringLiteral("maxResults")).toInt(100);
+            const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
+            if (issuesArr.size() >= maxResults || (total >= 0 && total > issuesArr.size())) {
+                pageLimitReached = true;
+            }
+        }
+
         const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("Jira"));
+        processSyncedItems(entry, items, QStringLiteral("Jira"), pageLimitReached, hasError);
     });
 }
 
@@ -1728,15 +1747,20 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
             return;
         }
 
-        const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(reply->readAll());
-        processSyncedItems(entry, items, QStringLiteral("YouTrack"));
+        const QByteArray bodyBytes = reply->readAll();
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+        const bool hasError = !doc.isArray();
+        const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
+        const bool pageLimitReached = (items.size() >= 100);
+        processSyncedItems(entry, items, QStringLiteral("YouTrack"), pageLimitReached, hasError);
     });
 }
 
 void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                                              const QVector<RemoteIssueItem>& items,
                                              const QString& providerName,
-                                             bool pageLimitReached)
+                                             bool pageLimitReached,
+                                             bool hasError)
 {
     DatabaseManager& db = DatabaseManager::instance();
     QStringList newIssues;
@@ -1769,12 +1793,20 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         }
     }
 
-    // Reconcile: If page limit was not reached, any locally open remote task that is no longer returned
-    // has been closed or resolved on the remote tracker. Mark it done locally!
-    if (!pageLimitReached) {
+    // Reconcile: Only reconcile closed issues if:
+    // 1. Page limit was NOT reached (neither explicitly flagged nor items >= 100).
+    // 2. No partial or parser error occurred (!hasError).
+    // 3. Remote items list is non-empty (!items.isEmpty()) to guard against empty/unparsed responses,
+    //    SSO HTML captive portals, or format shifts wiping out local tasks.
+    const bool limitReached = pageLimitReached || (items.size() >= 100);
+    if (!limitReached && !hasError && !items.isEmpty()) {
         const auto localOpenTasks = db.loadTasks(entry.id, false);
         for (const TxtTask& t : localOpenTasks) {
             if (!t.jiraKey().isEmpty() && !remoteKeys.contains(t.jiraKey())) {
+                if (m_activeTaskChecker && m_activeTaskChecker(entry.id, t.jiraKey())) {
+                    // Do not close a task that currently has an active running timer!
+                    continue;
+                }
                 TxtTask closedTask = t;
                 closedTask.setDone(true);
                 closedTask.setStatus(QStringLiteral("done"));
@@ -1786,7 +1818,6 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     }
 
     endSyncOperation();
-    const bool limitReached = pageLimitReached || (items.size() >= 100);
     const QUrl reqUrl(entry.jiraUrl);
     const bool isInsecureHttp = reqUrl.scheme().compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0 &&
                                 reqUrl.host() != QStringLiteral("localhost") &&
@@ -1861,8 +1892,30 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
             return;
         }
 
-        const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(reply->readAll());
-        processSyncedItems(entry, items, QStringLiteral("GitHub"));
+        const QByteArray bodyBytes = reply->readAll();
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+        bool pageLimitReached = false;
+        bool hasError = false;
+
+        if (!doc.isObject()) {
+            hasError = true;
+        } else {
+            const QJsonObject rootObj = doc.object();
+            if (rootObj.contains(QStringLiteral("message"))) {
+                hasError = true;
+            }
+            if (rootObj.value(QStringLiteral("incomplete_results")).toBool(false)) {
+                pageLimitReached = true;
+            }
+            const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
+            const QJsonArray itemsArray = rootObj.value(QStringLiteral("items")).toArray();
+            if (itemsArray.size() >= 100 || (totalCount >= 0 && totalCount > itemsArray.size())) {
+                pageLimitReached = true;
+            }
+        }
+
+        const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(bodyBytes);
+        processSyncedItems(entry, items, QStringLiteral("GitHub"), pageLimitReached, hasError);
     });
 }
 
@@ -1913,7 +1966,7 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
             emit syncFailed(entry.id, combinedState->errorMsg);
             return;
         }
-        processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached);
+        processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached, combinedState->hasError);
     };
 
     // 1. Fetch Issues
@@ -2000,8 +2053,24 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
             return;
         }
 
-        const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(reply->readAll());
-        processSyncedItems(entry, items, QStringLiteral("Redmine"));
+        const QByteArray bodyBytes = reply->readAll();
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+        bool pageLimitReached = false;
+        bool hasError = false;
+        if (!doc.isObject()) {
+            hasError = true;
+        } else {
+            const QJsonObject rootObj = doc.object();
+            const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
+            const int limit = rootObj.value(QStringLiteral("limit")).toInt(100);
+            const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
+            if (issuesArr.size() >= limit || (totalCount >= 0 && totalCount > issuesArr.size())) {
+                pageLimitReached = true;
+            }
+        }
+
+        const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(bodyBytes);
+        processSyncedItems(entry, items, QStringLiteral("Redmine"), pageLimitReached, hasError);
     });
 }
 
@@ -2030,8 +2099,12 @@ void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
             return;
         }
 
-        const QVector<RemoteIssueItem> items = parseTodoistTasksJson(reply->readAll());
-        processSyncedItems(entry, items, QStringLiteral("Todoist"));
+        const QByteArray bodyBytes = reply->readAll();
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
+        const bool hasError = !doc.isArray();
+        const QVector<RemoteIssueItem> items = parseTodoistTasksJson(bodyBytes);
+        const bool pageLimitReached = (items.size() >= 100);
+        processSyncedItems(entry, items, QStringLiteral("Todoist"), pageLimitReached, hasError);
     });
 }
 
@@ -2074,8 +2147,9 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                 emit syncFailed(entry.id, errMsg);
                 return;
             }
-            const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(reply->readAll());
-            processSyncedItems(entry, items, QStringLiteral("Nextcloud"));
+            const QByteArray bodyBytes = reply->readAll();
+            const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
+            processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty());
         });
         return;
     }
@@ -2120,8 +2194,9 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                         emit syncFailed(entry.id, errMsg);
                         return;
                     }
-                    const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(propReply->readAll());
-                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"));
+                    const QByteArray bodyBytes = propReply->readAll();
+                    const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
+                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty());
                 });
                 return;
             }
@@ -2133,8 +2208,9 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
             return;
         }
 
-        const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(reply->readAll());
-        processSyncedItems(entry, items, QStringLiteral("Nextcloud"));
+        const QByteArray bodyBytes = reply->readAll();
+        const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
+        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty());
     });
 }
 
@@ -2835,10 +2911,37 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
                                                   const QString& localStatus)
 {
     Q_UNUSED(localStatus)
+    if (!listEntry.syncStatusToRemote) return;
+    if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty() || listEntry.apiToken.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
 
+    auto handleReply = [this, listEntry, issueKey, done](QNetworkReply* reply) {
+        if (!reply) return;
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done]() {
+            reply->deleteLater();
+            const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (reply->error() != QNetworkReply::NoError || (statusCode >= 400 && statusCode < 600)) {
+                const QString errMsg = tr("Failed to update status for %1 on %2 (%3): %4")
+                    .arg(issueKey, listEntry.provider)
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
+            } else {
+                setStatusMessage(tr("Updated %1 on %2 to %3")
+                    .arg(issueKey, listEntry.provider, done ? tr("Closed") : tr("Open")));
+            }
+        });
+    };
+
     if (listEntry.provider == QStringLiteral("GitHub")) {
+        // Never send status closure/reopening for Pull Requests (e.g. from reviews)
+        if (issueKey.startsWith(QStringLiteral("PR#"), Qt::CaseInsensitive) ||
+            issueKey.contains(QStringLiteral("#PR#"), Qt::CaseInsensitive)) {
+            return;
+        }
+
         QString repo;
         QString numStr;
         if (issueKey.contains(QLatin1Char('#'))) {
@@ -2870,17 +2973,19 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         applyAuthHeader(req, listEntry);
 
         QJsonObject payload{{QStringLiteral("state"), done ? QStringLiteral("closed") : QStringLiteral("open")}};
-        m_nam.sendCustomRequest(req, "PATCH", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        QNetworkReply* reply = m_nam.sendCustomRequest(req, "PATCH", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        handleReply(reply);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        // Never send status updates for Merge Requests
+        if (issueKey.contains(QLatin1Char('!')) ||
+            issueKey.startsWith(QStringLiteral("MR#"), Qt::CaseInsensitive) ||
+            issueKey.contains(QStringLiteral("#MR#"), Qt::CaseInsensitive)) {
+            return;
+        }
+
         QString proj;
         QString iid;
-        bool isMr = false;
-        if (issueKey.contains(QLatin1Char('!'))) {
-            isMr = true;
-            const QStringList parts = issueKey.split(QLatin1Char('!'));
-            if (parts.size() >= 3) { proj = parts.at(1); iid = parts.at(2); }
-            else if (parts.size() == 2) { iid = parts.at(1); }
-        } else if (issueKey.contains(QLatin1Char('#'))) {
+        if (issueKey.contains(QLatin1Char('#'))) {
             const QStringList parts = issueKey.split(QLatin1Char('#'));
             if (parts.size() >= 3) { proj = parts.at(1); iid = parts.at(2); }
             else if (parts.size() == 2) { iid = parts.at(1); }
@@ -2891,23 +2996,27 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         if (iid.isEmpty()) return;
         if (proj.isEmpty()) {
             proj = listEntry.jiraJql.trimmed();
-            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+            if (proj.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive) ||
+                proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) {
+                proj.clear();
+            }
         }
         if (proj.isEmpty()) {
             static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
             const auto m = glUrlRe.match(baseUrl);
             if (m.hasMatch()) proj = m.captured(1);
         }
-        if (proj.isEmpty()) return;
+        if (proj.isEmpty() || proj.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive)) return;
 
-        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
+        const QString resource = QStringLiteral("issues");
         const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
         QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3").arg(encodedProj, resource, iid));
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
 
         QJsonObject payload{{QStringLiteral("state_event"), done ? QStringLiteral("close") : QStringLiteral("reopen")}};
-        m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        QNetworkReply* reply = m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        handleReply(reply);
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
         QString tdTaskId = issueKey;
         if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
@@ -2917,7 +3026,8 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + tdTaskId + QLatin1Char('/') + action);
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
-        m_nam.post(req, QByteArray());
+        QNetworkReply* reply = m_nam.post(req, QByteArray());
+        handleReply(reply);
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
         QString numStr;
         if (issueKey.contains(QLatin1Char('#'))) numStr = issueKey.split(QLatin1Char('#')).last();
@@ -2930,11 +3040,24 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
 
-        const int statusId = done ? 5 : 1; // 5 = Closed, 1 = New
+        int statusId = done ? 5 : 1;
+        const QString targetCategory = done ? QStringLiteral("done") : QStringLiteral("todo");
+        for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
+            if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0) {
+                bool ok = false;
+                const int mappedId = it.key().toInt(&ok);
+                if (ok && mappedId > 0) {
+                    statusId = mappedId;
+                    break;
+                }
+            }
+        }
+
         QJsonObject payload{
             {QStringLiteral("issue"), QJsonObject{{QStringLiteral("status_id"), statusId}}}
         };
-        m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        handleReply(reply);
     }
 }
 

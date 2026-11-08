@@ -27,6 +27,7 @@ struct TodoListEntry {
     QString jiraJql;
     QString apiToken;
     bool autoWorklog = true;
+    bool syncStatusToRemote = false;
     QVariantMap statusMapping; // remoteStatusName -> "todo" | "in_progress" | "paused" | "done" | "canceled"
     QVariantMap priorityMapping; // remotePriorityName -> "A" | "B" | "C" | "D" | "E" | "none"
 };

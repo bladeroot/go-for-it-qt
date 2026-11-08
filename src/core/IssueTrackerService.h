@@ -9,6 +9,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QVector>
+#include <functional>
 
 class TestTodoTxt;
 
@@ -63,6 +64,10 @@ public:
     static QUrl buildIssueBrowserUrl(const TodoListEntry& listEntry,
                                      const QString& issueKey,
                                      const QString& taskDescription = QString());
+
+    void setActiveTaskChecker(std::function<bool(const QString& listId, const QString& jiraKey)> checker) {
+        m_activeTaskChecker = std::move(checker);
+    }
 
     // Fetch available remote statuses for mapping UI
     Q_INVOKABLE void fetchRemoteStatuses(const QString& provider,
@@ -130,7 +135,7 @@ private:
     void fetchRedmineIssues(const TodoListEntry& entry);
     void fetchTodoistTasks(const TodoListEntry& entry);
     void fetchNextcloudTasks(const TodoListEntry& entry);
-    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false);
+    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false, bool hasError = false);
 
     void startSyncOperation();
     void endSyncOperation();
@@ -139,6 +144,7 @@ private:
     bool m_syncing = false;
     int m_activeSyncRequests = 0;
     QString m_lastStatusMessage;
+    std::function<bool(const QString& listId, const QString& jiraKey)> m_activeTaskChecker;
 
     friend class ::TestTodoTxt;
 };

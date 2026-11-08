@@ -852,7 +852,7 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
         return;
     }
     if (seq == "j" || seq == "\033[B") {
-        m_listEditRow = qMin(7, m_listEditRow + 1);
+        m_listEditRow = qMin(8, m_listEditRow + 1);
         return;
     }
     if (seq == "k" || seq == "\033[A") {
@@ -878,6 +878,10 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
             return;
         }
         if (m_listEditRow == 7) {
+            m_editingListCfg[QStringLiteral("syncStatusToRemote")] = !m_editingListCfg.value(QStringLiteral("syncStatusToRemote"), false).toBool();
+            return;
+        }
+        if (m_listEditRow == 8) {
             // Save & Activate List
             const QVariantMap check = m_app->listManager()->validateAndCheckConflicts(m_editingListCfg);
             if (!check.value(QStringLiteral("valid")).toBool()) {
@@ -1941,14 +1945,15 @@ void TuiApp::render() {
             tr("5. API Token / Permanent Token  : %1").arg(tokenMasked),
             tr("6. JQL / Search Query           : %1").arg(m_editingListCfg.value(QStringLiteral("jiraJql")).toString()),
             tr("7. Auto-log Pomodoro Worklog    : %1").arg(m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool() ? tr("[ON]") : tr("[OFF]")),
-            tr("8. >>> [ SAVE & ACTIVATE LIST ] <<<")
+            tr("8. Sync Status Back to Tracker  : %1").arg(m_editingListCfg.value(QStringLiteral("syncStatusToRemote"), false).toBool() ? tr("[ON]") : tr("[OFF]")),
+            tr("9. >>> [ SAVE & ACTIVATE LIST ] <<<")
         };
         for (int r = 1; r < bodyRows; ++r) {
             const int idx = r - 1;
             if (idx < editItems.size()) {
                 const bool isSel = (idx == m_listEditRow);
                 const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
-                out += (isSel ? (BG_SELECTED + (idx == 7 ? FG_GREEN : FG_WHITE) + ESC_BOLD) : (idx == 7 ? FG_GREEN : FG_WHITE))
+                out += (isSel ? (BG_SELECTED + (idx == 8 ? FG_GREEN : FG_WHITE) + ESC_BOLD) : (idx == 8 ? FG_GREEN : FG_WHITE))
                     + padRight(prefix + editItems.at(idx), m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
             } else {
                 out += QStringLiteral("\033[K\r\n");

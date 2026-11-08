@@ -1503,6 +1503,99 @@ private slots:
         QCOMPARE(doneTasks.first().status(), QStringLiteral("done"));
         QCOMPARE(changesSpy.count(), 1);
 
+        // Test 1: Truncated page / limit reached (>= 100 items) must NOT close any remaining open tasks
+        {
+            // Insert another task 3
+            TxtTask t3 = TxtTask::fromSimpleTxt(QStringLiteral("Issue 3"), false, false);
+            t3.setJiraKey(QStringLiteral("TEST#test/proj#3"));
+            QVERIFY(db.insertTask(ghList.id, t3, 2) >= 0);
+
+            QVector<RemoteIssueItem> pageOf100;
+            for (int i = 0; i < 100; ++i) {
+                RemoteIssueItem r;
+                r.key = QStringLiteral("TEST#test/proj#%1").arg(100 + i);
+                r.description = QStringLiteral("Page item %1").arg(i);
+                r.remoteStatus = QStringLiteral("open");
+                pageOf100.append(r);
+            }
+            // Neither item 2 nor item 3 are in pageOf100, but because size >= 100, reconciliation must NOT close them!
+            svc.processSyncedItems(ghList, pageOf100, QStringLiteral("GitHub"), true);
+            const auto remainingOpen = db.loadTasks(ghList.id, false);
+            bool hasItem2 = false;
+            bool hasItem3 = false;
+            for (const auto& t : remainingOpen) {
+                if (t.jiraKey() == QStringLiteral("TEST#test/proj#2")) hasItem2 = true;
+                if (t.jiraKey() == QStringLiteral("TEST#test/proj#3")) hasItem3 = true;
+            }
+            QVERIFY(hasItem2);
+            QVERIFY(hasItem3);
+        }
+
+        // Test 2: Empty response (items.isEmpty()) must NOT close any local open tasks
+        {
+            const auto openBeforeEmpty = db.loadTasks(ghList.id, false);
+            QVERIFY(!openBeforeEmpty.isEmpty());
+            svc.processSyncedItems(ghList, {}, QStringLiteral("GitHub"), false);
+            const auto openAfterEmpty = db.loadTasks(ghList.id, false);
+            QCOMPARE(openAfterEmpty.size(), openBeforeEmpty.size());
+        }
+
+        // Test 3: Error during sync (hasError == true) must NOT close any open tasks
+        {
+            const auto openBeforeError = db.loadTasks(ghList.id, false);
+            QVector<RemoteIssueItem> partialItems;
+            RemoteIssueItem r;
+            r.key = QStringLiteral("TEST#test/proj#9999");
+            r.description = QStringLiteral("Unrelated item");
+            r.remoteStatus = QStringLiteral("open");
+            partialItems.append(r);
+            svc.processSyncedItems(ghList, partialItems, QStringLiteral("GitHub"), false, true /* hasError */);
+            const auto openAfterError = db.loadTasks(ghList.id, false);
+            // Verify existing local tasks were NOT closed
+            bool hasItem2 = false;
+            for (const auto& t : openAfterError) {
+                if (t.jiraKey() == QStringLiteral("TEST#test/proj#2")) hasItem2 = true;
+            }
+            QVERIFY(hasItem2);
+        }
+
+        // Test 4: Task with an active timer running is protected from remote reconciliation
+        {
+            TxtTask activeT = TxtTask::fromSimpleTxt(QStringLiteral("Active Timer Task"), false, false);
+            activeT.setJiraKey(QStringLiteral("TEST#test/proj#active"));
+            QVERIFY(db.insertTask(ghList.id, activeT, 3) >= 0);
+
+            svc.setActiveTaskChecker([](const QString& listId, const QString& jiraKey) {
+                Q_UNUSED(listId)
+                return jiraKey == QStringLiteral("TEST#test/proj#active");
+            });
+
+            // Reconcile with only item2 returned (item 'active' is omitted from remote response)
+            svc.processSyncedItems(ghList, remoteItems, QStringLiteral("GitHub"), false);
+
+            const auto openAfterActiveSync = db.loadTasks(ghList.id, false);
+            bool activeStillOpen = false;
+            for (const auto& t : openAfterActiveSync) {
+                if (t.jiraKey() == QStringLiteral("TEST#test/proj#active")) activeStillOpen = true;
+            }
+            QVERIFY(activeStillOpen);
+        }
+
+        // Test 5: syncStatusToRemote persistence in DatabaseManager
+        {
+            ghList.syncStatusToRemote = true;
+            QVERIFY(db.saveList(ghList, 0));
+            const auto loadedLists = db.loadLists();
+            bool found = false;
+            for (const auto& l : loadedLists) {
+                if (l.id == ghList.id) {
+                    found = true;
+                    QVERIFY(l.syncStatusToRemote);
+                }
+            }
+            QVERIFY(found);
+        }
+
         db.close();
         QFile::remove(testDb);
     }

@@ -268,6 +268,7 @@ bool DatabaseManager::createSchema() {
             "  jira_jql TEXT NOT NULL DEFAULT '',"
             "  api_token TEXT NOT NULL DEFAULT '',"
             "  auto_worklog INTEGER NOT NULL DEFAULT 1,"
+            "  sync_status_to_remote INTEGER NOT NULL DEFAULT 0,"
             "  status_mapping TEXT NOT NULL DEFAULT '',"
             "  priority_mapping TEXT NOT NULL DEFAULT ''"
             ");"))) {
@@ -275,6 +276,7 @@ bool DatabaseManager::createSchema() {
     }
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN api_token TEXT NOT NULL DEFAULT '';"));
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN auto_worklog INTEGER NOT NULL DEFAULT 1;"));
+    q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN sync_status_to_remote INTEGER NOT NULL DEFAULT 0;"));
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN status_mapping TEXT NOT NULL DEFAULT '';"));
     q.exec(QStringLiteral("ALTER TABLE lists ADD COLUMN priority_mapping TEXT NOT NULL DEFAULT '';"));
 
@@ -561,7 +563,7 @@ QVector<TodoListEntry> DatabaseManager::loadLists() const {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "SELECT id, name, provider, activity_log_path, add_creation_dates, "
-        "reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping, priority_mapping "
+        "reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping, priority_mapping, sync_status_to_remote "
         "FROM lists ORDER BY sort_order ASC, rowid ASC"
     ));
     if (!q.exec()) {
@@ -583,6 +585,7 @@ QVector<TodoListEntry> DatabaseManager::loadLists() const {
         e.autoWorklog = q.value(11).toInt() != 0;
         e.statusMapping = deserializeStatusMapping(q.value(12).toString());
         e.priorityMapping = deserializePriorityMapping(q.value(13).toString());
+        e.syncStatusToRemote = q.value(14).toInt() != 0;
         e.directoryPath = m_dbPath;
         result.append(std::move(e));
     }
@@ -593,9 +596,9 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "INSERT INTO lists (id, name, provider, sort_order, activity_log_path, "
-        "add_creation_dates, reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping, priority_mapping) "
+        "add_creation_dates, reminder_time, custom_schedule, jira_url, jira_user, jira_jql, api_token, auto_worklog, status_mapping, priority_mapping, sync_status_to_remote) "
         "VALUES (:id, :name, :provider, :sort_order, :activity_log_path, "
-        ":add_creation_dates, :reminder_time, :custom_schedule, :jira_url, :jira_user, :jira_jql, :api_token, :auto_worklog, :status_mapping, :priority_mapping) "
+        ":add_creation_dates, :reminder_time, :custom_schedule, :jira_url, :jira_user, :jira_jql, :api_token, :auto_worklog, :status_mapping, :priority_mapping, :sync_status_to_remote) "
         "ON CONFLICT(id) DO UPDATE SET "
         "  name = excluded.name,"
         "  provider = excluded.provider,"
@@ -610,7 +613,8 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
         "  api_token = excluded.api_token,"
         "  auto_worklog = excluded.auto_worklog,"
         "  status_mapping = excluded.status_mapping,"
-        "  priority_mapping = excluded.priority_mapping"
+        "  priority_mapping = excluded.priority_mapping,"
+        "  sync_status_to_remote = excluded.sync_status_to_remote"
     ));
     q.bindValue(QStringLiteral(":id"), nonNullString(entry.id));
     q.bindValue(QStringLiteral(":name"), nonNullString(entry.name));
@@ -627,6 +631,7 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
     q.bindValue(QStringLiteral(":auto_worklog"), entry.autoWorklog ? 1 : 0);
     q.bindValue(QStringLiteral(":status_mapping"), nonNullString(serializeStatusMapping(entry.statusMapping)));
     q.bindValue(QStringLiteral(":priority_mapping"), nonNullString(serializePriorityMapping(entry.priorityMapping)));
+    q.bindValue(QStringLiteral(":sync_status_to_remote"), entry.syncStatusToRemote ? 1 : 0);
     return q.exec();
 }
 

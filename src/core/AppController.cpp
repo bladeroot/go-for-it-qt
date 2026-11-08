@@ -53,6 +53,18 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     connect(&m_desktopIntegration, &DesktopIntegration::showWindowRequested, this, &AppController::showWindowRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::quitRequested, this, &AppController::quitRequested);
 
+    m_issueTracker.setActiveTaskChecker([this](const QString& listId, const QString& jiraKey) {
+        if (m_timer.isRunning() && m_timer.hasActiveTask()) {
+            if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+                const TxtTask t = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
+                if (t.jiraKey() == jiraKey && (listId.isEmpty() || listId == m_currentListId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    });
+
     connect(&m_issueTracker, &IssueTrackerService::listIssuesSynced, this, [this](const QString& listId, int) {
         if (m_currentListId == listId) {
             m_taskManager.refresh();
@@ -330,7 +342,7 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     );
     if (!remoteKey.isEmpty() && !effectiveListId.isEmpty()) {
         for (const TodoListEntry& listEntry : m_listManager.entries()) {
-            if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite")) {
+            if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite") && listEntry.syncStatusToRemote) {
                 m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, willBeDone, willBeDone ? QStringLiteral("done") : QStringLiteral("todo"));
                 break;
             }
@@ -356,6 +368,7 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
     const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
     const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
+    const bool wasDone = (oldStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
     const bool isCompleting = (newStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
 
     store->setTaskStatus(sourceRow, newStatus);
@@ -364,10 +377,14 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
             tr("Task status changed"),
             QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
         );
-        if (!remoteKey.isEmpty() && !effectiveListId.isEmpty()) {
+        if (!remoteKey.isEmpty() && !effectiveListId.isEmpty() && wasDone != isCompleting) {
             for (const TodoListEntry& listEntry : m_listManager.entries()) {
-                if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite")) {
-                    m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, isCompleting, newStatus);
+                if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite") && listEntry.syncStatusToRemote) {
+                    if (isCompleting) {
+                        m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, true, newStatus);
+                    } else if (newStatus.compare(QStringLiteral("todo"), Qt::CaseInsensitive) == 0) {
+                        m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, false, newStatus);
+                    }
                     break;
                 }
             }
