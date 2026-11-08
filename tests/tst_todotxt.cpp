@@ -2199,6 +2199,100 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(testDb);
     }
+
+    void testDatabaseErrorHandlingAndNonFinalStatusTimer() {
+        const QString testDb = QStringLiteral("/tmp/gofi-dberr-test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QString(), testDb);
+            const QSqlDatabase dbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+
+            // 1. Non-final status change does NOT stop timer
+            const QString listId = ctrl.listManager()->addList(QStringLiteral("Status Timer List"));
+            ctrl.selectListById(listId);
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+            ctrl.addNewTask(QStringLiteral("Work in progress task"));
+            ctrl.setActiveTodoRow(0);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+
+            // Change to 'in_progress' - timer must CONTINUE running
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("in_progress"));
+            QVERIFY(ctrl.timer()->isRunning());
+
+            // Setting same status again - timer must CONTINUE running
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("in_progress"));
+            QVERIFY(ctrl.timer()->isRunning());
+
+            // Only completing to 'done' stops the timer
+            ctrl.changeTaskStatus(false, 0, QStringLiteral("done"));
+            QVERIFY(!ctrl.timer()->isRunning());
+
+            // 2. addList database failure handling
+            QSqlQuery trig(dbConn);
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_add_list BEFORE INSERT ON lists "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated addList error'); END;"
+            )));
+
+            bool errReceived = false;
+            QObject::connect(&ctrl, &AppController::databaseError, [&errReceived](const QString&) {
+                errReceived = true;
+            });
+
+            const QString failedId = ctrl.listManager()->addList(QStringLiteral("Will Fail"));
+            QVERIFY(failedId.isEmpty());
+            QVERIFY(errReceived);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_add_list"));
+
+            // 3. clearDoneList database failure handling
+            QVERIFY(ctrl.doneProxyModel()->rowCount() > 0);
+            const int doneCountBefore = ctrl.doneProxyModel()->rowCount();
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_clear_done BEFORE DELETE ON tasks "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated clearDone error'); END;"
+            )));
+
+            errReceived = false;
+            ctrl.clearDoneTasks();
+            QVERIFY(errReceived);
+            // Done tasks must NOT be cleared from UI when database delete failed
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), doneCountBefore);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_clear_done"));
+
+            // Now clean clear succeeds
+            ctrl.clearDoneTasks();
+            QCOMPARE(ctrl.doneProxyModel()->rowCount(), 0);
+
+            // 4. Remote sync write error stops reconciliation and reports syncFailed
+            TodoListEntry entry = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(listId));
+            QVector<RemoteIssueItem> items;
+            RemoteIssueItem it;
+            it.key = QStringLiteral("ERR-1");
+            it.description = QStringLiteral("Sync error task");
+            items.append(it);
+
+            QVERIFY(trig.exec(QStringLiteral(
+                "CREATE TRIGGER test_fail_upsert BEFORE INSERT ON tasks "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated upsert error'); END;"
+            )));
+
+            bool syncFailedCalled = false;
+            QObject::connect(ctrl.issueTracker(), &IssueTrackerService::syncFailed, [&syncFailedCalled](const QString&, const QString&) {
+                syncFailedCalled = true;
+            });
+
+            ctrl.issueTracker()->processSyncedItems(entry, items, QStringLiteral("Jira"), false, false, false);
+            QVERIFY(syncFailedCalled);
+            trig.exec(QStringLiteral("DROP TRIGGER test_fail_upsert"));
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
