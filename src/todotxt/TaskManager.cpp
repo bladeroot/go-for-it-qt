@@ -71,12 +71,22 @@ void TaskManager::addNewTask(const QString& simpleText, bool onTop, bool addCrea
 }
 
 void TaskManager::clearDoneList() {
+    bool allSuccess = true;
     if (!m_listIds.isEmpty()) {
         for (const QString& lid : m_listIds) {
-            DatabaseManager::instance().deleteDoneTasks(lid);
+            if (!DatabaseManager::instance().deleteDoneTasks(lid)) {
+                allSuccess = false;
+            }
         }
     } else if (!m_listId.isEmpty()) {
-        DatabaseManager::instance().deleteDoneTasks(m_listId);
+        if (!DatabaseManager::instance().deleteDoneTasks(m_listId)) {
+            allSuccess = false;
+        }
+    }
+    if (!allSuccess) {
+        emit errorOccurred(tr("Failed to delete completed tasks from database."));
+        loadFromDatabase(false);
+        return;
     }
     m_movingBetweenStores = true;
     m_doneStore.clear();
@@ -104,7 +114,9 @@ void TaskManager::onTodoTaskDoneToggled(int row, const TxtTask& task) {
     m_todoStore.removeAt(row);
     m_movingBetweenStores = false;
 
-    updateTasksOrders(false, m_todoStore.tasks());
+    if (!updateTasksOrders(false, m_todoStore.tasks())) {
+        return;
+    }
     m_doneStore.appendTask(task);
 }
 
@@ -119,7 +131,9 @@ void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task) {
     m_doneStore.removeAt(row);
     m_movingBetweenStores = false;
 
-    updateTasksOrders(true, m_doneStore.tasks());
+    if (!updateTasksOrders(true, m_doneStore.tasks())) {
+        return;
+    }
     m_todoStore.appendTask(task);
 }
 
@@ -148,8 +162,8 @@ void TaskManager::onDoneTasksReordered() {
     updateTasksOrders(true, m_doneStore.tasks());
 }
 
-void TaskManager::updateTasksOrders(bool done, const QVector<TxtTask>& tasks) {
-    if (tasks.isEmpty()) return;
+bool TaskManager::updateTasksOrders(bool done, const QVector<TxtTask>& tasks) {
+    if (tasks.isEmpty()) return true;
     QMap<QString, QVector<TxtTask>> tasksByList;
     for (const TxtTask& t : tasks) {
         const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
@@ -166,7 +180,9 @@ void TaskManager::updateTasksOrders(bool done, const QVector<TxtTask>& tasks) {
     if (!allSucceeded) {
         emit errorOccurred(tr("Failed to update tasks order in database."));
         loadFromDatabase(false);
+        return false;
     }
+    return true;
 }
 
 void TaskManager::loadFromDatabase(bool addDefaultsIfEmpty) {

@@ -84,7 +84,10 @@ QString ListManagerModel::addList(const QString& name, const QString& directoryP
     entry.directoryPath = DatabaseManager::instance().databasePath();
 
     const int pos = static_cast<int>(m_entries.size());
-    DatabaseManager::instance().saveList(entry, pos);
+    if (!DatabaseManager::instance().saveList(entry, pos)) {
+        emit errorOccurred(tr("Failed to save new list to database."));
+        return {};
+    }
 
     beginInsertRows(QModelIndex(), pos, pos);
     m_entries.append(entry);

@@ -49,7 +49,7 @@ private slots:
 
 private:
     void loadFromDatabase(bool addDefaultsIfEmpty);
-    void updateTasksOrders(bool done, const QVector<TxtTask>& tasks);
+    bool updateTasksOrders(bool done, const QVector<TxtTask>& tasks);
 
     TaskStoreModel m_todoStore;
     TaskStoreModel m_doneStore;
