@@ -60,9 +60,11 @@ public:
 
     using ToggleDoneHandler = std::function<bool(int row, const TxtTask& task)>;
     using UpdateTaskHandler = std::function<bool(int row, const TxtTask& task)>;
+    using UpdateTaskTimerHandler = std::function<bool(int row, const TxtTask& task)>;
 
     void setToggleDoneHandler(ToggleDoneHandler handler) { m_toggleDoneHandler = std::move(handler); }
     void setUpdateTaskHandler(UpdateTaskHandler handler) { m_updateTaskHandler = std::move(handler); }
+    void setUpdateTaskTimerHandler(UpdateTaskTimerHandler handler) { m_updateTaskTimerHandler = std::move(handler); }
 
     Q_INVOKABLE void removeAt(int row);
     Q_INVOKABLE void moveItem(int fromRow, int toRow);
@@ -86,7 +88,7 @@ signals:
     void taskUpdated(int row, gofi::TxtTask task);
     void taskRemoved(qint64 taskId);
     void tasksReordered();
-    void taskDoneToggled(int row, gofi::TxtTask task);
+    void taskDoneToggled(gofi::TxtTask task);
     void taskBecameInvalid(int row);
 
 private:
@@ -94,6 +96,7 @@ private:
     bool m_doneByDefault = false;
     ToggleDoneHandler m_toggleDoneHandler;
     UpdateTaskHandler m_updateTaskHandler;
+    UpdateTaskTimerHandler m_updateTaskTimerHandler;
 };
 
 } // namespace gofi

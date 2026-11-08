@@ -97,7 +97,7 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
         } else {
             t.setDone(newDone);
         }
-        emit taskDoneToggled(index.row(), updatedTask);
+        emit taskDoneToggled(updatedTask);
         return true;
     }
     case StatusRole: {
@@ -115,7 +115,7 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
             } else {
                 t.setStatus(newStatus);
             }
-            emit taskDoneToggled(index.row(), updatedTask);
+            emit taskDoneToggled(updatedTask);
             return true;
         } else {
             TxtTask updatedTask = t;
@@ -169,7 +169,11 @@ bool TaskStoreModel::setData(const QModelIndex& index, const QVariant& value, in
         if (t.timerValue() == sec) return false;
         TxtTask updated = t;
         updated.setTimerValue(sec);
-        if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
+        if (m_updateTaskTimerHandler) {
+            if (!m_updateTaskTimerHandler(index.row(), updated)) {
+                return false;
+            }
+        } else if (m_updateTaskHandler && !m_updateTaskHandler(index.row(), updated)) {
             return false;
         }
         t.setTimerValue(sec);

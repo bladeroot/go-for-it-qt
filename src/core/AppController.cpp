@@ -351,11 +351,11 @@ void AppController::addNewTask(const QString& simpleText) {
     }
 }
 
-void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
+bool AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
-    toggleTaskDoneSource(fromDoneList, sourceRow);
+    if (sourceRow < 0) return false;
+    return toggleTaskDoneSource(fromDoneList, sourceRow);
 }
 
 bool AppController::toggleTaskDoneSource(bool fromDoneList, int sourceRow) {
@@ -408,11 +408,11 @@ bool AppController::toggleTaskDoneSource(bool fromDoneList, int sourceRow) {
     return true;
 }
 
-void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus) {
+bool AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
-    changeTaskStatusSource(fromDoneList, sourceRow, newStatus);
+    if (sourceRow < 0) return false;
+    return changeTaskStatusSource(fromDoneList, sourceRow, newStatus);
 }
 
 bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, const QString& newStatus) {
@@ -470,11 +470,11 @@ bool AppController::changeTaskStatusSource(bool fromDoneList, int sourceRow, con
     return true;
 }
 
-void AppController::changeTaskPriority(bool fromDoneList, int proxyRow, const QString& priorityLetter) {
+bool AppController::changeTaskPriority(bool fromDoneList, int proxyRow, const QString& priorityLetter) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
+    if (sourceRow < 0) return false;
 
     quint8 prio = TxtTask::NoPriority;
     const QString p = priorityLetter.trimmed().toUpper();
@@ -486,30 +486,35 @@ void AppController::changeTaskPriority(bool fromDoneList, int proxyRow, const QS
     }
 
     const QModelIndex idx = store->index(sourceRow, 0);
-    store->setData(idx, prio, TaskStoreModel::PriorityRole);
+    return store->setData(idx, prio, TaskStoreModel::PriorityRole);
 }
 
-void AppController::updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText) {
+bool AppController::updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
+    if (sourceRow < 0) return false;
 
-    store->updateTaskText(sourceRow, simpleText);
+    if (!store->updateTaskText(sourceRow, simpleText)) {
+        return false;
+    }
     if (!fromDoneList && sourceRow == m_activeTodoRow) {
         syncActiveTaskToTimer();
     }
+    return true;
 }
 
-void AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details) {
+bool AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
-
-    store->updateTaskDetails(sourceRow, details);
+    if (sourceRow < 0) return false;
 
     const TxtTask task = store->taskAt(sourceRow);
+    if (!store->updateTaskDetails(sourceRow, details)) {
+        return false;
+    }
+
     const QString targetListId = task.listId().isEmpty() ? m_currentListId : task.listId();
     const int listIdx = m_listManager.indexOfId(targetListId);
     if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
@@ -518,14 +523,15 @@ void AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QSt
             m_issueTracker.updateIssueDescription(listEntry, task.jiraKey(), details);
         }
     }
+    return true;
 }
 
-void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText) {
-    if (commentText.trimmed().isEmpty()) return;
+bool AppController::addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText) {
+    if (commentText.trimmed().isEmpty()) return false;
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
+    if (sourceRow < 0) return false;
 
     const TxtTask task = store->taskAt(sourceRow);
     const QString targetListId = task.listId().isEmpty() ? m_currentListId : task.listId();
@@ -537,7 +543,9 @@ void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QStrin
             author = listEntry.jiraUser.trimmed();
         }
     }
-    store->appendTaskComment(sourceRow, author, commentText);
+    if (!store->appendTaskComment(sourceRow, author, commentText)) {
+        return false;
+    }
 
     if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
         const TodoListEntry listEntry = m_listManager.entry(listIdx);
@@ -545,6 +553,7 @@ void AppController::addTaskComment(bool fromDoneList, int proxyRow, const QStrin
             m_issueTracker.postIssueComment(listEntry, task.jiraKey(), commentText);
         }
     }
+    return true;
 }
 
 int AppController::unviewedTodoCount() const {
@@ -555,12 +564,11 @@ int AppController::totalTodoCount() const {
     return m_taskManager.todoModel()->totalTodoCount();
 }
 
-void AppController::markTaskViewed(bool fromDoneList, int proxyRow) {
-    if (fromDoneList) return;
+bool AppController::markTaskViewed(bool fromDoneList, int proxyRow) {
+    if (fromDoneList) return false;
     const int sourceRow = m_todoProxy.mapToSourceRow(proxyRow);
-    if (sourceRow >= 0) {
-        m_taskManager.todoModel()->markTaskViewed(sourceRow);
-    }
+    if (sourceRow < 0) return false;
+    return m_taskManager.todoModel()->markTaskViewed(sourceRow);
 }
 
 void AppController::removeTask(bool fromDoneList, int proxyRow) {
@@ -826,23 +834,36 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
 
 void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
     const qint64 timedTaskId = m_timer.activeTaskId();
+    bool ok = true;
     if (timedTaskId >= 0) {
         const int row = findActiveTodoRowById(timedTaskId);
         if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
-            m_taskManager.todoModel()->setTaskTimerValue(row, totalSeconds);
-            return;
-        }
-        for (int r = 0; r < m_taskManager.doneModel()->rowCount(); ++r) {
-            if (m_taskManager.doneModel()->taskAt(r).id() == timedTaskId) {
-                m_taskManager.doneModel()->setTaskTimerValue(r, totalSeconds);
-                return;
+            ok = m_taskManager.todoModel()->setTaskTimerValue(row, totalSeconds);
+        } else {
+            bool foundInDone = false;
+            for (int r = 0; r < m_taskManager.doneModel()->rowCount(); ++r) {
+                if (m_taskManager.doneModel()->taskAt(r).id() == timedTaskId) {
+                    ok = m_taskManager.doneModel()->setTaskTimerValue(r, totalSeconds);
+                    foundInDone = true;
+                    break;
+                }
+            }
+            if (!foundInDone) {
+                ok = DatabaseManager::instance().updateTaskTimer(timedTaskId, totalSeconds);
             }
         }
-        DatabaseManager::instance().updateTaskTimer(timedTaskId, totalSeconds);
-        return;
+    } else if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        ok = m_taskManager.todoModel()->setTaskTimerValue(m_activeTodoRow, totalSeconds);
     }
-    if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
-        m_taskManager.todoModel()->setTaskTimerValue(m_activeTodoRow, totalSeconds);
+
+    if (!ok) {
+        const QString err = tr("Failed to save task timer progress to database.");
+        qWarning() << "AppController::onActiveTaskTimeUpdated database error:" << err;
+        m_notifications.notifyTaskEvent(tr("Database Error"), err);
+        emit databaseError(err);
+        if (m_timer.isRunning()) {
+            m_timer.stop();
+        }
     }
 }
 

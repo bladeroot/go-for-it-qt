@@ -22,6 +22,13 @@ TaskManager::TaskManager(QObject* parent)
         return updateTaskInDatabase(row, task);
     });
 
+    m_todoStore.setUpdateTaskTimerHandler([this](int row, const TxtTask& task) {
+        return updateTaskTimerInDatabase(row, task);
+    });
+    m_doneStore.setUpdateTaskTimerHandler([this](int row, const TxtTask& task) {
+        return updateTaskTimerInDatabase(row, task);
+    });
+
     connect(&m_todoStore, &TaskStoreModel::taskRemoved, this, &TaskManager::onTaskRemoved);
     connect(&m_doneStore, &TaskStoreModel::taskRemoved, this, &TaskManager::onTaskRemoved);
 
@@ -277,6 +284,20 @@ bool TaskManager::updateTaskInDatabase(int row, const TxtTask& task) {
         emit errorOccurred(tr("Failed to update task in database."));
         loadFromDatabase(false);
         return false;
+    }
+    return true;
+}
+
+bool TaskManager::updateTaskTimerInDatabase(int row, const TxtTask& task) {
+    Q_UNUSED(row)
+    if (m_suppressStoreTaskUpdated) {
+        return true;
+    }
+    if (task.id() >= 0) {
+        if (!DatabaseManager::instance().updateTaskTimer(task.id(), task.timerValue())) {
+            emit errorOccurred(tr("Failed to update task timer in database."));
+            return false;
+        }
     }
     return true;
 }

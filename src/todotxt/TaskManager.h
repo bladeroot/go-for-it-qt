@@ -50,6 +50,7 @@ private:
     bool toggleTodoTaskDone(int row, const gofi::TxtTask& task);
     bool toggleDoneTaskDone(int row, const gofi::TxtTask& task);
     bool updateTaskInDatabase(int row, const gofi::TxtTask& task);
+    bool updateTaskTimerInDatabase(int row, const gofi::TxtTask& task);
     void loadFromDatabase(bool addDefaultsIfEmpty);
     bool updateTasksOrders(bool done, const QVector<TxtTask>& tasks);
 
