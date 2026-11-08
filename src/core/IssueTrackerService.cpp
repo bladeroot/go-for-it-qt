@@ -2276,9 +2276,9 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             }
         });
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        QString taskId = issueKey;
-        if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
-        if (taskId.isEmpty()) return;
+        QString tdTaskId = issueKey;
+        if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
+        if (tdTaskId.isEmpty()) return;
 
         const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
         QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
@@ -2286,7 +2286,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         applyAuthHeader(req, listEntry);
 
         QJsonObject payload{
-            {QStringLiteral("task_id"), taskId},
+            {QStringLiteral("task_id"), tdTaskId},
             {QStringLiteral("content"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
         };
 

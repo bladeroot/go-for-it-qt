@@ -192,10 +192,13 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
         const QString configuredPath = boot.value(QStringLiteral("Storage/databasePath")).toString().trimmed();
         if (!configuredPath.isEmpty()) {
             targetPath = configuredPath;
-            QFileInfo(targetPath).dir().mkpath(QStringLiteral("."));
+            const QString dirPath = QFileInfo(targetPath).dir().path();
+            QDir().mkpath(dirPath);
+            QFile::setPermissions(dirPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
         } else {
             const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
             QDir().mkpath(dataDir);
+            QFile::setPermissions(dataDir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
             targetPath = dataDir + QStringLiteral("/goforit.db");
         }
     } else if (targetPath != QStringLiteral(":memory:")) {
@@ -304,6 +307,8 @@ bool DatabaseManager::createSchema() {
     q.exec(QStringLiteral("ALTER TABLE tasks ADD COLUMN is_viewed INTEGER NOT NULL DEFAULT 1;"));
     q.exec(QStringLiteral("UPDATE tasks SET status = 'done' WHERE done = 1 AND status = 'todo';"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tasks_list_done_order ON tasks(list_id, done, sort_order);"));
+    q.exec(QStringLiteral("DELETE FROM tasks WHERE jira_key != '' AND id NOT IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key);"));
+    q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_list_jira_key ON tasks(list_id, jira_key) WHERE jira_key != '';"));
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS activity_log ("
@@ -881,7 +886,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
     QSqlDatabase database = db();
     QSqlQuery check(database);
     check.prepare(QStringLiteral(
-        "SELECT id, duration_seconds, details, status FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
+        "SELECT id, duration_seconds, details, status, comments_json FROM tasks WHERE list_id = :list_id AND jira_key = :jira_key LIMIT 1"
     ));
     check.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
     check.bindValue(QStringLiteral(":jira_key"), nonNullString(issueKey));
@@ -890,6 +895,7 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         const quint32 existingDur = check.value(1).toUInt();
         const QString existingDetails = check.value(2).toString();
         const QString prevStatus = check.value(3).toString();
+        const QString existingCommentsJson = check.value(4).toString();
         if (outOldStatus) *outOldStatus = prevStatus;
         QSqlQuery upd(database);
         upd.prepare(QStringLiteral(
@@ -903,7 +909,8 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":priority"), static_cast<int>(priority));
         upd.bindValue(QStringLiteral(":duration"), durationSeconds > 0 ? durationSeconds : existingDur);
         upd.bindValue(QStringLiteral(":details"), !details.trimmed().isEmpty() ? nonNullString(details) : nonNullString(existingDetails));
-        upd.bindValue(QStringLiteral(":comments_json"), nonNullString(serializeCommentsList(comments)));
+        const QString commentsJson = !comments.isEmpty() ? serializeCommentsList(comments) : existingCommentsJson;
+        upd.bindValue(QStringLiteral(":comments_json"), nonNullString(commentsJson));
         upd.bindValue(QStringLiteral(":id"), existingId);
         return upd.exec();
     }

@@ -7,6 +7,7 @@
 #include "core/ShortcutManager.h"
 #include "core/SystemHookService.h"
 #include "todotxt/TaskFilterProxyModel.h"
+#include "todotxt/TaskManager.h"
 #include "todotxt/TaskStoreModel.h"
 #include "todotxt/TxtTask.h"
 #include "tui/TuiApp.h"
@@ -1229,6 +1230,118 @@ private slots:
 
         db.close();
         QFile::remove(testCsv);
+        QFile::remove(testDb);
+    }
+
+    void testMultiListOperationsAndCommentPreservation() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("multilist_test.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+
+        TodoListEntry list1;
+        list1.id = QStringLiteral("list1");
+        list1.name = QStringLiteral("List One");
+        QVERIFY(db.saveList(list1, 0));
+
+        TodoListEntry list2;
+        list2.id = QStringLiteral("list2");
+        list2.name = QStringLiteral("List Two");
+        QVERIFY(db.saveList(list2, 1));
+
+        // Insert tasks in list1 and list2
+        TxtTask t1 = TxtTask::fromSimpleTxt(QStringLiteral("Task 1 in List 1"), false, false);
+        const qint64 id1 = db.insertTask(list1.id, t1, 0);
+        QVERIFY(id1 >= 0);
+
+        TxtTask t2 = TxtTask::fromSimpleTxt(QStringLiteral("x Done task in List 1"), false, false);
+        t2.setDone(true);
+        const qint64 id2 = db.insertTask(list1.id, t2, 1);
+        QVERIFY(id2 >= 0);
+
+        TxtTask t3 = TxtTask::fromSimpleTxt(QStringLiteral("x Done task in List 2"), false, false);
+        t3.setDone(true);
+        const qint64 id3 = db.insertTask(list2.id, t3, 0);
+        QVERIFY(id3 >= 0);
+
+        // Test multi-list clearDoneList via TaskManager
+        TaskManager mgr;
+        mgr.setActiveLists(QStringList{list1.id, list2.id});
+        QCOMPARE(mgr.doneModel()->rowCount(), 2);
+        mgr.clearDoneList();
+        QCOMPARE(mgr.doneModel()->rowCount(), 0);
+
+        // Verify done tasks were deleted in BOTH list1 and list2 in the database
+        const auto remainingList1Done = db.loadTasks(list1.id, true);
+        const auto remainingList2Done = db.loadTasks(list2.id, true);
+        QCOMPARE(remainingList1Done.size(), 0);
+        QCOMPARE(remainingList2Done.size(), 0);
+
+        // But todo task in list1 remains
+        const auto remainingList1Todo = db.loadTasks(list1.id, false);
+        QCOMPARE(remainingList1Todo.size(), 1);
+
+        // Test TaskManager::addNewTask failing safely when DB insertion fails (foreign key violation)
+        TaskManager invalidDbMgr;
+        invalidDbMgr.setActiveList(QStringLiteral("non_existent_list_id"));
+        QSignalSpy errorSpy(&invalidDbMgr, &TaskManager::errorOccurred);
+        invalidDbMgr.addNewTask(QStringLiteral("Phantom task"), false, false);
+        QCOMPARE(invalidDbMgr.todoModel()->rowCount(), 0);
+        QCOMPARE(errorSpy.count(), 1);
+
+        // Test remote issue comments preservation
+        QVariantList initialComments;
+        initialComments.append(QVariantMap{
+            {QStringLiteral("author"), QStringLiteral("Alice")},
+            {QStringLiteral("body"), QStringLiteral("Initial comment")},
+            {QStringLiteral("created"), QStringLiteral("2026-11-08T00:00:00Z")}
+        });
+
+        bool isNew = false;
+        QString oldStatus;
+        QVERIFY(db.upsertRemoteIssueTask(list1.id, QStringLiteral("TEST-100"), QStringLiteral("Test issue"),
+                                         QStringLiteral("todo"), 2, 60, QStringLiteral("Details"),
+                                         initialComments, &isNew, &oldStatus));
+        QVERIFY(isNew);
+
+        // Verify comments saved
+        auto loadedTasks = db.loadTasks(list1.id, false);
+        TxtTask savedTask;
+        for (const auto& t : loadedTasks) {
+            if (t.jiraKey() == QStringLiteral("TEST-100")) {
+                savedTask = t;
+                break;
+            }
+        }
+        QVERIFY(savedTask.isValid());
+        QCOMPARE(savedTask.comments().size(), 1);
+
+        // Update task with empty comments (simulating issue list sync where comments are omitted)
+        QVariantList emptyComments;
+        QVERIFY(db.upsertRemoteIssueTask(list1.id, QStringLiteral("TEST-100"), QStringLiteral("Updated description"),
+                                         QStringLiteral("todo"), 2, 120, QStringLiteral("Updated details"),
+                                         emptyComments, &isNew, &oldStatus));
+        QVERIFY(!isNew);
+
+        // Verify existing comments were preserved
+        loadedTasks = db.loadTasks(list1.id, false);
+        for (const auto& t : loadedTasks) {
+            if (t.jiraKey() == QStringLiteral("TEST-100")) {
+                savedTask = t;
+                break;
+            }
+        }
+        QCOMPARE(savedTask.comments().size(), 1);
+        QCOMPARE(savedTask.description(), QStringLiteral("Updated description"));
+        QCOMPARE(savedTask.details(), QStringLiteral("Updated details"));
+
+        // Verify unique constraint idx_tasks_list_jira_key prevents duplicates on raw insert
+        TxtTask duplicateTask = TxtTask::fromSimpleTxt(QStringLiteral("Duplicate TEST-100"), false, false);
+        duplicateTask.setJiraKey(QStringLiteral("TEST-100"));
+        const qint64 dupId = db.insertTask(list1.id, duplicateTask, 99);
+        QCOMPARE(dupId, -1);
+
+        db.close();
         QFile::remove(testDb);
     }
 };

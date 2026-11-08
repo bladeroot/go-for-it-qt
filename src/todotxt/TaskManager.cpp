@@ -56,18 +56,26 @@ void TaskManager::addNewTask(const QString& simpleText, bool onTop, bool addCrea
 
     const int order = onTop ? 0 : m_todoStore.rowCount();
     const qint64 newId = DatabaseManager::instance().insertTask(m_listId, task, order);
+    if (newId < 0) {
+        emit errorOccurred(tr("Failed to save new task to SQLite database."));
+        return;
+    }
     task.setId(newId);
 
     if (onTop) {
         m_todoStore.prependTask(task);
-        DatabaseManager::instance().replaceListTasksOrders(m_listId, false, m_todoStore.tasks());
+        updateTasksOrders(false, m_todoStore.tasks());
     } else {
         m_todoStore.appendTask(task);
     }
 }
 
 void TaskManager::clearDoneList() {
-    if (!m_listId.isEmpty()) {
+    if (!m_listIds.isEmpty()) {
+        for (const QString& lid : m_listIds) {
+            DatabaseManager::instance().deleteDoneTasks(lid);
+        }
+    } else if (!m_listId.isEmpty()) {
         DatabaseManager::instance().deleteDoneTasks(m_listId);
     }
     m_movingBetweenStores = true;
@@ -92,7 +100,7 @@ void TaskManager::onTodoTaskDoneToggled(int row, const TxtTask& task) {
 
     const int newOrder = m_doneStore.rowCount();
     DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder);
-    DatabaseManager::instance().replaceListTasksOrders(m_listId, false, m_todoStore.tasks());
+    updateTasksOrders(false, m_todoStore.tasks());
     m_doneStore.appendTask(task);
 }
 
@@ -103,7 +111,7 @@ void TaskManager::onDoneTaskDoneToggled(int row, const TxtTask& task) {
 
     const int newOrder = m_todoStore.rowCount();
     DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder);
-    DatabaseManager::instance().replaceListTasksOrders(m_listId, true, m_doneStore.tasks());
+    updateTasksOrders(true, m_doneStore.tasks());
     m_todoStore.appendTask(task);
 }
 
@@ -119,14 +127,24 @@ void TaskManager::onTaskRemoved(qint64 taskId) {
 }
 
 void TaskManager::onTodoTasksReordered() {
-    if (!m_listId.isEmpty()) {
-        DatabaseManager::instance().replaceListTasksOrders(m_listId, false, m_todoStore.tasks());
-    }
+    updateTasksOrders(false, m_todoStore.tasks());
 }
 
 void TaskManager::onDoneTasksReordered() {
-    if (!m_listId.isEmpty()) {
-        DatabaseManager::instance().replaceListTasksOrders(m_listId, true, m_doneStore.tasks());
+    updateTasksOrders(true, m_doneStore.tasks());
+}
+
+void TaskManager::updateTasksOrders(bool done, const QVector<TxtTask>& tasks) {
+    if (tasks.isEmpty()) return;
+    QMap<QString, QVector<TxtTask>> tasksByList;
+    for (const TxtTask& t : tasks) {
+        const QString lid = !t.listId().isEmpty() ? t.listId() : m_listId;
+        if (!lid.isEmpty()) {
+            tasksByList[lid].append(t);
+        }
+    }
+    for (auto it = tasksByList.cbegin(); it != tasksByList.cend(); ++it) {
+        DatabaseManager::instance().replaceListTasksOrders(it.key(), done, it.value());
     }
 }
 
