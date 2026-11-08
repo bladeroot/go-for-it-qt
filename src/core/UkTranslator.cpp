@@ -1,4 +1,9 @@
 #include "UkTranslator.h"
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
 
 namespace gofi {
 
@@ -229,6 +234,18 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral("Syncing issues from YouTrack..."), QStringLiteral("Синхронізація задач із YouTrack...")},
         {QStringLiteral("Synced %1 issues from Jira."), QStringLiteral("Синхронізовано задач із Jira: %1.")},
         {QStringLiteral("Synced %1 issues from YouTrack."), QStringLiteral("Синхронізовано задач із YouTrack: %1.")},
+        {QStringLiteral("Synced %1 issues from %2."), QStringLiteral("Синхронізовано задач із %2: %1.")},
+        {QStringLiteral("Synced %1 issues from %2 (maximum page limit reached; older items omitted)."),
+         QStringLiteral("Синхронізовано задач із %2: %1 (досягнуто ліміту сторінки; старіші елементи пропущено).")},
+        {QStringLiteral("Sync task completion back to tracker"), QStringLiteral("Синхронізувати завершення задач із трекером")},
+        {QStringLiteral("8. Sync Status Back to Tracker  : %1"), QStringLiteral("8. Синхронізувати статус із трекером : %1")},
+        {QStringLiteral("Failed to update status for %1 on %2 (%3): %4"), QStringLiteral("Не вдалося оновити статус для %1 на %2 (%3): %4")},
+        {QStringLiteral("Updated %1 on %2 to %3"), QStringLiteral("Оновлено %1 на %2 до %3")},
+        {QStringLiteral(" ⚠️ Insecure HTTP!"), QStringLiteral(" ⚠️ Незахищений HTTP!")},
+        {QStringLiteral("GitHub sync without an API token requires a repository, user, or organization in the query field (e.g. repo:owner/project, user:username, or org:name)."),
+         QStringLiteral("Синхронізація з GitHub без API-токена вимагає репозиторію, користувача або організації в полі запиту (напр. repo:owner/project, user:username або org:name).")},
+        {QStringLiteral("Closed"), QStringLiteral("Закрито")},
+        {QStringLiteral("Open"), QStringLiteral("Відкрито")},
         {QStringLiteral("Jira authentication failed: please verify your Jira Email (e.g. corporate email) and API Token."),
          QStringLiteral("Помилка авторизації Jira: перевірте ваш Jira Email (напр. корпоративний) та API-токен.")},
         {QStringLiteral("Updated description on Jira issue %1."), QStringLiteral("Оновлено опис задачі Jira %1.")},
@@ -737,6 +754,37 @@ UkTranslator::UkTranslator(QObject* parent)
         {QStringLiteral(" 2:To-Do (%1/%2) "), QStringLiteral(" 2:Da fare (%1/%2) ")},
         {QStringLiteral(" 2:To-Do (%1) "), QStringLiteral(" 2:Da fare (%1) ")}
     };
+
+    const QString customDir = QString::fromUtf8(qgetenv("GOFI_TRANSLATIONS_DIR"));
+    if (!customDir.isEmpty()) {
+        loadTranslationsFromDirectory(customDir);
+    }
+    const QString appDataTranslations = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/translations");
+    loadTranslationsFromDirectory(appDataTranslations);
+}
+
+bool UkTranslator::loadTranslationsFromJson(const QString& filePath, const QString& langCode) {
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    if (!doc.isObject()) return false;
+    const QJsonObject obj = doc.object();
+    auto& targetDict = m_dicts[langCode.trimmed().toLower()];
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        targetDict[it.key()] = it.value().toString();
+    }
+    return true;
+}
+
+void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
+    if (dirPath.isEmpty()) return;
+    QDir dir(dirPath);
+    if (!dir.exists()) return;
+    const QStringList files = dir.entryList({QStringLiteral("*.json")}, QDir::Files);
+    for (const QString& file : files) {
+        const QString lang = file.section(QLatin1Char('.'), 0, 0).toLower();
+        loadTranslationsFromJson(dir.filePath(file), lang);
+    }
 }
 
 void UkTranslator::setLanguageCode(const QString& code) {

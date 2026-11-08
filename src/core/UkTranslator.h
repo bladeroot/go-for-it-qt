@@ -14,6 +14,9 @@ public:
     void setLanguageCode(const QString& code);
     [[nodiscard]] QString languageCode() const { return m_langCode; }
 
+    bool loadTranslationsFromJson(const QString& filePath, const QString& langCode);
+    void loadTranslationsFromDirectory(const QString& dirPath);
+
     [[nodiscard]] bool isEmpty() const override { return false; }
     [[nodiscard]] QString translate(const char* context,
                                     const char* sourceText,

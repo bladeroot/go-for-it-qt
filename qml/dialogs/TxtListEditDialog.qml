@@ -58,9 +58,11 @@ Dialog {
         currentStatusMapping = mappingObj || ({})
         const keys = Object.keys(currentStatusMapping)
         for (let i = 0; i < keys.length; ++i) {
+            if (keys[i].startsWith("_id_")) continue
             statusMappingModel.append({
                 remoteName: keys[i],
-                localStatus: currentStatusMapping[keys[i]]
+                localStatus: currentStatusMapping[keys[i]],
+                remoteId: currentStatusMapping["_id_" + keys[i]] || 0
             })
         }
     }
@@ -97,6 +99,9 @@ Dialog {
         for (let i = 0; i < statusMappingModel.count; ++i) {
             const item = statusMappingModel.get(i)
             out[item.remoteName] = item.localStatus
+            if (item.remoteId !== undefined && item.remoteId > 0) {
+                out["_id_" + item.remoteName] = item.remoteId
+            }
         }
         return out
     }
@@ -117,7 +122,8 @@ Dialog {
             for (let i = 0; i < statuses.length; ++i) {
                 statusMappingModel.append({
                     remoteName: statuses[i].remoteName,
-                    localStatus: statuses[i].localStatus
+                    localStatus: statuses[i].localStatus,
+                    remoteId: statuses[i].remoteId || 0
                 })
             }
             statusFetchLabel.text = qsTr("Loaded %1 statuses.").arg(statuses.length)

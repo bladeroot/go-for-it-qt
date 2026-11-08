@@ -55,9 +55,8 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
 
     m_issueTracker.setActiveTaskChecker([this](const QString& listId, const QString& jiraKey) {
         if (m_timer.isRunning() && m_timer.hasActiveTask()) {
-            if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
-                const TxtTask t = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
-                if (t.jiraKey() == jiraKey && (listId.isEmpty() || listId == m_currentListId)) {
+            if (!jiraKey.isEmpty() && jiraKey == m_activeTaskJiraKey) {
+                if (listId.isEmpty() || m_activeTaskListId.isEmpty() || listId == m_activeTaskListId) {
                     return true;
                 }
             }
@@ -702,10 +701,16 @@ void AppController::updateAutoSyncTimer() {
 
 void AppController::syncActiveTaskToTimer() {
     if (m_activeTodoRow < 0 || m_activeTodoRow >= m_taskManager.todoModel()->rowCount()) {
+        m_activeTaskId = -1;
+        m_activeTaskJiraKey.clear();
+        m_activeTaskListId.clear();
         m_timer.clearActiveTask();
         return;
     }
     const TxtTask task = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
+    m_activeTaskId = task.id();
+    m_activeTaskJiraKey = task.jiraKey();
+    m_activeTaskListId = task.listId();
     m_timer.setActiveTask(task.description(), task.timerValue(), task.duration());
 }
 

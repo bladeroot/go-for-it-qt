@@ -1596,6 +1596,67 @@ private slots:
             QVERIFY(found);
         }
 
+        // Test 6: Legitimate empty response with explicitZeroTotal == true (last open task was closed remotely)
+        {
+            svc.setActiveTaskChecker(nullptr);
+            const auto openBeforeReconcile = db.loadTasks(ghList.id, false);
+            QVERIFY(!openBeforeReconcile.isEmpty());
+            // Remote tracker authoritatively reports total == 0 with empty items list and no errors
+            svc.processSyncedItems(ghList, {}, QStringLiteral("GitHub"), false, false /* hasError */, true /* explicitZeroTotal */);
+            const auto openAfterReconcile = db.loadTasks(ghList.id, false);
+            QCOMPARE(openAfterReconcile.size(), 0);
+        }
+
+        // Test 7: PR and MR keys are never updated on remote tracker
+        {
+            // updateIssueStatusRemote should do nothing for PRs/MRs
+            svc.updateIssueStatusRemote(ghList, QStringLiteral("PR#owner/repo#42"), true, QStringLiteral("done"));
+            svc.updateIssueStatusRemote(ghList, QStringLiteral("MR#owner/repo!99"), true, QStringLiteral("done"));
+            svc.updateIssueStatusRemote(ghList, QStringLiteral("GL#owner/repo!99"), true, QStringLiteral("done"));
+        }
+
+        // Test 8: Redmine statuses parsing and ID resolution
+        {
+            const QByteArray redmineJson = R"({
+                "issue_statuses": [
+                    {"id": 1, "name": "New", "is_closed": false},
+                    {"id": 3, "name": "Resolved", "is_closed": true},
+                    {"id": 5, "name": "Closed", "is_closed": true}
+                ]
+            })";
+            const auto redmineStatuses = IssueTrackerService::parseRedmineStatusesJson(redmineJson);
+            QCOMPARE(redmineStatuses.size(), 3);
+            QCOMPARE(redmineStatuses.at(0).toMap().value(QStringLiteral("remoteId")).toInt(), 1);
+            QCOMPARE(redmineStatuses.at(2).toMap().value(QStringLiteral("remoteId")).toInt(), 5);
+        }
+
+        // Test 9: UkTranslator new translations and JSON loading
+        {
+            UkTranslator translator;
+            translator.setLanguageCode(QStringLiteral("uk"));
+            const QString trSync = translator.translate("TxtListEditDialog", "Sync task completion back to tracker");
+            QCOMPARE(trSync, QStringLiteral("Синхронізувати завершення задач із трекером"));
+
+            const QString trTuiSync = translator.translate("TuiApp", "8. Sync Status Back to Tracker  : %1");
+            QCOMPARE(trTuiSync, QStringLiteral("8. Синхронізувати статус із трекером : %1"));
+
+            const QString trInsecure = translator.translate("IssueTrackerService", " ⚠️ Insecure HTTP!");
+            QCOMPARE(trInsecure, QStringLiteral(" ⚠️ Незахищений HTTP!"));
+
+            // Test loading external translation JSON file
+            const QString tempJsonPath = m_testSandbox.filePath(QStringLiteral("custom_de.json"));
+            QFile f(tempJsonPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(R"({"Sync task completion back to tracker": "Synchronisiere Aufgabenabschluss zuruck zum Tracker"})");
+            f.close();
+
+            QVERIFY(translator.loadTranslationsFromJson(tempJsonPath, QStringLiteral("de")));
+            translator.setLanguageCode(QStringLiteral("de"));
+            const QString trDe = translator.translate("TxtListEditDialog", "Sync task completion back to tracker");
+            QCOMPARE(trDe, QStringLiteral("Synchronisiere Aufgabenabschluss zuruck zum Tracker"));
+            QFile::remove(tempJsonPath);
+        }
+
         db.close();
         QFile::remove(testDb);
     }

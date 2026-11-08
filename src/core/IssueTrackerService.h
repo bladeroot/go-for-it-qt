@@ -135,7 +135,7 @@ private:
     void fetchRedmineIssues(const TodoListEntry& entry);
     void fetchTodoistTasks(const TodoListEntry& entry);
     void fetchNextcloudTasks(const TodoListEntry& entry);
-    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false, bool hasError = false);
+    void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false, bool hasError = false, bool explicitZeroTotal = false);
 
     void startSyncOperation();
     void endSyncOperation();

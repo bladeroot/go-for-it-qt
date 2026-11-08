@@ -1351,9 +1351,11 @@ QVariantList IssueTrackerService::parseRedmineStatusesJson(const QByteArray& jso
         const QString name = obj.value(QStringLiteral("name")).toString().trimmed();
         if (name.isEmpty()) continue;
         const bool isClosed = obj.value(QStringLiteral("is_closed")).toBool(false);
+        const int id = obj.value(QStringLiteral("id")).toInt(0);
 
         QVariantMap entry;
         entry[QStringLiteral("remoteName")] = name;
+        entry[QStringLiteral("remoteId")] = id;
         entry[QStringLiteral("localStatus")] = mapRemoteStatusToLocal(
             name,
             isClosed ? QStringLiteral("Done") : QString(),
@@ -1687,6 +1689,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         bool pageLimitReached = false;
         bool hasError = false;
+        bool explicitZeroTotal = false;
         if (!doc.isObject()) {
             hasError = true;
         } else {
@@ -1696,14 +1699,22 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
             }
             const int total = rootObj.value(QStringLiteral("total")).toInt(-1);
             const int maxResults = rootObj.value(QStringLiteral("maxResults")).toInt(100);
+            const int startAt = rootObj.value(QStringLiteral("startAt")).toInt(0);
             const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
-            if (issuesArr.size() >= maxResults || (total >= 0 && total > issuesArr.size())) {
+            if (rootObj.contains(QStringLiteral("isLast")) && !rootObj.value(QStringLiteral("isLast")).toBool(true)) {
                 pageLimitReached = true;
+            } else if (rootObj.contains(QStringLiteral("nextPageToken")) && !rootObj.value(QStringLiteral("nextPageToken")).toString().trimmed().isEmpty()) {
+                pageLimitReached = true;
+            } else if (issuesArr.size() >= maxResults || (total >= 0 && (startAt + issuesArr.size() < total))) {
+                pageLimitReached = true;
+            }
+            if (total == 0 && !hasError && issuesArr.isEmpty()) {
+                explicitZeroTotal = true;
             }
         }
 
         const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("Jira"), pageLimitReached, hasError);
+        processSyncedItems(entry, items, QStringLiteral("Jira"), pageLimitReached, hasError, explicitZeroTotal);
     });
 }
 
@@ -1760,7 +1771,8 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                                              const QVector<RemoteIssueItem>& items,
                                              const QString& providerName,
                                              bool pageLimitReached,
-                                             bool hasError)
+                                             bool hasError,
+                                             bool explicitZeroTotal)
 {
     DatabaseManager& db = DatabaseManager::instance();
     QStringList newIssues;
@@ -1796,10 +1808,11 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     // Reconcile: Only reconcile closed issues if:
     // 1. Page limit was NOT reached (neither explicitly flagged nor items >= 100).
     // 2. No partial or parser error occurred (!hasError).
-    // 3. Remote items list is non-empty (!items.isEmpty()) to guard against empty/unparsed responses,
-    //    SSO HTML captive portals, or format shifts wiping out local tasks.
+    // 3. Remote items list is non-empty (!items.isEmpty()), OR the tracker explicitly reported total == 0 (explicitZeroTotal)
+    //    in a valid error-free response (e.g. GitHub/Jira/Redmine total_count == 0).
     const bool limitReached = pageLimitReached || (items.size() >= 100);
-    if (!limitReached && !hasError && !items.isEmpty()) {
+    const bool canReconcile = !limitReached && !hasError && (!items.isEmpty() || explicitZeroTotal);
+    if (canReconcile) {
         const auto localOpenTasks = db.loadTasks(entry.id, false);
         for (const TxtTask& t : localOpenTasks) {
             if (!t.jiraKey().isEmpty() && !remoteKeys.contains(t.jiraKey())) {
@@ -1896,6 +1909,7 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         bool pageLimitReached = false;
         bool hasError = false;
+        bool explicitZeroTotal = false;
 
         if (!doc.isObject()) {
             hasError = true;
@@ -1912,10 +1926,13 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
             if (itemsArray.size() >= 100 || (totalCount >= 0 && totalCount > itemsArray.size())) {
                 pageLimitReached = true;
             }
+            if (totalCount == 0 && !hasError && !pageLimitReached && itemsArray.isEmpty()) {
+                explicitZeroTotal = true;
+            }
         }
 
         const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("GitHub"), pageLimitReached, hasError);
+        processSyncedItems(entry, items, QStringLiteral("GitHub"), pageLimitReached, hasError, explicitZeroTotal);
     });
 }
 
@@ -2057,6 +2074,7 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         bool pageLimitReached = false;
         bool hasError = false;
+        bool explicitZeroTotal = false;
         if (!doc.isObject()) {
             hasError = true;
         } else {
@@ -2067,10 +2085,13 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
             if (issuesArr.size() >= limit || (totalCount >= 0 && totalCount > issuesArr.size())) {
                 pageLimitReached = true;
             }
+            if (totalCount == 0 && issuesArr.isEmpty()) {
+                explicitZeroTotal = true;
+            }
         }
 
         const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("Redmine"), pageLimitReached, hasError);
+        processSyncedItems(entry, items, QStringLiteral("Redmine"), pageLimitReached, hasError, explicitZeroTotal);
     });
 }
 
@@ -3042,13 +3063,47 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
 
         int statusId = done ? 5 : 1;
         const QString targetCategory = done ? QStringLiteral("done") : QStringLiteral("todo");
-        for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
-            if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0) {
+
+        QStringList preferredOrder;
+        if (done) {
+            preferredOrder << QStringLiteral("closed") << QStringLiteral("resolved");
+        } else {
+            preferredOrder << QStringLiteral("new") << QStringLiteral("open");
+        }
+
+        QString selectedStatusName;
+        for (const QString& pref : preferredOrder) {
+            for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
+                if (it.key().startsWith(QStringLiteral("_id_"))) continue;
+                if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0 &&
+                    it.key().compare(pref, Qt::CaseInsensitive) == 0) {
+                    selectedStatusName = it.key();
+                    break;
+                }
+            }
+            if (!selectedStatusName.isEmpty()) break;
+        }
+        if (selectedStatusName.isEmpty()) {
+            for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
+                if (it.key().startsWith(QStringLiteral("_id_"))) continue;
+                if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0) {
+                    if (done && (it.key().contains(QStringLiteral("reject"), Qt::CaseInsensitive) ||
+                                 it.key().contains(QStringLiteral("cancel"), Qt::CaseInsensitive))) {
+                        continue;
+                    }
+                    selectedStatusName = it.key();
+                    break;
+                }
+            }
+        }
+
+        if (!selectedStatusName.isEmpty()) {
+            const QString idKey = QStringLiteral("_id_") + selectedStatusName;
+            if (listEntry.statusMapping.contains(idKey)) {
                 bool ok = false;
-                const int mappedId = it.key().toInt(&ok);
+                const int mappedId = listEntry.statusMapping.value(idKey).toInt(&ok);
                 if (ok && mappedId > 0) {
                     statusId = mappedId;
-                    break;
                 }
             }
         }

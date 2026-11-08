@@ -162,6 +162,9 @@ private:
     QStringList m_activeFilterListIds;
     QString m_currentFilterTitle;
     int m_activeTodoRow = -1;
+    qint64 m_activeTaskId = -1;
+    QString m_activeTaskJiraKey;
+    QString m_activeTaskListId;
     bool m_showingOverview = false;
     bool m_isMultiListView = false;
     bool m_lastSessionCompletedPomodoro = false;
