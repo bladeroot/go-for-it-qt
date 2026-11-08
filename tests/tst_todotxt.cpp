@@ -1758,9 +1758,9 @@ private slots:
             QCOMPARE(db.loadTasks(e.id, false).size(), 150);
             QCOMPARE(db.loadTasks(e.id, true).size(), 0);
 
-            // Case A: Next sync returns first 100-item page (pageLimitReached = false, but items.size() == 100)
+            // Case A: Sync reaches page limit (pageLimitReached = true)
             // MUST NOT close the remaining 50 items!
-            svc.processSyncedItems(e, items150.mid(0, 100), QStringLiteral("GitHub"), false, false);
+            svc.processSyncedItems(e, items150.mid(0, 100), QStringLiteral("GitHub"), true /* pageLimitReached */, false);
             QCOMPARE(db.loadTasks(e.id, false).size(), 150);
             QCOMPARE(db.loadTasks(e.id, true).size(), 0);
 
@@ -2018,15 +2018,182 @@ private slots:
             ).toUInt();
             QCOMPARE(betaSeconds, 0u);
 
-            // 2. DatabaseManager batch ordering transaction atomicity
+            // 2. DatabaseManager batch ordering transaction atomicity with failure & rollback verification
             DatabaseManager& db = DatabaseManager::instance();
-            QVector<TodoListEntry> entries = db.loadLists();
-            QVERIFY(!entries.isEmpty());
-            QVERIFY(db.updateListsOrder(entries));
+            ctrl.addNewTask(QStringLiteral("Task Gamma"));
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 3);
 
-            QVector<TxtTask> tasks = db.loadTasks(listId, false);
-            QCOMPARE(tasks.size(), 2);
-            QVERIFY(db.replaceListTasksOrders(listId, false, tasks));
+            QVector<TxtTask> initialTasks = db.loadTasks(listId, false);
+            QCOMPARE(initialTasks.size(), 3);
+
+            const QSqlDatabase testDbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+            QSqlQuery initialQuery(testDbConn);
+            initialQuery.exec(QStringLiteral("SELECT id, sort_order FROM tasks WHERE list_id = '") + listId + QStringLiteral("' ORDER BY id ASC"));
+            QMap<qint64, int> originalOrders;
+            while (initialQuery.next()) {
+                originalOrders[initialQuery.value(0).toLongLong()] = initialQuery.value(1).toInt();
+            }
+
+            // Invert the tasks order
+            QVector<TxtTask> reversedTasks = { initialTasks[2], initialTasks[1], initialTasks[0] };
+
+            // Create a trigger that fails when sort_order = 1
+            QSqlQuery triggerQuery(testDbConn);
+            QVERIFY(triggerQuery.exec(QStringLiteral(
+                "CREATE TRIGGER test_abort_sort_order BEFORE UPDATE OF sort_order ON tasks "
+                "WHEN NEW.sort_order = 1 "
+                "BEGIN SELECT RAISE(ABORT, 'Simulated batch failure on second item'); END;"
+            )));
+
+            // Attempt batch update - must fail and rollback!
+            const bool batchResult = db.replaceListTasksOrders(listId, false, reversedTasks);
+            QVERIFY(!batchResult);
+
+            // Verify that sort_order for all tasks is STILL their original value (item 0 rolled back!)
+            QSqlQuery checkQuery(testDbConn);
+            checkQuery.exec(QStringLiteral("SELECT id, sort_order FROM tasks WHERE list_id = '") + listId + QStringLiteral("' ORDER BY id ASC"));
+            while (checkQuery.next()) {
+                const qint64 id = checkQuery.value(0).toLongLong();
+                const int sortOrder = checkQuery.value(1).toInt();
+                QCOMPARE(sortOrder, originalOrders[id]);
+            }
+
+            // Drop trigger and verify success
+            triggerQuery.exec(QStringLiteral("DROP TRIGGER test_abort_sort_order"));
+            QVERIFY(db.replaceListTasksOrders(listId, false, reversedTasks));
+
+            // 3. Regression: Active task completed via toggleTaskDone while timer is running
+            ctrl.addNewTask(QStringLiteral("Task Delta"));
+            int deltaRow = -1;
+            for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
+                if (ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0), TaskStoreModel::DescriptionRole).toString() == QStringLiteral("Task Delta")) {
+                    deltaRow = r;
+                    break;
+                }
+            }
+            QVERIFY(deltaRow >= 0);
+            ctrl.setActiveTodoRow(deltaRow);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+            QThread::msleep(1050);
+
+            // Toggle done while timer running
+            ctrl.toggleTaskDone(false, deltaRow);
+            QVERIFY(!ctrl.timer()->isRunning());
+
+            // Task Delta in doneModel must have >= 1 second
+            bool deltaFoundInDone = false;
+            for (int r = 0; r < ctrl.doneProxyModel()->rowCount(); ++r) {
+                const QString d = ctrl.doneProxyModel()->data(ctrl.doneProxyModel()->index(r, 0), TaskStoreModel::DescriptionRole).toString();
+                if (d == QStringLiteral("Task Delta")) {
+                    const uint secs = ctrl.doneProxyModel()->data(ctrl.doneProxyModel()->index(r, 0), TaskStoreModel::TimerValueRole).toUInt();
+                    QVERIFY(secs >= 1);
+                    deltaFoundInDone = true;
+                    break;
+                }
+            }
+            QVERIFY(deltaFoundInDone);
+
+            // Remaining active task in todoModel must NOT have received Delta's time
+            if (ctrl.activeTodoRow() >= 0 && ctrl.activeTodoRow() < ctrl.todoProxyModel()->rowCount()) {
+                const QString activeDesc = ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(ctrl.activeTodoRow(), 0), TaskStoreModel::DescriptionRole).toString();
+                if (activeDesc != QStringLiteral("Task Alpha")) {
+                    const uint currentSecs = ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(ctrl.activeTodoRow(), 0), TaskStoreModel::TimerValueRole).toUInt();
+                    QCOMPARE(currentSecs, 0u);
+                }
+            }
+
+            // 4. Regression: Active task removed via removeTask while timer is running
+            ctrl.addNewTask(QStringLiteral("Task Epsilon"));
+            ctrl.addNewTask(QStringLiteral("Task Zeta"));
+            int epsRow = -1;
+            for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
+                if (ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0), TaskStoreModel::DescriptionRole).toString() == QStringLiteral("Task Epsilon")) {
+                    epsRow = r;
+                    break;
+                }
+            }
+            QVERIFY(epsRow >= 0);
+            ctrl.setActiveTodoRow(epsRow);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+            QThread::msleep(1050);
+
+            ctrl.removeTask(false, epsRow);
+            QVERIFY(!ctrl.timer()->isRunning());
+
+            // Verify Task Zeta has 0 seconds
+            for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
+                if (ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0), TaskStoreModel::DescriptionRole).toString() == QStringLiteral("Task Zeta")) {
+                    const uint zSecs = ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0), TaskStoreModel::TimerValueRole).toUInt();
+                    QCOMPARE(zSecs, 0u);
+                    break;
+                }
+            }
+
+            // 5. Regression: Deleting the very last task while timer is running
+            while (ctrl.todoProxyModel()->rowCount() > 1) {
+                ctrl.removeTask(false, 0);
+            }
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+            ctrl.setActiveTodoRow(0);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+            QThread::msleep(1050);
+
+            ctrl.removeTask(false, 0);
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 0);
+            QCOMPARE(ctrl.activeTodoRow(), -1);
+            QVERIFY(!ctrl.timer()->isRunning());
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
+
+    void testPaginationReconciliationForLargeLists() {
+        const QString testDb = QStringLiteral("/tmp/gofi-reconcile-test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QString(), testDb);
+            const QString listId = ctrl.listManager()->addList(QStringLiteral("Reconcile Tracker"));
+            QVariantMap cfg = ctrl.listManager()->getListConfig(listId);
+            cfg[QStringLiteral("provider")] = QStringLiteral("Jira");
+            cfg[QStringLiteral("jiraUrl")] = QStringLiteral("https://jira.example.com");
+            ctrl.listManager()->saveListConfig(cfg);
+
+            TodoListEntry entry = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(listId));
+
+            DatabaseManager& db = DatabaseManager::instance();
+            QVector<RemoteIssueItem> items;
+            for (int i = 1; i <= 105; ++i) {
+                RemoteIssueItem it;
+                it.key = QStringLiteral("PROJ-%1").arg(i);
+                it.description = QStringLiteral("Issue %1").arg(i);
+                it.remoteStatus = QStringLiteral("Open");
+                items.append(it);
+            }
+
+            // First sync with 105 items: pageLimitReached = false
+            ctrl.issueTracker()->processSyncedItems(entry, items, QStringLiteral("Jira"), false, false, false);
+            QCOMPARE(db.countAllTasksInList(listId), 105);
+
+            // PROJ-105 is closed remotely -> remote items now has 104 issues
+            items.removeLast();
+            QCOMPARE(items.size(), 104);
+
+            // Second sync with 104 items: pageLimitReached = false
+            // Must reconcile and close PROJ-105 locally!
+            ctrl.issueTracker()->processSyncedItems(entry, items, QStringLiteral("Jira"), false, false, false);
+
+            const QVector<TxtTask> openTasks = db.loadTasks(listId, false);
+            QCOMPARE(openTasks.size(), 104);
+
+            const QVector<TxtTask> doneTasks = db.loadTasks(listId, true);
+            QCOMPARE(doneTasks.size(), 1);
+            QCOMPARE(doneTasks.first().jiraKey(), QStringLiteral("PROJ-105"));
+            QVERIFY(doneTasks.first().isDone());
         }
 
         DatabaseManager::instance().close();
