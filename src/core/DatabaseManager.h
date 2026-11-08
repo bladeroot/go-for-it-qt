@@ -80,6 +80,7 @@ public:
     [[nodiscard]] int countAllTasksInLists(const QStringList& listIds) const;
     [[nodiscard]] int countAllTasksInList(const QString& listId) const;
     qint64 insertTask(const QString& listId, const TxtTask& task, int sortOrder);
+    qint64 insertTaskOnTopAndReorder(const QString& listId, const TxtTask& task, const QVector<TxtTask>& existingTasks);
     bool updateTask(const TxtTask& task);
     bool markTaskViewed(qint64 taskId, bool viewed = true);
     bool updateTaskDoneAndOrder(const TxtTask& task, int sortOrder);

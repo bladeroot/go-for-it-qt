@@ -883,6 +883,68 @@ qint64 DatabaseManager::insertTask(const QString& listId, const TxtTask& task, i
     return q.lastInsertId().toLongLong();
 }
 
+qint64 DatabaseManager::insertTaskOnTopAndReorder(const QString& listId, const TxtTask& task, const QVector<TxtTask>& existingTasks) {
+    if (listId.isEmpty()) return -1;
+    QSqlDatabase database = db();
+    if (!database.transaction()) {
+        return -1;
+    }
+
+    QSqlQuery q(database);
+    q.prepare(QStringLiteral(
+        "INSERT INTO tasks (list_id, description, done, status, priority, creation_date, "
+        "completion_date, duration_seconds, timer_seconds, sort_order, jira_key, jira_synced_seconds, details, comments_json, is_viewed) "
+        "VALUES (:list_id, :description, :done, :status, :priority, :creation_date, "
+        ":completion_date, :duration_seconds, :timer_seconds, :sort_order, :jira_key, :jira_synced_seconds, :details, :comments_json, :is_viewed)"
+    ));
+    q.bindValue(QStringLiteral(":list_id"), nonNullString(listId));
+    q.bindValue(QStringLiteral(":description"), nonNullString(task.description()));
+    q.bindValue(QStringLiteral(":done"), task.isDone() ? 1 : 0);
+    q.bindValue(QStringLiteral(":status"), nonNullString(task.status()));
+    q.bindValue(QStringLiteral(":priority"), static_cast<int>(task.priority()));
+    q.bindValue(QStringLiteral(":creation_date"), task.creationDate().isValid() ? task.creationDate().toString(Qt::ISODate) : QStringLiteral(""));
+    q.bindValue(QStringLiteral(":completion_date"), task.completionDate().isValid() ? task.completionDate().toString(Qt::ISODate) : QStringLiteral(""));
+    q.bindValue(QStringLiteral(":duration_seconds"), task.duration());
+    q.bindValue(QStringLiteral(":timer_seconds"), task.timerValue());
+    q.bindValue(QStringLiteral(":sort_order"), 0);
+    q.bindValue(QStringLiteral(":jira_key"), nonNullString(task.jiraKey()));
+    q.bindValue(QStringLiteral(":jira_synced_seconds"), task.jiraSyncedSeconds());
+    q.bindValue(QStringLiteral(":details"), nonNullString(task.details()));
+    q.bindValue(QStringLiteral(":comments_json"), nonNullString(serializeCommentsList(task.comments())));
+    q.bindValue(QStringLiteral(":is_viewed"), task.isViewed() ? 1 : 0);
+
+    if (!q.exec()) {
+        database.rollback();
+        return -1;
+    }
+    const qint64 newId = q.lastInsertId().toLongLong();
+
+    QSqlQuery reorderQ(database);
+    reorderQ.prepare(QStringLiteral(
+        "UPDATE tasks SET sort_order = :order WHERE id = :id AND list_id = :list_id AND done = 0"
+    ));
+
+    int currentOrder = 1;
+    for (const TxtTask& t : existingTasks) {
+        const QString lid = !t.listId().isEmpty() ? t.listId() : listId;
+        if (lid == listId && t.id() >= 0 && !t.isDone()) {
+            reorderQ.bindValue(QStringLiteral(":order"), currentOrder++);
+            reorderQ.bindValue(QStringLiteral(":id"), t.id());
+            reorderQ.bindValue(QStringLiteral(":list_id"), lid);
+            if (!reorderQ.exec()) {
+                database.rollback();
+                return -1;
+            }
+        }
+    }
+
+    if (!database.commit()) {
+        database.rollback();
+        return -1;
+    }
+    return newId;
+}
+
 bool DatabaseManager::updateTask(const TxtTask& task) {
     if (task.id() < 0) return false;
     QSqlQuery q(db());

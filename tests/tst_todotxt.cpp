@@ -2119,8 +2119,15 @@ private slots:
             QVERIFY(ctrl.timer()->isRunning());
             QThread::msleep(1050);
 
+            int deleteDatabaseErrorCount = 0;
+            const QMetaObject::Connection deleteErrorConnection = QObject::connect(
+                &ctrl, &AppController::databaseError, [&deleteDatabaseErrorCount](const QString&) {
+                    ++deleteDatabaseErrorCount;
+                });
             ctrl.removeTask(false, epsRow);
             QVERIFY(!ctrl.timer()->isRunning());
+            QCOMPARE(deleteDatabaseErrorCount, 0);
+            QObject::disconnect(deleteErrorConnection);
 
             // Verify Task Zeta has 0 seconds
             for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
@@ -2851,7 +2858,33 @@ private slots:
                 QVERIFY(ctrl.updateTaskText(false, 0, QStringLiteral("Success update text")));
             }
 
-            // 2. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
+            // 2. Adding a task on top must roll back the INSERT if reordering fails
+            {
+                TaskManager isolatedManager;
+                isolatedManager.setActiveList(listId, false, false);
+                const int initialTaskCount = DatabaseManager::instance().countAllTasksInList(listId);
+
+                QSqlQuery triggerQ(dbConn);
+                QVERIFY(triggerQ.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_add_on_top_reorder BEFORE UPDATE OF sort_order ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated add-on-top reorder failure'); "
+                    "END;"
+                )));
+
+                isolatedManager.addNewTask(QStringLiteral("Atomic top insert"), true, false);
+                QCOMPARE(DatabaseManager::instance().countAllTasksInList(listId), initialTaskCount);
+
+                QVERIFY(triggerQ.exec(QStringLiteral("DROP TRIGGER test_fail_add_on_top_reorder")));
+                QSqlQuery cleanupQ(dbConn);
+                cleanupQ.prepare(QStringLiteral("DELETE FROM tasks WHERE list_id = :list_id AND description = :description"));
+                cleanupQ.bindValue(QStringLiteral(":list_id"), listId);
+                cleanupQ.bindValue(QStringLiteral(":description"), QStringLiteral("Atomic top insert"));
+                QVERIFY(cleanupQ.exec());
+                ctrl.selectListById(listId);
+            }
+
+            // 3. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
             {
                 ctrl.setActiveTodoRow(0);
                 ctrl.timer()->start();
@@ -2895,7 +2928,7 @@ private slots:
                 QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
             }
 
-            // 3. Timer persistence failure must not stop/log the active session or duplicate errors
+            // 4. Timer persistence failure must not stop/log the active session or duplicate errors
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -2941,7 +2974,7 @@ private slots:
                 }
             }
 
-            // 4. Failed deletion of the active task must not stop/log its timer
+            // 5. Failed deletion of the active task must not stop/log its timer
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -2976,7 +3009,7 @@ private slots:
                 }
             }
 
-            // 5. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            // 6. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
             {
                 auto& db = DatabaseManager::instance();
                 const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
@@ -3038,7 +3071,7 @@ private slots:
                 failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
-            // 6. markActivityWorklogSynced() validation
+            // 7. markActivityWorklogSynced() validation
             {
                 auto& db = DatabaseManager::instance();
                 // Invalid IDs or non-existent log IDs must return false

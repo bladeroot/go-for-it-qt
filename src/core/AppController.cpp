@@ -857,7 +857,9 @@ void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
                 }
             }
             if (!foundInDone) {
-                ok = DatabaseManager::instance().updateTaskTimer(timedTaskId, totalSeconds);
+                if (DatabaseManager::instance().loadTask(timedTaskId).has_value()) {
+                    ok = DatabaseManager::instance().updateTaskTimer(timedTaskId, totalSeconds);
+                }
             }
         }
     } else if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {

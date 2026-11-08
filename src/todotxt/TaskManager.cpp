@@ -73,18 +73,22 @@ void TaskManager::addNewTask(const QString& simpleText, bool onTop, bool addCrea
         return;
     }
 
-    const int order = onTop ? 0 : m_todoStore.rowCount();
-    const qint64 newId = DatabaseManager::instance().insertTask(m_listId, task, order);
-    if (newId < 0) {
-        emit errorOccurred(tr("Failed to save new task to SQLite database."));
-        return;
-    }
-    task.setId(newId);
-
     if (onTop) {
+        const qint64 newId = DatabaseManager::instance().insertTaskOnTopAndReorder(m_listId, task, m_todoStore.tasks());
+        if (newId < 0) {
+            emit errorOccurred(tr("Failed to save new task to SQLite database."));
+            return;
+        }
+        task.setId(newId);
         m_todoStore.prependTask(task);
-        updateTasksOrders(false, m_todoStore.tasks());
     } else {
+        const int order = m_todoStore.rowCount();
+        const qint64 newId = DatabaseManager::instance().insertTask(m_listId, task, order);
+        if (newId < 0) {
+            emit errorOccurred(tr("Failed to save new task to SQLite database."));
+            return;
+        }
+        task.setId(newId);
         m_todoStore.appendTask(task);
     }
 }
