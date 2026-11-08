@@ -2972,7 +2972,38 @@ private slots:
                 QVERIFY(!removed);
             }
 
-            // 7. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
+            // 7. Batch task reorder must reject stale task IDs
+            {
+                const QString staleBatchListId = ctrl.listManager()->addList(QStringLiteral("Stale Batch Reorder"));
+                QVERIFY(DatabaseManager::instance().insertTask(
+                    staleBatchListId, TxtTask::fromSimpleTxt(QStringLiteral("Batch A"), false, false), 0) >= 0);
+                QVERIFY(DatabaseManager::instance().insertTask(
+                    staleBatchListId, TxtTask::fromSimpleTxt(QStringLiteral("Batch B"), false, false), 1) >= 0);
+
+                QVector<TxtTask> batchTasks = DatabaseManager::instance().loadTasks(staleBatchListId, false);
+                QCOMPARE(batchTasks.size(), 2);
+                TxtTask staleTask = TxtTask::fromSimpleTxt(QStringLiteral("Missing batch task"), false, false);
+                staleTask.setId(99999999);
+                batchTasks.insert(1, staleTask);
+
+                QVERIFY(!DatabaseManager::instance().replaceListTasksOrders(staleBatchListId, false, batchTasks));
+            }
+
+            // 8. Batch list reorder must reject stale list IDs
+            {
+                const QString staleListA = ctrl.listManager()->addList(QStringLiteral("Stale List Order A"));
+                const QString staleListB = ctrl.listManager()->addList(QStringLiteral("Stale List Order B"));
+                TodoListEntry listA = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(staleListA));
+                TodoListEntry listB = ctrl.listManager()->entry(ctrl.listManager()->indexOfId(staleListB));
+                TodoListEntry missingList;
+                missingList.id = QStringLiteral("missing-list-order-id");
+                missingList.name = QStringLiteral("Missing list order");
+
+                const QVector<TodoListEntry> entries{listA, missingList, listB};
+                QVERIFY(!DatabaseManager::instance().updateListsOrder(entries));
+            }
+
+            // 9. Timer side-effects rollback safety: no activity log or worklog on failed toggleTaskDone
             {
                 ctrl.setActiveTodoRow(0);
                 ctrl.timer()->start();
@@ -3016,7 +3047,7 @@ private slots:
                 QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
             }
 
-            // 8. Timer persistence failure must not stop/log the active session or duplicate errors
+            // 10. Timer persistence failure must not stop/log the active session or duplicate errors
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3062,7 +3093,7 @@ private slots:
                 }
             }
 
-            // 9. Failed deletion of the active task must not stop/log its timer
+            // 11. Failed deletion of the active task must not stop/log its timer
             {
                 ctrl.selectListById(listId);
                 ctrl.setActiveTodoRow(0);
@@ -3097,7 +3128,7 @@ private slots:
                 }
             }
 
-            // 10. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            // 12. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
             {
                 auto& db = DatabaseManager::instance();
                 const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
@@ -3159,7 +3190,7 @@ private slots:
                 failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
-            // 11. markActivityWorklogSynced() validation
+            // 13. markActivityWorklogSynced() validation
             {
                 auto& db = DatabaseManager::instance();
                 // Invalid IDs or non-existent log IDs must return false
@@ -3167,7 +3198,7 @@ private slots:
                 QVERIFY(!db.markActivityWorklogSynced(999999));
             }
 
-            // 12. loadTask distinction between not-found and query failure
+            // 14. loadTask distinction between not-found and query failure
             {
                 auto& db = DatabaseManager::instance();
                 bool queryError = true;

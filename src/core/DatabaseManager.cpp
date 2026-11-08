@@ -714,7 +714,7 @@ bool DatabaseManager::updateListsOrder(const QVector<TodoListEntry>& entries) {
     for (int i = 0; i < entries.size(); ++i) {
         q.bindValue(QStringLiteral(":order"), i);
         q.bindValue(QStringLiteral(":id"), entries.at(i).id);
-        if (!q.exec()) {
+        if (!q.exec() || q.numRowsAffected() <= 0) {
             database.rollback();
             return false;
         }
@@ -1159,7 +1159,7 @@ bool DatabaseManager::replaceListTasksOrders(const QString& listId, bool done, c
         q.bindValue(QStringLiteral(":id"), tasks.at(i).id());
         q.bindValue(QStringLiteral(":list_id"), listId);
         q.bindValue(QStringLiteral(":done"), done ? 1 : 0);
-        if (!q.exec()) {
+        if (!q.exec() || q.numRowsAffected() <= 0) {
             database.rollback();
             return false;
         }
