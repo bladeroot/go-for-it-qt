@@ -1975,7 +1975,7 @@ private slots:
             QVERIFY(!invalidCtrl.isDatabaseReady());
         }
 
-        const QString testDb = QStringLiteral("/tmp/gofi-timer-switch-test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi-timer-switch-test.db"));
         QFile::remove(testDb);
 
         {
@@ -2159,7 +2159,7 @@ private slots:
     }
 
     void testPaginationReconciliationForLargeLists() {
-        const QString testDb = QStringLiteral("/tmp/gofi-reconcile-test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi-reconcile-test.db"));
         QFile::remove(testDb);
 
         {
@@ -2208,7 +2208,7 @@ private slots:
     }
 
     void testDatabaseErrorHandlingAndNonFinalStatusTimer() {
-        const QString testDb = QStringLiteral("/tmp/gofi-dberr-test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi-dberr-test.db"));
         QFile::remove(testDb);
 
         {
@@ -2302,7 +2302,7 @@ private slots:
     }
 
     void testAllListsClearDoneAndStatusSideEffectsSafety() {
-        const QString testDb = QStringLiteral("/tmp/gofi-alllists-safety-test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi-alllists-safety-test.db"));
         QFile::remove(testDb);
 
         {
@@ -2505,7 +2505,7 @@ private slots:
         QCOMPARE(TxtTask::normalizeStatus(QStringLiteral(" Canceled ")), QStringLiteral("canceled"));
         QCOMPARE(TxtTask::normalizeStatus(QStringLiteral("   ")), QStringLiteral("todo"));
 
-        const QString testDb = QStringLiteral("/tmp/gofi-reorder-atomic-test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi-reorder-atomic-test.db"));
         QFile::remove(testDb);
 
         {
@@ -2595,7 +2595,7 @@ private slots:
     }
 
     void testSyncCompletionDateTimerRestorationAndMultiListOrder() {
-        const QString testDb = QStringLiteral("/tmp/gofi-sync-timer-order-test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi-sync-timer-order-test.db"));
         QFile::remove(testDb);
 
         {
@@ -2721,11 +2721,13 @@ private slots:
     }
 
     void testAtomicDoneAndWorklogSyncAndOrderCompaction() {
-        const QString testDb = QStringLiteral("/tmp/gofi_atomic_done_test.db");
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi_atomic_done_test.db"));
         QFile::remove(testDb);
 
         {
-            AppController ctrl(QStringLiteral("/tmp/gofi_atomic_ctrl.log"), testDb);
+            const QString logPath = m_testSandbox.filePath(QStringLiteral("gofi_atomic_ctrl.log"));
+            QFile::remove(logPath);
+            AppController ctrl(logPath, testDb);
             const QSqlDatabase dbConn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
             const QString listId = ctrl.listManager()->addList(QStringLiteral("Atomic Done Test"));
             ctrl.selectListById(listId);
@@ -3278,6 +3280,71 @@ private slots:
 
         DatabaseManager::instance().close();
         QFile::remove(testDb);
+    }
+
+    void testRedmineStatusMappingDoesNotResetTimerOrMultiList() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("gofi_status_mapping_safety.db"));
+        QFile::remove(testDb);
+        {
+            AppController ctrl(QString(), testDb);
+            const QString rmListId = ctrl.listManager()->addList(QStringLiteral("Redmine List"));
+            QVariantMap cfg = ctrl.listManager()->getListConfig(rmListId);
+            cfg[QStringLiteral("provider")] = QStringLiteral("Redmine");
+            cfg[QStringLiteral("jiraUrl")] = QStringLiteral("https://redmine.example.com");
+            cfg[QStringLiteral("apiToken")] = QStringLiteral("secret-token");
+            ctrl.listManager()->saveListConfig(cfg);
+
+            // Add 3 tasks
+            ctrl.selectListById(rmListId);
+            ctrl.addNewTask(QStringLiteral("Task 1"));
+            ctrl.addNewTask(QStringLiteral("Task 2"));
+            ctrl.addNewTask(QStringLiteral("Task 3"));
+
+            // 1. Single-list view: last row active, timer started
+            ctrl.setActiveTodoRow(2);
+            QCOMPARE(ctrl.activeTodoRow(), 2);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+
+            QVariantMap mappingWithNewKey;
+            mappingWithNewKey.insert(QStringLiteral("_id_Closed"), 5);
+            emit ctrl.issueTracker()->listStatusMappingUpdated(rmListId, mappingWithNewKey);
+
+            // Timer must still be running and activeTodoRow must not have jumped to 0
+            QVERIFY(ctrl.timer()->isRunning());
+            QCOMPARE(ctrl.activeTodoRow(), 2);
+            ctrl.timer()->stop();
+
+            // 2. Multi-list view: showAllLists, timer started
+            ctrl.showAllLists();
+            QVERIFY(ctrl.isMultiListView());
+            ctrl.setActiveTodoRow(1);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+
+            emit ctrl.issueTracker()->listStatusMappingUpdated(rmListId, mappingWithNewKey);
+
+            QVERIFY(ctrl.timer()->isRunning());
+            QCOMPARE(ctrl.activeTodoRow(), 1);
+            QVERIFY(ctrl.isMultiListView());
+            ctrl.timer()->stop();
+        }
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
+
+    void testTaskTimerNoDoubleCountingOnFlush() {
+        SettingsManager settings;
+        TaskTimer timer(&settings);
+        timer.setActiveTask(QStringLiteral("Test Task"), 0, 3600);
+        timer.start();
+        QVERIFY(timer.isRunning());
+        QTest::qWait(1100);
+        const uint flushedSec = timer.flushActiveTaskSeconds();
+        QCOMPARE(flushedSec, 1u);
+        QTest::qWait(300);
+        timer.stop();
+        QCOMPARE(timer.activeTaskTimerValue(), 1u);
     }
 };
 

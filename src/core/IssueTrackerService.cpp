@@ -1616,6 +1616,7 @@ struct IssueTrackerService::YouTrackSyncState {
     int pagesFetched = 0;
     bool limitReached = false;
     bool hasError = false;
+    bool explicitZeroTotal = false;
 };
 
 struct IssueTrackerService::GitHubSyncState {
@@ -1659,7 +1660,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
     setStatusMessage(tr("Syncing issues from Jira..."));
 
     const QString jql = entry.jiraJql.trimmed().isEmpty()
-        ? QStringLiteral("assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC")
+        ? QStringLiteral("assignee = currentUser() AND resolution = Unresolved ORDER BY id ASC")
         : entry.jiraJql.trimmed();
 
     const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
@@ -1815,7 +1816,7 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
     setStatusMessage(tr("Syncing issues from YouTrack..."));
 
     const QString ytQuery = entry.jiraJql.trimmed().isEmpty()
-        ? QStringLiteral("for: me #Unresolved sort by: updated desc")
+        ? QStringLiteral("for: me #Unresolved sort by: created asc")
         : entry.jiraJql.trimmed();
 
     auto state = std::make_shared<YouTrackSyncState>();
@@ -1867,12 +1868,17 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         if (!doc.isArray()) {
             state->hasError = true;
         }
+        const int rawCount = doc.isArray() ? doc.array().size() : 0;
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
         state->allItems.append(items);
         state->pagesFetched++;
-        state->skip += items.size();
+        state->skip += rawCount;
 
-        const bool hasMore = (items.size() >= 100);
+        if (state->pagesFetched == 1 && rawCount == 0 && !state->hasError) {
+            state->explicitZeroTotal = true;
+        }
+
+        const bool hasMore = (rawCount >= 100);
         if (hasMore && !state->hasError) {
             if (state->pagesFetched < 50) {
                 fetchYouTrackPage(entry, state, baseUrl, ytQuery);
@@ -1882,7 +1888,7 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
             }
         }
 
-        processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError);
+        processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
     });
 }
 
@@ -2048,8 +2054,8 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
     QUrl url(apiUrl + QStringLiteral("/search/issues"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("q"), queryStr);
-    query.addQueryItem(QStringLiteral("sort"), QStringLiteral("updated"));
-    query.addQueryItem(QStringLiteral("order"), QStringLiteral("desc"));
+    query.addQueryItem(QStringLiteral("sort"), QStringLiteral("created"));
+    query.addQueryItem(QStringLiteral("order"), QStringLiteral("asc"));
     query.addQueryItem(QStringLiteral("per_page"), QStringLiteral("100"));
     if (state->page > 1) {
         query.addQueryItem(QStringLiteral("page"), QString::number(state->page));
@@ -2136,15 +2142,15 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     if (projectSpec.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive)) {
         const QString groupName = projectSpec.mid(6).trimmed();
         const QString encodedGroup = QString::fromUtf8(QUrl::toPercentEncoding(groupName));
-        issuesPath = QStringLiteral("/api/v4/groups/%1/issues?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedGroup);
-        mrPath = QStringLiteral("/api/v4/groups/%1/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedGroup);
+        issuesPath = QStringLiteral("/api/v4/groups/%1/issues?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedGroup);
+        mrPath = QStringLiteral("/api/v4/groups/%1/merge_requests?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedGroup);
     } else if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
         const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(projectSpec));
-        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
-        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100").arg(encodedProj);
+        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedProj);
+        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedProj);
     } else {
-        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=all&order_by=updated_at&sort=desc&per_page=100");
-        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=all&order_by=updated_at&sort=desc&per_page=100");
+        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=assigned_to_me&order_by=id&sort=asc&per_page=100");
+        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=assigned_to_me&order_by=id&sort=asc&per_page=100");
         if (!projectSpec.isEmpty()) {
             issuesPath += QLatin1Char('&') + projectSpec;
             mrPath += QLatin1Char('&') + projectSpec;
@@ -2181,7 +2187,8 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
                 emit syncFailed(entry.id, combinedState->errorMsg);
                 return;
             }
-            processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached, combinedState->hasError);
+            const bool explicitZero = !combinedState->hasError && combinedState->items.isEmpty();
+            processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached, combinedState->hasError, explicitZero);
         };
 
         if (reply->error() != QNetworkReply::NoError) {
@@ -2197,6 +2204,20 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
         }
 
         const QByteArray bodyBytes = reply->readAll();
+        QJsonParseError parseErr;
+        const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes, &parseErr);
+        if (parseErr.error != QJsonParseError::NoError || !doc.isArray()) {
+            combinedState->hasError = true;
+            if (combinedState->errorMsg.isEmpty()) {
+                combinedState->errorMsg = isMr
+                    ? tr("GitLab merge requests returned invalid response: %1").arg(reply->errorString())
+                    : tr("GitLab issues returned invalid response: %1").arg(reply->errorString());
+            }
+            combinedState->completedRequests++;
+            checkDone();
+            return;
+        }
+
         const auto parsed = isMr ? parseGitLabMergeRequestsJson(bodyBytes) : parseGitLabIssuesJson(bodyBytes);
         combinedState->items.append(parsed);
 
@@ -2232,7 +2253,7 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
 
     QString queryStr = entry.jiraJql.trimmed();
     if (queryStr.isEmpty()) {
-        queryStr = QStringLiteral("assigned_to_id=me&status_id=open&limit=100&sort=updated_on:desc");
+        queryStr = QStringLiteral("assigned_to_id=me&status_id=open&limit=100&sort=id:asc");
     } else {
         if (!queryStr.contains(QStringLiteral("limit="))) {
             queryStr += QStringLiteral("&limit=100");
@@ -2299,13 +2320,16 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
 
             if (state->pagesFetched == 0) {
                 // Auto-learn status IDs from Redmine server statuses if closed ID is missing
-                bool hasClosedId = false;
-                for (auto it = entry.statusMapping.begin(); it != entry.statusMapping.end(); ++it) {
-                    if (it.key().startsWith(QStringLiteral("_id_"))) {
-                        const QString stName = it.key().mid(4).toLower();
-                        if (stName == QStringLiteral("closed") || stName == QStringLiteral("resolved") || stName == QStringLiteral("done")) {
-                            hasClosedId = true;
-                            break;
+                const bool statusesFetched = entry.statusMapping.contains(QStringLiteral("_statuses_fetched"));
+                bool hasClosedId = statusesFetched;
+                if (!hasClosedId) {
+                    for (auto it = entry.statusMapping.begin(); it != entry.statusMapping.end(); ++it) {
+                        if (it.key().startsWith(QStringLiteral("_id_"))) {
+                            const QString stName = it.key().mid(4).toLower();
+                            if (stName == QStringLiteral("closed") || stName == QStringLiteral("resolved") || stName == QStringLiteral("done")) {
+                                hasClosedId = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -2326,13 +2350,25 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
                             const QJsonObject sObj = val.toObject();
                             const QString name = sObj.value(QStringLiteral("name")).toString().trimmed();
                             const int id = sObj.value(QStringLiteral("id")).toInt(0);
+                            const bool isClosed = sObj.value(QStringLiteral("is_closed")).toBool(false);
                             if (!name.isEmpty() && id > 0) {
                                 const QString idKey = QStringLiteral("_id_") + name;
                                 if (!newMapping.contains(idKey)) {
                                     newMapping[idKey] = id;
                                     changed = true;
                                 }
+                                if (isClosed) {
+                                    const QString closedKey = QStringLiteral("_is_closed_") + QString::number(id);
+                                    if (!newMapping.contains(closedKey)) {
+                                        newMapping[closedKey] = 1;
+                                        changed = true;
+                                    }
+                                }
                             }
+                        }
+                        if (!newMapping.contains(QStringLiteral("_statuses_fetched"))) {
+                            newMapping[QStringLiteral("_statuses_fetched")] = 1;
+                            changed = true;
                         }
                         if (changed) {
                             emit listStatusMappingUpdated(entry.id, newMapping);
@@ -2407,8 +2443,8 @@ void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         const bool hasError = !doc.isArray();
         const QVector<RemoteIssueItem> items = parseTodoistTasksJson(bodyBytes);
-        const bool pageLimitReached = (items.size() >= 100);
-        processSyncedItems(entry, items, QStringLiteral("Todoist"), pageLimitReached, hasError);
+        const bool explicitZero = !hasError && items.isEmpty();
+        processSyncedItems(entry, items, QStringLiteral("Todoist"), false, hasError, explicitZero);
     });
 }
 
@@ -2500,7 +2536,8 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                     }
                     const QByteArray bodyBytes = propReply->readAll();
                     const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty());
+                    const bool explicitZero = !bodyBytes.trimmed().isEmpty() && items.isEmpty();
+                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty(), explicitZero);
                 });
                 return;
             }
@@ -2514,7 +2551,8 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
 
         const QByteArray bodyBytes = reply->readAll();
         const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty());
+        const bool explicitZero = !bodyBytes.trimmed().isEmpty() && items.isEmpty();
+        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty(), explicitZero);
     });
 }
 
@@ -3422,6 +3460,39 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
                 const int mappedId = listEntry.statusMapping.value(idKey).toInt(&ok);
                 if (ok && mappedId > 0) {
                     statusId = mappedId;
+                }
+            }
+        } else {
+            // KB-2a: User has no explicit mapping; check auto-learned _id_* keys matching preferred names
+            bool foundLearned = false;
+            for (const QString& pref : preferredOrder) {
+                for (auto it = listEntry.statusMapping.cbegin(); it != listEntry.statusMapping.cend(); ++it) {
+                    if (it.key().startsWith(QStringLiteral("_id_"))) {
+                        const QString rawName = it.key().mid(4);
+                        if (rawName.compare(pref, Qt::CaseInsensitive) == 0) {
+                            bool ok = false;
+                            const int mappedId = it.value().toInt(&ok);
+                            if (ok && mappedId > 0) {
+                                statusId = mappedId;
+                                foundLearned = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (foundLearned) break;
+            }
+            if (!foundLearned && done) {
+                // If closing and no preferred name matched, pick first learned is_closed status
+                for (auto it = listEntry.statusMapping.cbegin(); it != listEntry.statusMapping.cend(); ++it) {
+                    if (it.key().startsWith(QStringLiteral("_is_closed_"))) {
+                        bool ok = false;
+                        const int mappedId = it.key().mid(11).toInt(&ok);
+                        if (ok && mappedId > 0) {
+                            statusId = mappedId;
+                            break;
+                        }
+                    }
                 }
             }
         }

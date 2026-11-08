@@ -96,7 +96,7 @@ uint TaskTimer::flushActiveTaskSeconds() {
     if (totalTaskMs > 0) {
         const uint addedSec = static_cast<uint>(totalTaskMs / 1000LL);
         m_accumulatedMsRemainder = totalTaskMs % 1000LL;
-        m_lastTaskSyncMs += static_cast<qint64>(addedSec) * 1000LL;
+        m_lastTaskSyncMs = elapsedMs;
         if (addedSec > 0) {
             m_activeTaskTimerSec += addedSec;
             emit activeTaskTimeUpdated(m_activeTaskTimerSec);
@@ -138,7 +138,7 @@ void TaskTimer::stop() {
         if (totalTaskMs > 0) {
             const uint addedSec = static_cast<uint>(totalTaskMs / 1000LL);
             m_accumulatedMsRemainder = totalTaskMs % 1000LL;
-            m_lastTaskSyncMs += static_cast<qint64>(addedSec) * 1000LL;
+            m_lastTaskSyncMs = elapsedMs;
             if (addedSec > 0) {
                 m_activeTaskTimerSec += addedSec;
                 emit activeTaskTimeUpdated(m_activeTaskTimerSec);

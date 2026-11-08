@@ -133,7 +133,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         }
     });
     connect(&m_listManager, &ListManagerModel::listUpdated, this, [this](const QString& id) {
-        if (m_currentListId == id) {
+        if (m_currentListId == id && !m_isMultiListView) {
             selectListById(id);
         }
     });

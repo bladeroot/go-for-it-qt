@@ -49,7 +49,7 @@ void UkTranslator::reloadTranslations() {
         loadTranslationsFromDirectory(appDir + QStringLiteral("/data/translations"));
     }
 
-    // 5. User data location (~/.local/share/go-for-it-qt/translations) — overrides system & dev
+    // 5. User app data location (AppDataLocation/translations) — overrides system & dev
     const QString appDataTranslations = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/translations");
     loadTranslationsFromDirectory(appDataTranslations);
 

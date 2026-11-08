@@ -265,14 +265,25 @@ void ListManagerModel::moveItem(int fromRow, int toRow) {
 void ListManagerModel::updateListStatusMapping(const QString& listId, const QVariantMap& mapping) {
     for (int i = 0; i < m_entries.size(); ++i) {
         if (m_entries[i].id == listId) {
-            m_entries[i].statusMapping = mapping;
-            if (!DatabaseManager::instance().updateListStatusMapping(listId, mapping)) {
+            // KB-2c: merge only _id_* and metadata keys into current statusMapping to avoid overwriting user edits
+            bool hasNewKeys = false;
+            for (auto it = mapping.cbegin(); it != mapping.cend(); ++it) {
+                if (it.key().startsWith(QLatin1Char('_')) && !m_entries[i].statusMapping.contains(it.key())) {
+                    m_entries[i].statusMapping.insert(it.key(), it.value());
+                    hasNewKeys = true;
+                }
+            }
+            if (!hasNewKeys) {
+                return;
+            }
+            if (!DatabaseManager::instance().updateListStatusMapping(listId, m_entries[i].statusMapping)) {
                 emit errorOccurred(tr("Failed to save status mapping to database."));
                 reloadFromDatabase();
                 return;
             }
             emit dataChanged(index(i, 0), index(i, 0));
-            emit listUpdated(listId);
+            // KB-1: Do not emit listUpdated(listId) here because that would trigger selectListById,
+            // resetting the active task, stopping the timer, and leaving multi-list view.
             break;
         }
     }

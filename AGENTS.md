@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This C++20/Qt 6 application has two front ends. Core services, SQLite persistence, and models live in `src/core/`; Todo.txt handling is in `src/todotxt/`; the terminal UI is in `src/tui/`. Entry points are `src/main.cpp` and `src/main_tui.cpp`. QML views are grouped under `qml/components/`, `qml/dialogs/`, and `qml/pages/`. Runtime assets belong in `data/`, tests in `tests/`, and distribution files in `packaging/`, `debian/`, and `PKGBUILD`.
+This C++20/Qt 6 application has GUI and terminal front ends. Core services and SQLite persistence live in `src/core/`; Todo.txt handling is in `src/todotxt/`; terminal code is in `src/tui/`. QML views are under `qml/`, assets under `data/`, tests in `tests/`, and distribution files in `packaging/` and `debian/`.
 
 ## Build, Test, and Development Commands
 
@@ -16,15 +16,19 @@ ctest --test-dir "$build_dir" --output-on-failure
 cmake -E remove_directory "$build_dir"
 ```
 
-Run `$build_dir/go-for-it-qt` for the GUI or `$build_dir/go-for-it-tui` for the terminal interface before cleanup. Use `-DCMAKE_BUILD_TYPE=Release` for production builds. Never leave generated build artifacts in the working tree. Register new C++ files in `GOFI_CORE_SOURCES` and QML files in the `QML_FILES` list in `CMakeLists.txt`.
+Run `$build_dir/go-for-it-qt` or `$build_dir/go-for-it-tui` before cleanup. Never leave generated artifacts in the repository. Register new C++ and QML files in `CMakeLists.txt`.
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation, same-line braces, `PascalCase` classes, and `camelCase` methods and variables. Pair `ClassName.h` with `ClassName.cpp`, use `QStringLiteral` for fixed Qt strings, and place application types in `gofi`. Name QML components `PascalCase.qml` and properties or IDs in lower camel case. No repository-wide formatter is configured; preserve nearby formatting.
+Use four-space indentation, same-line braces, `PascalCase` classes, and `camelCase` members. Pair `ClassName.h` with `ClassName.cpp` and use `QStringLiteral` for fixed strings. Name QML components `PascalCase.qml` and IDs in lower camel case. No formatter is configured; preserve nearby style.
 
 ## Testing Guidelines
 
-Tests use Qt Test and are registered through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, naming them `testBehaviorOrFeature`. Exercise model state, persistence, parsing, rollback behavior, and signal side effects with deterministic data. Run one slot as `$build_dir/tst_todotxt testBehaviorOrFeature`. CMake sets the offscreen Qt platform for CTest. Always run the full suite and add regression coverage for bug fixes, including failure paths.
+Tests use Qt Test through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, named `testBehaviorOrFeature`. Exercise persistence, rollback, model state, parsing, and signal side effects with deterministic data. Run one slot as `$build_dir/tst_todotxt testBehaviorOrFeature`, then always run the full suite.
+
+## Review & Known-Bug Workflow
+
+Review the repository after every commit or relevant working-tree change; do not limit review to the latest diff. For each reproducible defect, add a regression test first and verify it. Only afterward update `knownbug.md`. Keep every unresolved issue under `Open`, repeat still-present findings in subsequent reviews, and move verified fixes to `Resolved`. Record the reviewed commit and test results. During active monitoring, check HEAD, `git status`, file diffs, and `knownbug.md` contents at least once per minute.
 
 ## Configuration & Safety
 

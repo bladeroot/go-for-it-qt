@@ -96,6 +96,13 @@ Dialog {
 
     function exportStatusMappingObject() {
         let out = {}
+        if (currentStatusMapping) {
+            for (let k in currentStatusMapping) {
+                if (k.startsWith("_")) {
+                    out[k] = currentStatusMapping[k]
+                }
+            }
+        }
         for (let i = 0; i < statusMappingModel.count; ++i) {
             const item = statusMappingModel.get(i)
             out[item.remoteName] = item.localStatus
