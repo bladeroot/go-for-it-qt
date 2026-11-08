@@ -155,6 +155,9 @@ if(BUILD_TESTING)
         Qt6::Test
     )
     add_test(NAME tst_todotxt COMMAND tst_todotxt)
+    set_tests_properties(tst_todotxt PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    )
 endif()
 
 # ==============================================================================
