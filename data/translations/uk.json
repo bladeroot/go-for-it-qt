@@ -325,5 +325,9 @@
   "total": "всього",
   " 2:To-Do (%1/%2) ": " 2:До виконання (%1/%2) ",
   " 2:To-Do (%1) ": " 2:До виконання (%1) ",
-  "Language (Enter to cycle)       : [%1] (%2)": "Мова інтерфейсу (Enter змінити) : [%1] (%2)"
+  "Language (Enter to cycle)       : [%1] (%2)": "Мова інтерфейсу (Enter змінити) : [%1] (%2)",
+  "Delete task '%1'? (y/N)": "Видалити задачу «%1»? (y/N)",
+  "Delete list '%1' and all its tasks? (y/N)": "Видалити список «%1» та всі його задачі? (y/N)",
+  "Priority (A-Z, Space to clear): ": "Пріоритет (A-Z, Space щоб очистити): ",
+  "  Tab or 1..6 or gt / gT        Switch status tab (All, To-Do, In Progress, Paused, Done, Canceled)": "  Tab або 1..6 або gt / gT        Перемкнути вкладку статусу (Усі, До виконання, У роботі, На паузі, Виконані, Скасовані)"
 }
