@@ -306,6 +306,7 @@ bool DatabaseManager::createSchema() {
     q.exec(QStringLiteral("UPDATE tasks SET status = 'done' WHERE done = 1 AND status = 'todo';"));
     q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_tasks_list_done_order ON tasks(list_id, done, sort_order);"));
     // Consolidate tracked timer and duration from duplicates before removing duplicate rows
+    database.transaction();
     q.exec(QStringLiteral(
         "UPDATE tasks "
         "SET timer_seconds = (SELECT SUM(t2.timer_seconds) FROM tasks t2 WHERE t2.list_id = tasks.list_id AND t2.jira_key = tasks.jira_key AND t2.jira_key != ''), "
@@ -315,6 +316,7 @@ bool DatabaseManager::createSchema() {
     ));
     q.exec(QStringLiteral("DELETE FROM tasks WHERE jira_key != '' AND id NOT IN (SELECT MIN(id) FROM tasks WHERE jira_key != '' GROUP BY list_id, jira_key);"));
     q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_list_jira_key ON tasks(list_id, jira_key) WHERE jira_key != '';"));
+    database.commit();
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS activity_log ("

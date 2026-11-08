@@ -320,12 +320,22 @@ void AppController::toggleTaskDone(bool fromDoneList, int proxyRow) {
     // which immediately removes the row from the store.
     const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
     const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+    const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
+    const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
 
     store->setData(idx, willBeDone, TaskStoreModel::DoneRole);
     m_notifications.notifyTaskEvent(
         tr("Task status changed"),
         QStringLiteral("%1 → %2").arg(desc, willBeDone ? tr("Done") : tr("To-Do"))
     );
+    if (!remoteKey.isEmpty() && !effectiveListId.isEmpty()) {
+        for (const TodoListEntry& listEntry : m_listManager.entries()) {
+            if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite")) {
+                m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, willBeDone, willBeDone ? QStringLiteral("done") : QStringLiteral("todo"));
+                break;
+            }
+        }
+    }
     if (willBeDone) {
         m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
     }
@@ -344,6 +354,8 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
     // Pre-fetch metadata and check for completion status case-insensitively BEFORE mutating model
     const QString remoteKey = store->data(idx, TaskStoreModel::JiraKeyRole).toString();
     const QString taskId = store->data(idx, TaskStoreModel::IdRole).toString();
+    const QString listId = store->data(idx, TaskStoreModel::ListIdRole).toString();
+    const QString effectiveListId = !listId.isEmpty() ? listId : m_currentListId;
     const bool isCompleting = (newStatus.compare(QStringLiteral("done"), Qt::CaseInsensitive) == 0);
 
     store->setTaskStatus(sourceRow, newStatus);
@@ -352,6 +364,14 @@ void AppController::changeTaskStatus(bool fromDoneList, int proxyRow, const QStr
             tr("Task status changed"),
             QStringLiteral("%1: %2 → %3").arg(desc, oldStatus, newStatus)
         );
+        if (!remoteKey.isEmpty() && !effectiveListId.isEmpty()) {
+            for (const TodoListEntry& listEntry : m_listManager.entries()) {
+                if (listEntry.id == effectiveListId && listEntry.provider != QStringLiteral("SQLite")) {
+                    m_issueTracker.updateIssueStatusRemote(listEntry, remoteKey, isCompleting, newStatus);
+                    break;
+                }
+            }
+        }
         if (isCompleting) {
             m_systemHooks.onTaskCompleted(desc, remoteKey, taskId);
         }

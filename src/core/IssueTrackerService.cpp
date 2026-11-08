@@ -1610,7 +1610,7 @@ void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpoi
     setStatusMessage(tr("Syncing issues from Jira..."));
 
     const QString jql = entry.jiraJql.trimmed().isEmpty()
-        ? QStringLiteral("assignee = currentUser() ORDER BY updated DESC")
+        ? QStringLiteral("assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC")
         : entry.jiraJql.trimmed();
 
     const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
@@ -1699,7 +1699,7 @@ void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
     setStatusMessage(tr("Syncing issues from YouTrack..."));
 
     const QString ytQuery = entry.jiraJql.trimmed().isEmpty()
-        ? QStringLiteral("for: me sort by: updated desc")
+        ? QStringLiteral("for: me #Unresolved sort by: updated desc")
         : entry.jiraJql.trimmed();
 
     QUrl url(baseUrl + QStringLiteral("/api/issues"));
@@ -1741,7 +1741,12 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     DatabaseManager& db = DatabaseManager::instance();
     QStringList newIssues;
     QStringList statusChanges;
+    QSet<QString> remoteKeys;
+
     for (const RemoteIssueItem& item : items) {
+        if (!item.key.isEmpty()) {
+            remoteKeys.insert(item.key);
+        }
         const QString localStatus = mapRemoteStatusToLocal(
             item.remoteStatus, item.remoteStatusCategory, entry.statusMapping
         );
@@ -1764,13 +1769,40 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         }
     }
 
+    // Reconcile: If page limit was not reached, any locally open remote task that is no longer returned
+    // has been closed or resolved on the remote tracker. Mark it done locally!
+    if (!pageLimitReached) {
+        const auto localOpenTasks = db.loadTasks(entry.id, false);
+        for (const TxtTask& t : localOpenTasks) {
+            if (!t.jiraKey().isEmpty() && !remoteKeys.contains(t.jiraKey())) {
+                TxtTask closedTask = t;
+                closedTask.setDone(true);
+                closedTask.setStatus(QStringLiteral("done"));
+                closedTask.setCompletionDate(QDate::currentDate());
+                db.updateTask(closedTask);
+                statusChanges.append(QStringLiteral("%1: %2 → done (closed remotely)").arg(t.jiraKey(), t.status()));
+            }
+        }
+    }
+
     endSyncOperation();
     const bool limitReached = pageLimitReached || (items.size() >= 100);
+    const QUrl reqUrl(entry.jiraUrl);
+    const bool isInsecureHttp = reqUrl.scheme().compare(QStringLiteral("http"), Qt::CaseInsensitive) == 0 &&
+                                reqUrl.host() != QStringLiteral("localhost") &&
+                                reqUrl.host() != QStringLiteral("127.0.0.1") &&
+                                !entry.apiToken.trimmed().isEmpty();
+
+    QString statusText;
     if (limitReached) {
-        setStatusMessage(tr("Synced %1 issues from %2 (maximum page limit reached; older items omitted).").arg(items.size()).arg(providerName));
+        statusText = tr("Synced %1 issues from %2 (maximum page limit reached; older items omitted).").arg(items.size()).arg(providerName);
     } else {
-        setStatusMessage(tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName));
+        statusText = tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName);
     }
+    if (isInsecureHttp) {
+        statusText += tr(" ⚠️ Insecure HTTP!");
+    }
+    setStatusMessage(statusText);
     emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
     if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
         emit trackerChangesDetected(entry.name, newIssues, statusChanges);
@@ -2794,6 +2826,115 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
                 }
             });
         });
+    }
+}
+
+void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry,
+                                                  const QString& issueKey,
+                                                  bool done,
+                                                  const QString& localStatus)
+{
+    Q_UNUSED(localStatus)
+    if (issueKey.trimmed().isEmpty() || listEntry.apiToken.trimmed().isEmpty()) return;
+    const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+
+    if (listEntry.provider == QStringLiteral("GitHub")) {
+        QString repo;
+        QString numStr;
+        if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) { repo = parts.at(1); numStr = parts.at(2); }
+            else if (parts.size() == 2) { numStr = parts.at(1); }
+        }
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
+        if (numStr.isEmpty()) return;
+        if (repo.isEmpty()) {
+            const QString jql = listEntry.jiraJql.trimmed();
+            static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = repoRe.match(jql);
+            if (m.hasMatch()) repo = m.captured(1);
+            else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+        }
+        if (repo.isEmpty()) {
+            static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto um = urlRepoRe.match(baseUrl);
+            if (um.hasMatch()) repo = um.captured(1);
+        }
+        if (repo.isEmpty()) return;
+
+        const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
+        QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("state"), done ? QStringLiteral("closed") : QStringLiteral("open")}};
+        m_nam.sendCustomRequest(req, "PATCH", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    } else if (listEntry.provider == QStringLiteral("GitLab")) {
+        QString proj;
+        QString iid;
+        bool isMr = false;
+        if (issueKey.contains(QLatin1Char('!'))) {
+            isMr = true;
+            const QStringList parts = issueKey.split(QLatin1Char('!'));
+            if (parts.size() >= 3) { proj = parts.at(1); iid = parts.at(2); }
+            else if (parts.size() == 2) { iid = parts.at(1); }
+        } else if (issueKey.contains(QLatin1Char('#'))) {
+            const QStringList parts = issueKey.split(QLatin1Char('#'));
+            if (parts.size() >= 3) { proj = parts.at(1); iid = parts.at(2); }
+            else if (parts.size() == 2) { iid = parts.at(1); }
+        }
+        if (iid.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
+        }
+        if (iid.isEmpty()) return;
+        if (proj.isEmpty()) {
+            proj = listEntry.jiraJql.trimmed();
+            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
+        }
+        if (proj.isEmpty()) {
+            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+            const auto m = glUrlRe.match(baseUrl);
+            if (m.hasMatch()) proj = m.captured(1);
+        }
+        if (proj.isEmpty()) return;
+
+        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
+        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
+        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3").arg(encodedProj, resource, iid));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QJsonObject payload{{QStringLiteral("state_event"), done ? QStringLiteral("close") : QStringLiteral("reopen")}};
+        m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    } else if (listEntry.provider == QStringLiteral("Todoist")) {
+        QString tdTaskId = issueKey;
+        if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
+        if (tdTaskId.isEmpty()) return;
+
+        const QString action = done ? QStringLiteral("close") : QStringLiteral("reopen");
+        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + tdTaskId + QLatin1Char('/') + action);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+        m_nam.post(req, QByteArray());
+    } else if (listEntry.provider == QStringLiteral("Redmine")) {
+        QString numStr;
+        if (issueKey.contains(QLatin1Char('#'))) numStr = issueKey.split(QLatin1Char('#')).last();
+        if (numStr.isEmpty()) {
+            for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+        }
+        if (numStr.isEmpty()) return;
+
+        QUrl url(baseUrl + QStringLiteral("/issues/") + numStr + QStringLiteral(".json"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        const int statusId = done ? 5 : 1; // 5 = Closed, 1 = New
+        QJsonObject payload{
+            {QStringLiteral("issue"), QJsonObject{{QStringLiteral("status_id"), statusId}}}
+        };
+        m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
     }
 }
 

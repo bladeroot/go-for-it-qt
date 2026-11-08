@@ -10,6 +10,8 @@
 #include <QVariantMap>
 #include <QVector>
 
+class TestTodoTxt;
+
 namespace gofi {
 
 struct RemoteIssueItem {
@@ -48,6 +50,10 @@ public:
                                 const QString& markdownDetails,
                                 bool forceBearerAuth = false,
                                 bool useV2Fallback = false);
+    void updateIssueStatusRemote(const TodoListEntry& listEntry,
+                                 const QString& issueKey,
+                                 bool done,
+                                 const QString& localStatus);
     void postIssueComment(const TodoListEntry& listEntry,
                           const QString& issueKey,
                           const QString& markdownComment,
@@ -133,6 +139,8 @@ private:
     bool m_syncing = false;
     int m_activeSyncRequests = 0;
     QString m_lastStatusMessage;
+
+    friend class ::TestTodoTxt;
 };
 
 } // namespace gofi

@@ -12,6 +12,8 @@
 #include "todotxt/TxtTask.h"
 #include "tui/TuiApp.h"
 #include <QSqlQuery>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QtTest>
 
 using namespace gofi;
@@ -1385,6 +1387,121 @@ private slots:
             svc.syncListIssues(ghList);
             QCOMPARE(failSpy.count(), 1);
         }
+
+        db.close();
+        QFile::remove(testDb);
+    }
+
+    void testJiraBearerAuthRetryWithLocalServer() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        const quint16 port = server.serverPort();
+
+        int requestCount = 0;
+        bool hadBasicAuth = false;
+        bool hadBearerAuth = false;
+
+        connect(&server, &QTcpServer::newConnection, [&]() {
+            while (server.hasPendingConnections()) {
+                QTcpSocket* socket = server.nextPendingConnection();
+                connect(socket, &QTcpSocket::readyRead, [socket, &requestCount, &hadBasicAuth, &hadBearerAuth]() {
+                    const QByteArray req = socket->readAll();
+                    if (!req.isEmpty()) {
+                        requestCount++;
+                        if (req.contains("Authorization: Basic")) {
+                            hadBasicAuth = true;
+                            const QByteArray body = "{}";
+                            const QByteArray resp =
+                                "HTTP/1.1 401 Unauthorized\r\n"
+                                "Content-Type: application/json\r\n"
+                                "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n"
+                                "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
+                            socket->write(resp);
+                        } else if (req.contains("Authorization: Bearer")) {
+                            hadBearerAuth = true;
+                            const QByteArray body = "{\"issues\":[]}";
+                            const QByteArray resp =
+                                "HTTP/1.1 200 OK\r\n"
+                                "Content-Type: application/json\r\n"
+                                "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
+                            socket->write(resp);
+                        }
+                    }
+                });
+            }
+        });
+
+        IssueTrackerService svc;
+        TodoListEntry entry;
+        entry.id = QStringLiteral("jira_retry_test");
+        entry.name = QStringLiteral("Jira Retry List");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("test_pat_token");
+
+        QSignalSpy syncSpy(&svc, &IssueTrackerService::listIssuesSynced);
+        svc.syncListIssues(entry);
+
+        QVERIFY(svc.isSyncing());
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(requestCount, 2);
+        QVERIFY(hadBasicAuth);
+        QVERIFY(hadBearerAuth);
+        QCOMPARE(syncSpy.count(), 1);
+        server.close();
+    }
+
+    void testRemoteClosedIssuesReconciliation() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("reconcile_test.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+
+        TodoListEntry ghList;
+        ghList.id = QStringLiteral("gh_reconcile");
+        ghList.name = QStringLiteral("GitHub Reconcile");
+        ghList.provider = QStringLiteral("GitHub");
+        ghList.jiraUrl = QStringLiteral("https://github.com");
+        ghList.apiToken = QStringLiteral("token");
+        ghList.jiraJql = QStringLiteral("repo:test/proj");
+        QVERIFY(db.saveList(ghList, 0));
+
+        // Insert two open remote tasks
+        TxtTask t1 = TxtTask::fromSimpleTxt(QStringLiteral("Issue 1"), false, false);
+        t1.setJiraKey(QStringLiteral("TEST#test/proj#1"));
+        QVERIFY(db.insertTask(ghList.id, t1, 0) >= 0);
+
+        TxtTask t2 = TxtTask::fromSimpleTxt(QStringLiteral("Issue 2"), false, false);
+        t2.setJiraKey(QStringLiteral("TEST#test/proj#2"));
+        QVERIFY(db.insertTask(ghList.id, t2, 1) >= 0);
+
+        QCOMPARE(db.loadTasks(ghList.id, false).size(), 2);
+        QCOMPARE(db.loadTasks(ghList.id, true).size(), 0);
+
+        // Simulate incoming sync where only Issue 2 is returned (Issue 1 was closed remotely)
+        QVector<RemoteIssueItem> remoteItems;
+        RemoteIssueItem item2;
+        item2.key = QStringLiteral("TEST#test/proj#2");
+        item2.description = QStringLiteral("Issue 2 updated");
+        item2.remoteStatus = QStringLiteral("open");
+        item2.priority = 2;
+        remoteItems.append(item2);
+
+        IssueTrackerService svc;
+        QSignalSpy changesSpy(&svc, &IssueTrackerService::trackerChangesDetected);
+        svc.processSyncedItems(ghList, remoteItems, QStringLiteral("GitHub"), false);
+
+        // Verify Issue 1 was marked done locally because it was no longer in the open issues returned
+        const auto openTasks = db.loadTasks(ghList.id, false);
+        const auto doneTasks = db.loadTasks(ghList.id, true);
+        QCOMPARE(openTasks.size(), 1);
+        QCOMPARE(openTasks.first().jiraKey(), QStringLiteral("TEST#test/proj#2"));
+        QCOMPARE(doneTasks.size(), 1);
+        QCOMPARE(doneTasks.first().jiraKey(), QStringLiteral("TEST#test/proj#1"));
+        QVERIFY(doneTasks.first().isDone());
+        QCOMPARE(doneTasks.first().status(), QStringLiteral("done"));
+        QCOMPARE(changesSpy.count(), 1);
 
         db.close();
         QFile::remove(testDb);
