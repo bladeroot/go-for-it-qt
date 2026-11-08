@@ -70,20 +70,80 @@ void TaskManager::addNewTask(const QString& simpleText, bool onTop, bool addCrea
     }
 }
 
-void TaskManager::clearDoneList() {
-    bool allSuccess = true;
-    if (!m_listIds.isEmpty()) {
-        for (const QString& lid : m_listIds) {
-            if (!DatabaseManager::instance().deleteDoneTasks(lid)) {
-                allSuccess = false;
-            }
-        }
-    } else if (!m_listId.isEmpty()) {
-        if (!DatabaseManager::instance().deleteDoneTasks(m_listId)) {
-            allSuccess = false;
-        }
+bool TaskManager::toggleTaskDone(bool fromDoneList, int sourceRow) {
+    TaskStoreModel* sourceStore = fromDoneList ? &m_doneStore : &m_todoStore;
+    TaskStoreModel* destStore = fromDoneList ? &m_todoStore : &m_doneStore;
+    if (sourceRow < 0 || sourceRow >= sourceStore->rowCount()) {
+        return false;
     }
-    if (!allSuccess) {
+
+    TxtTask task = sourceStore->taskAt(sourceRow);
+    const bool willBeDone = !fromDoneList;
+    task.setDone(willBeDone);
+    const int newOrder = destStore->rowCount();
+
+    if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+        emit errorOccurred(tr("Failed to update task status in database."));
+        return false;
+    }
+
+    m_movingBetweenStores = true;
+    sourceStore->removeAt(sourceRow);
+    m_movingBetweenStores = false;
+
+    if (!updateTasksOrders(fromDoneList, sourceStore->tasks())) {
+        loadFromDatabase(false);
+        return false;
+    }
+    destStore->appendTask(task);
+    return true;
+}
+
+bool TaskManager::setTaskStatus(bool fromDoneList, int sourceRow, const QString& newStatus) {
+    TaskStoreModel* store = fromDoneList ? &m_doneStore : &m_todoStore;
+    if (sourceRow < 0 || sourceRow >= store->rowCount()) {
+        return false;
+    }
+
+    TxtTask task = store->taskAt(sourceRow);
+    const QString oldStatus = task.status();
+    const bool wasClosed = TxtTask::isClosedStatus(oldStatus);
+    const bool willBeClosed = TxtTask::isClosedStatus(newStatus);
+
+    if (wasClosed != willBeClosed) {
+        task.setStatus(newStatus);
+        TaskStoreModel* destStore = willBeClosed ? &m_doneStore : &m_todoStore;
+        const int newOrder = destStore->rowCount();
+
+        if (!DatabaseManager::instance().updateTaskDoneAndOrder(task, newOrder)) {
+            emit errorOccurred(tr("Failed to update task status in database."));
+            return false;
+        }
+
+        m_movingBetweenStores = true;
+        store->removeAt(sourceRow);
+        m_movingBetweenStores = false;
+
+        if (!updateTasksOrders(!willBeClosed, store->tasks())) {
+            loadFromDatabase(false);
+            return false;
+        }
+        destStore->appendTask(task);
+        return true;
+    } else {
+        task.setStatus(newStatus);
+        if (!DatabaseManager::instance().updateTask(task)) {
+            emit errorOccurred(tr("Failed to update task in database."));
+            return false;
+        }
+        store->setTaskStatus(sourceRow, newStatus);
+        return true;
+    }
+}
+
+void TaskManager::clearDoneList() {
+    const QStringList targetLists = !m_listIds.isEmpty() ? m_listIds : (!m_listId.isEmpty() ? QStringList{m_listId} : QStringList{QStringLiteral("__ALL__")});
+    if (!DatabaseManager::instance().deleteDoneTasks(targetLists)) {
         emit errorOccurred(tr("Failed to delete completed tasks from database."));
         loadFromDatabase(false);
         return;

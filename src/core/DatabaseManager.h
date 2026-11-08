@@ -54,6 +54,9 @@ public:
     bool initialize(const QString& customDbPath = {});
     void close();
     [[nodiscard]] bool isOpen() const;
+    bool beginTransaction();
+    bool commitTransaction();
+    bool rollbackTransaction();
     [[nodiscard]] QString databasePath() const { return m_dbPath; }
     bool relocateDatabase(const QString& newDbPath, bool copyExisting = true);
     bool exportDatabaseBackup(const QString& destinationFilePath) const;
@@ -83,6 +86,7 @@ public:
     bool updateTaskTimer(qint64 taskId, quint32 timerSeconds, quint32 jiraSyncedSeconds = 0);
     bool deleteTask(qint64 taskId);
     bool deleteDoneTasks(const QString& listId);
+    bool deleteDoneTasks(const QStringList& listIds);
     bool replaceListTasksOrders(const QString& listId, bool done, const QVector<TxtTask>& tasks);
     bool upsertRemoteIssueTask(const QString& listId,
                                const QString& issueKey,

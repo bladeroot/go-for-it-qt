@@ -247,6 +247,18 @@ bool DatabaseManager::isOpen() const {
     return QSqlDatabase::database(m_connectionName, false).isOpen();
 }
 
+bool DatabaseManager::beginTransaction() {
+    return db().transaction();
+}
+
+bool DatabaseManager::commitTransaction() {
+    return db().commit();
+}
+
+bool DatabaseManager::rollbackTransaction() {
+    return db().rollback();
+}
+
 QSqlDatabase DatabaseManager::db() const {
     if (!isOpen() && !m_initFailed) {
         const_cast<DatabaseManager*>(this)->initialize();
@@ -944,12 +956,35 @@ bool DatabaseManager::deleteTask(qint64 taskId) {
     return q.exec();
 }
 
+bool DatabaseManager::deleteDoneTasks(const QStringList& listIds) {
+    QSqlDatabase database = db();
+    if (!database.transaction()) {
+        return false;
+    }
+    const bool matchAll = listIds.isEmpty() || listIds.contains(QStringLiteral("__ALL__")) || listIds.contains(QStringLiteral("*"));
+    QSqlQuery q(database);
+    if (matchAll) {
+        q.prepare(QStringLiteral("DELETE FROM tasks WHERE done = 1"));
+    } else {
+        QStringList placeholders;
+        for (int i = 0; i < listIds.size(); ++i) {
+            placeholders.append(QStringLiteral(":lid_%1").arg(i));
+        }
+        q.prepare(QStringLiteral("DELETE FROM tasks WHERE done = 1 AND list_id IN (%1)").arg(placeholders.join(QLatin1Char(','))));
+        for (int i = 0; i < listIds.size(); ++i) {
+            q.bindValue(QStringLiteral(":lid_%1").arg(i), listIds.at(i));
+        }
+    }
+    if (!q.exec()) {
+        database.rollback();
+        return false;
+    }
+    return database.commit();
+}
+
 bool DatabaseManager::deleteDoneTasks(const QString& listId) {
     if (listId.isEmpty()) return false;
-    QSqlQuery q(db());
-    q.prepare(QStringLiteral("DELETE FROM tasks WHERE list_id = :list_id AND done = 1"));
-    q.bindValue(QStringLiteral(":list_id"), listId);
-    return q.exec();
+    return deleteDoneTasks(QStringList{listId});
 }
 
 bool DatabaseManager::replaceListTasksOrders(const QString& listId, bool done, const QVector<TxtTask>& tasks) {

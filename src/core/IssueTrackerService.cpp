@@ -1898,6 +1898,7 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     QStringList statusChanges;
     QSet<QString> remoteKeys;
 
+    const bool inTx = db.beginTransaction();
     bool hasDbError = false;
     for (const RemoteIssueItem& item : items) {
         if (!item.key.isEmpty()) {
@@ -1918,7 +1919,7 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         );
         if (!ok) {
             hasDbError = true;
-            continue;
+            break;
         }
         if (isNew) {
             if (!TxtTask::isClosedStatus(localStatus)) {
@@ -1953,17 +1954,32 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                     statusChanges.append(QStringLiteral("%1: %2 → done (closed remotely)").arg(t.jiraKey(), t.status()));
                 } else {
                     hasDbError = true;
+                    break;
                 }
             }
         }
     }
 
     if (hasDbError) {
+        if (inTx) {
+            db.rollbackTransaction();
+        }
         endSyncOperation();
         const QString errMsg = tr("Database error occurred while saving synchronized issues from %1.").arg(providerName);
         setStatusMessage(errMsg);
         emit syncFailed(entry.id, errMsg);
         return;
+    }
+
+    if (inTx) {
+        if (!db.commitTransaction()) {
+            db.rollbackTransaction();
+            endSyncOperation();
+            const QString errMsg = tr("Database transaction error while saving synchronized issues from %1.").arg(providerName);
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
+        }
     }
 
     endSyncOperation();

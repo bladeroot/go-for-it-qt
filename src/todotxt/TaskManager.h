@@ -31,6 +31,8 @@ public:
     [[nodiscard]] bool isMultiList() const { return m_listIds.size() != 1 || m_listIds.contains(QStringLiteral("__ALL__")); }
 
     void addNewTask(const QString& simpleText, bool onTop = false, bool addCreationDate = true);
+    bool toggleTaskDone(bool fromDoneList, int sourceRow);
+    bool setTaskStatus(bool fromDoneList, int sourceRow, const QString& newStatus);
     void clearDoneList();
     void sortTasks();
     void refresh();
