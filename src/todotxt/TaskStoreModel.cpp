@@ -297,9 +297,14 @@ void TaskStoreModel::sortTasks() {
     emit taskDataChanged();
 }
 
-void TaskStoreModel::removeAt(int row) {
-    if (row < 0 || row >= m_tasks.size()) return;
+bool TaskStoreModel::removeAt(int row) {
+    if (row < 0 || row >= m_tasks.size()) return false;
     const qint64 removedId = m_tasks.at(row).id();
+    if (m_removeTaskHandler) {
+        if (!m_removeTaskHandler(row, removedId)) {
+            return false;
+        }
+    }
     beginRemoveRows(QModelIndex(), row, row);
     m_tasks.removeAt(row);
     endRemoveRows();
@@ -310,6 +315,7 @@ void TaskStoreModel::removeAt(int row) {
     emit taskDataChanged();
     emit unviewedTodoCountChanged();
     emit totalTodoCountChanged();
+    return true;
 }
 
 void TaskStoreModel::moveItem(int fromRow, int toRow) {

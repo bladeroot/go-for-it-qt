@@ -2895,7 +2895,88 @@ private slots:
                 QCOMPARE(countQ.value(0).toInt(), initialActivityCount + 1);
             }
 
-            // 3. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
+            // 3. Timer persistence failure must not stop/log the active session or duplicate errors
+            {
+                ctrl.selectListById(listId);
+                ctrl.setActiveTodoRow(0);
+                ctrl.timer()->start();
+                QVERIFY(ctrl.timer()->isRunning());
+                QThread::msleep(1050);
+
+                QSqlQuery countQ(dbConn);
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                const int initialActivityCount = countQ.value(0).toInt();
+
+                QSqlQuery triggerQ(dbConn);
+                QVERIFY(triggerQ.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_timer_progress BEFORE UPDATE OF timer_seconds ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated timer progress failure'); "
+                    "END;"
+                )));
+
+                int databaseErrorCount = 0;
+                const QMetaObject::Connection errorConnection = QObject::connect(
+                    &ctrl, &AppController::databaseError, [&databaseErrorCount](const QString&) {
+                        ++databaseErrorCount;
+                    });
+
+                QVERIFY(QMetaObject::invokeMethod(
+                    &ctrl,
+                    "onActiveTaskTimeUpdated",
+                    Qt::DirectConnection,
+                    Q_ARG(uint, ctrl.timer()->activeTaskTimerValue() + 1U)));
+
+                QVERIFY(ctrl.timer()->isRunning());
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                QCOMPARE(countQ.value(0).toInt(), initialActivityCount);
+                QCOMPARE(databaseErrorCount, 1);
+
+                QObject::disconnect(errorConnection);
+                QVERIFY(triggerQ.exec(QStringLiteral("DROP TRIGGER test_fail_timer_progress")));
+                if (ctrl.timer()->isRunning()) {
+                    ctrl.timer()->stop();
+                }
+            }
+
+            // 4. Failed deletion of the active task must not stop/log its timer
+            {
+                ctrl.selectListById(listId);
+                ctrl.setActiveTodoRow(0);
+                ctrl.timer()->start();
+                QVERIFY(ctrl.timer()->isRunning());
+                QThread::msleep(1050);
+
+                const int initialTodoCount = ctrl.todoProxyModel()->rowCount();
+                QSqlQuery countQ(dbConn);
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                const int initialActivityCount = countQ.value(0).toInt();
+
+                QSqlQuery triggerQ(dbConn);
+                QVERIFY(triggerQ.exec(QStringLiteral(
+                    "CREATE TRIGGER test_fail_active_delete BEFORE DELETE ON tasks "
+                    "BEGIN "
+                    "  SELECT RAISE(ABORT, 'Simulated active task deletion failure'); "
+                    "END;"
+                )));
+
+                ctrl.removeTask(false, 0);
+                QCOMPARE(ctrl.todoProxyModel()->rowCount(), initialTodoCount);
+                QVERIFY(ctrl.timer()->isRunning());
+                QVERIFY(countQ.exec(QStringLiteral("SELECT COUNT(*) FROM activity_log")));
+                QVERIFY(countQ.next());
+                QCOMPARE(countQ.value(0).toInt(), initialActivityCount);
+
+                QVERIFY(triggerQ.exec(QStringLiteral("DROP TRIGGER test_fail_active_delete")));
+                if (ctrl.timer()->isRunning()) {
+                    ctrl.timer()->stop();
+                }
+            }
+
+            // 5. Remote open <-> closed sort_order updates and list compaction in upsertRemoteIssueTask
             {
                 auto& db = DatabaseManager::instance();
                 const QString remListId = ctrl.listManager()->addList(QStringLiteral("Remote Sort Test"));
@@ -2957,7 +3038,7 @@ private slots:
                 failCompactTrigger.exec(QStringLiteral("DROP TRIGGER test_fail_compact"));
             }
 
-            // 4. markActivityWorklogSynced() validation
+            // 6. markActivityWorklogSynced() validation
             {
                 auto& db = DatabaseManager::instance();
                 // Invalid IDs or non-existent log IDs must return false

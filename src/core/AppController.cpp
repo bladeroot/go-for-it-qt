@@ -571,22 +571,26 @@ bool AppController::markTaskViewed(bool fromDoneList, int proxyRow) {
     return m_taskManager.todoModel()->markTaskViewed(sourceRow);
 }
 
-void AppController::removeTask(bool fromDoneList, int proxyRow) {
+bool AppController::removeTask(bool fromDoneList, int proxyRow) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
     const int sourceRow = proxy.mapToSourceRow(proxyRow);
-    if (sourceRow < 0) return;
+    if (sourceRow < 0) return false;
 
-    if (!fromDoneList && m_timer.isRunning()) {
-        const qint64 timedTaskId = m_timer.activeTaskId();
-        const qint64 removingTaskId = store->taskAt(sourceRow).id();
-        if (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && removingTaskId == timedTaskId)) {
-            m_timer.stop();
-        }
-    }
+    const qint64 timedTaskId = m_timer.activeTaskId();
+    const qint64 removingTaskId = store->taskAt(sourceRow).id();
+    const bool isTimingThisTask = !fromDoneList && m_timer.isRunning() &&
+        (sourceRow == m_activeTodoRow || (timedTaskId >= 0 && removingTaskId == timedTaskId));
 
     const bool removingActive = (!fromDoneList && sourceRow == m_activeTodoRow);
-    store->removeAt(sourceRow);
+    if (!store->removeAt(sourceRow)) {
+        return false;
+    }
+
+    if (isTimingThisTask && m_timer.isRunning()) {
+        m_timer.stop();
+    }
+
     if (!fromDoneList) {
         if (removingActive) {
             const int count = m_taskManager.todoModel()->rowCount();
@@ -601,6 +605,7 @@ void AppController::removeTask(bool fromDoneList, int proxyRow) {
             }
         }
     }
+    return true;
 }
 
 void AppController::moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxyRow) {
@@ -835,14 +840,17 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
 void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
     const qint64 timedTaskId = m_timer.activeTaskId();
     bool ok = true;
+    bool reportedByStore = false;
     if (timedTaskId >= 0) {
         const int row = findActiveTodoRowById(timedTaskId);
         if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
+            reportedByStore = true;
             ok = m_taskManager.todoModel()->setTaskTimerValue(row, totalSeconds);
         } else {
             bool foundInDone = false;
             for (int r = 0; r < m_taskManager.doneModel()->rowCount(); ++r) {
                 if (m_taskManager.doneModel()->taskAt(r).id() == timedTaskId) {
+                    reportedByStore = true;
                     ok = m_taskManager.doneModel()->setTaskTimerValue(r, totalSeconds);
                     foundInDone = true;
                     break;
@@ -853,16 +861,16 @@ void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
             }
         }
     } else if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        reportedByStore = true;
         ok = m_taskManager.todoModel()->setTaskTimerValue(m_activeTodoRow, totalSeconds);
     }
 
     if (!ok) {
         const QString err = tr("Failed to save task timer progress to database.");
         qWarning() << "AppController::onActiveTaskTimeUpdated database error:" << err;
-        m_notifications.notifyTaskEvent(tr("Database Error"), err);
-        emit databaseError(err);
-        if (m_timer.isRunning()) {
-            m_timer.stop();
+        if (!reportedByStore) {
+            m_notifications.notifyTaskEvent(tr("Database Error"), err);
+            emit databaseError(err);
         }
     }
 }

@@ -29,8 +29,12 @@ TaskManager::TaskManager(QObject* parent)
         return updateTaskTimerInDatabase(row, task);
     });
 
-    connect(&m_todoStore, &TaskStoreModel::taskRemoved, this, &TaskManager::onTaskRemoved);
-    connect(&m_doneStore, &TaskStoreModel::taskRemoved, this, &TaskManager::onTaskRemoved);
+    m_todoStore.setRemoveTaskHandler([this](int row, qint64 taskId) {
+        return deleteTaskFromDatabase(row, taskId);
+    });
+    m_doneStore.setRemoveTaskHandler([this](int row, qint64 taskId) {
+        return deleteTaskFromDatabase(row, taskId);
+    });
 
     connect(&m_todoStore, &TaskStoreModel::tasksReordered, this, &TaskManager::onTodoTasksReordered);
     connect(&m_doneStore, &TaskStoreModel::tasksReordered, this, &TaskManager::onDoneTasksReordered);
@@ -302,13 +306,18 @@ bool TaskManager::updateTaskTimerInDatabase(int row, const TxtTask& task) {
     return true;
 }
 
-void TaskManager::onTaskRemoved(qint64 taskId) {
-    if (!m_movingBetweenStores && taskId >= 0) {
+bool TaskManager::deleteTaskFromDatabase(int row, qint64 taskId) {
+    Q_UNUSED(row)
+    if (m_movingBetweenStores) {
+        return true;
+    }
+    if (taskId >= 0) {
         if (!DatabaseManager::instance().deleteTask(taskId)) {
             emit errorOccurred(tr("Failed to delete task from database."));
-            loadFromDatabase(false);
+            return false;
         }
     }
+    return true;
 }
 
 void TaskManager::onTodoTasksReordered() {

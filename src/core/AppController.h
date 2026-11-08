@@ -97,10 +97,12 @@ public:
     Q_INVOKABLE bool changeTaskStatus(bool fromDoneList, int proxyRow, const QString& newStatus);
     Q_INVOKABLE bool changeTaskPriority(bool fromDoneList, int proxyRow, const QString& priorityLetter);
     Q_INVOKABLE bool updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText);
+    // Returns true if local SQLite persistence succeeded. Remote issue tracker sync is dispatched asynchronously.
     Q_INVOKABLE bool updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details);
+    // Returns true if local SQLite persistence succeeded. Remote issue tracker sync is dispatched asynchronously.
     Q_INVOKABLE bool addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText);
     Q_INVOKABLE bool markTaskViewed(bool fromDoneList, int proxyRow);
-    Q_INVOKABLE void removeTask(bool fromDoneList, int proxyRow);
+    Q_INVOKABLE bool removeTask(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void moveTaskRow(bool fromDoneList, int fromProxyRow, int toProxyRow);
     Q_INVOKABLE void moveActiveTaskByOffset(int delta);
     Q_INVOKABLE void switchToNextTask();
