@@ -2062,7 +2062,7 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
     applyAuthHeader(req, entry);
 
     QNetworkReply* reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, entry, baseUrl]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             endSyncOperation();
@@ -2091,23 +2091,65 @@ void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
                 explicitZeroTotal = true;
             }
 
-            // Auto-learn status IDs from returned issues for existing lists that haven't reloaded statuses
+            // Auto-learn status IDs from Redmine server statuses if closed ID is missing
+            bool hasClosedId = false;
+            for (auto it = entry.statusMapping.begin(); it != entry.statusMapping.end(); ++it) {
+                if (it.key().startsWith(QStringLiteral("_id_"))) {
+                    const QString stName = it.key().mid(4).toLower();
+                    if (stName == QStringLiteral("closed") || stName == QStringLiteral("resolved") || stName == QStringLiteral("done")) {
+                        hasClosedId = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasClosedId) {
+                QUrl statusUrl(baseUrl + QStringLiteral("/issue_statuses.json"));
+                QNetworkRequest statusReq(statusUrl);
+                applyAuthHeader(statusReq, entry, false);
+                QNetworkReply* stReply = m_nam.get(statusReq);
+                connect(stReply, &QNetworkReply::finished, this, [this, stReply, entry]() {
+                    stReply->deleteLater();
+                    if (stReply->error() != QNetworkReply::NoError) return;
+                    const QJsonDocument sDoc = QJsonDocument::fromJson(stReply->readAll());
+                    if (!sDoc.isObject()) return;
+                    const QJsonArray sArr = sDoc.object().value(QStringLiteral("issue_statuses")).toArray();
+                    QVariantMap newMapping = entry.statusMapping;
+                    bool changed = false;
+                    for (const auto& val : sArr) {
+                        const QJsonObject sObj = val.toObject();
+                        const QString name = sObj.value(QStringLiteral("name")).toString().trimmed();
+                        const int id = sObj.value(QStringLiteral("id")).toInt(0);
+                        if (!name.isEmpty() && id > 0) {
+                            const QString idKey = QStringLiteral("_id_") + name;
+                            if (!newMapping.contains(idKey)) {
+                                newMapping[idKey] = id;
+                                changed = true;
+                            }
+                        }
+                    }
+                    if (changed) {
+                        emit listStatusMappingUpdated(entry.id, newMapping);
+                    }
+                });
+            }
+
+            // Auto-learn status IDs from returned issues for existing lists
             bool mappingChanged = false;
-            TodoListEntry updatedEntry = entry;
+            QVariantMap updatedMapping = entry.statusMapping;
             for (const auto& val : issuesArr) {
                 const QJsonObject statusObj = val.toObject().value(QStringLiteral("status")).toObject();
                 const QString sName = statusObj.value(QStringLiteral("name")).toString().trimmed();
                 const int sId = statusObj.value(QStringLiteral("id")).toInt(0);
                 if (!sName.isEmpty() && sId > 0) {
                     const QString idKey = QStringLiteral("_id_") + sName;
-                    if (!updatedEntry.statusMapping.contains(idKey)) {
-                        updatedEntry.statusMapping[idKey] = sId;
+                    if (!updatedMapping.contains(idKey)) {
+                        updatedMapping[idKey] = sId;
                         mappingChanged = true;
                     }
                 }
             }
             if (mappingChanged) {
-                DatabaseManager::instance().saveList(updatedEntry, 0);
+                emit listStatusMappingUpdated(entry.id, updatedMapping);
             }
         }
 

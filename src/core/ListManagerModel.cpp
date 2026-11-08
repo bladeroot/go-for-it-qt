@@ -244,6 +244,18 @@ void ListManagerModel::moveItem(int fromRow, int toRow) {
     DatabaseManager::instance().updateListsOrder(m_entries);
 }
 
+void ListManagerModel::updateListStatusMapping(const QString& listId, const QVariantMap& mapping) {
+    for (int i = 0; i < m_entries.size(); ++i) {
+        if (m_entries[i].id == listId) {
+            m_entries[i].statusMapping = mapping;
+            DatabaseManager::instance().updateListStatusMapping(listId, mapping);
+            emit dataChanged(index(i, 0), index(i, 0));
+            emit listUpdated(listId);
+            break;
+        }
+    }
+}
+
 int ListManagerModel::indexOfId(const QString& id) const {
     for (int i = 0; i < m_entries.size(); ++i) {
         if (m_entries.at(i).id == id) {

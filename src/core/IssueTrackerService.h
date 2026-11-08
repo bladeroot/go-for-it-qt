@@ -121,6 +121,7 @@ signals:
     void remoteStatusesError(const QString& error);
     void remotePrioritiesLoaded(const QVariantList& priorities);
     void remotePrioritiesError(const QString& error);
+    void listStatusMappingUpdated(const QString& listId, const QVariantMap& mapping);
 
 private:
     static QString normalizeBaseUrl(const QString& rawUrl);

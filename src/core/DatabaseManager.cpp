@@ -635,6 +635,14 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
     return q.exec();
 }
 
+bool DatabaseManager::updateListStatusMapping(const QString& listId, const QVariantMap& mapping) {
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE lists SET status_mapping = :status_mapping WHERE id = :id"));
+    q.bindValue(QStringLiteral(":status_mapping"), nonNullString(serializeStatusMapping(mapping)));
+    q.bindValue(QStringLiteral(":id"), listId);
+    return q.exec();
+}
+
 bool DatabaseManager::removeList(const QString& listId) {
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM lists WHERE id = :id"));

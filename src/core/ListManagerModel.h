@@ -41,6 +41,7 @@ public:
     Q_INVOKABLE [[nodiscard]] QVariantMap get(int row) const;
     Q_INVOKABLE void removeListById(const QString& id);
     Q_INVOKABLE void moveItem(int fromRow, int toRow);
+    Q_INVOKABLE void updateListStatusMapping(const QString& listId, const QVariantMap& mapping);
     void reloadFromDatabase();
 
     [[nodiscard]] int indexOfId(const QString& id) const;
