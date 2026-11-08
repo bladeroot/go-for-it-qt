@@ -1042,7 +1042,7 @@ bool DatabaseManager::moveTaskDoneAndReorder(const TxtTask& task, int newOrder, 
             reorderQ.bindValue(QStringLiteral(":id"), tasks.at(i).id());
             reorderQ.bindValue(QStringLiteral(":list_id"), listId);
             reorderQ.bindValue(QStringLiteral(":done"), remainingDone ? 1 : 0);
-            if (!reorderQ.exec()) {
+            if (!reorderQ.exec() || reorderQ.numRowsAffected() <= 0) {
                 database.rollback();
                 return false;
             }
