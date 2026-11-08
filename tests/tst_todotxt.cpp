@@ -1967,6 +1967,71 @@ private slots:
             QFile::remove(csvB);
         }
     }
+
+    void testTaskTimerSwitchingAndDatabaseAtomicity() {
+        // 1. isDatabaseReady check
+        {
+            AppController invalidCtrl(QString(), QStringLiteral("/proc/gofi-review-blocked/db.sqlite"));
+            QVERIFY(!invalidCtrl.isDatabaseReady());
+        }
+
+        const QString testDb = QStringLiteral("/tmp/gofi-timer-switch-test.db");
+        QFile::remove(testDb);
+
+        {
+            AppController ctrl(QString(), testDb);
+            QVERIFY(ctrl.isDatabaseReady());
+
+            const QString listId = ctrl.listManager()->addList(QStringLiteral("Timer Switch List"));
+            ctrl.selectListById(listId);
+
+            // Remove any default tasks created by addDefaultsIfEmpty
+            while (ctrl.todoProxyModel()->rowCount() > 0) {
+                ctrl.removeTask(false, 0);
+            }
+
+            ctrl.addNewTask(QStringLiteral("Task Alpha"));
+            ctrl.addNewTask(QStringLiteral("Task Beta"));
+            QCOMPARE(ctrl.todoProxyModel()->rowCount(), 2);
+
+            // Select Task Alpha (row 0) and start timer
+            ctrl.setActiveTodoRow(0);
+            QCOMPARE(ctrl.activeTodoRow(), 0);
+            ctrl.timer()->start();
+            QVERIFY(ctrl.timer()->isRunning());
+            QThread::msleep(1050);
+
+            // Switch to Task Beta (row 1) while timer is running
+            ctrl.setActiveTodoRow(1);
+            QCOMPARE(ctrl.activeTodoRow(), 1);
+            QVERIFY(!ctrl.timer()->isRunning());
+
+            // Task Alpha (row 0) must have recorded >= 1 second
+            const uint alphaSeconds = ctrl.todoProxyModel()->data(
+                ctrl.todoProxyModel()->index(0, 0), TaskStoreModel::TimerValueRole
+            ).toUInt();
+            QVERIFY(alphaSeconds >= 1);
+
+            // Task Beta (row 1) must still have 0 seconds (time of Task Alpha not leaked to Task Beta)
+            const uint betaSeconds = ctrl.todoProxyModel()->data(
+                ctrl.todoProxyModel()->index(1, 0), TaskStoreModel::TimerValueRole
+            ).toUInt();
+            QCOMPARE(betaSeconds, 0u);
+
+            // 2. DatabaseManager batch ordering transaction atomicity
+            DatabaseManager& db = DatabaseManager::instance();
+            QVector<TodoListEntry> entries = db.loadLists();
+            QVERIFY(!entries.isEmpty());
+            QVERIFY(db.updateListsOrder(entries));
+
+            QVector<TxtTask> tasks = db.loadTasks(listId, false);
+            QCOMPARE(tasks.size(), 2);
+            QVERIFY(db.replaceListTasksOrders(listId, false, tasks));
+        }
+
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

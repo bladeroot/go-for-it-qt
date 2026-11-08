@@ -19,7 +19,8 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_shortcuts(this)
     , m_timer(&m_settings, this)
     , m_notifications(&m_settings, &m_timer, this)
-    , m_listManager((DatabaseManager::instance().initialize(customDbPath), this))
+    , m_databaseReady(customDbPath.isEmpty() ? DatabaseManager::instance().initialize() : DatabaseManager::instance().initialize(customDbPath))
+    , m_listManager(this)
     , m_issueTracker(this)
     , m_taskManager(this)
     , m_todoProxy(this)
@@ -30,8 +31,8 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     , m_systemHooks(this, &m_settings, &m_timer, this)
     , m_desktopIntegration(this, &m_settings, &m_timer, this)
 {
-    if (!customDbPath.isEmpty() && !DatabaseManager::instance().isOpen()) {
-        qCritical() << "Error: Failed to initialize custom database at:" << customDbPath;
+    if (!m_databaseReady) {
+        qCritical() << "Error: Failed to initialize database at:" << (customDbPath.isEmpty() ? QStringLiteral("default") : customDbPath);
     }
     m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
     applyLanguageTranslator();
@@ -159,6 +160,9 @@ void AppController::setActiveTodoRow(int sourceRow) {
     if (m_activeTodoRow == clamped) {
         syncActiveTaskToTimer();
         return;
+    }
+    if (m_timer.isRunning()) {
+        m_timer.stop();
     }
     m_activeTodoRow = clamped;
     emit activeTodoRowChanged();
@@ -651,8 +655,18 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
     QString jiraKey;
     QString targetListId = m_currentListId;
     QString targetListName = m_currentListName;
-    if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
-        const TxtTask activeTask = m_taskManager.todoModel()->taskAt(m_activeTodoRow);
+
+    const qint64 timedTaskId = m_timer.activeTaskId();
+    int row = -1;
+    if (timedTaskId >= 0) {
+        row = findActiveTodoRowById(timedTaskId);
+    }
+    if (row < 0 && m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        row = m_activeTodoRow;
+    }
+
+    if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
+        const TxtTask activeTask = m_taskManager.todoModel()->taskAt(row);
         activeTaskId = activeTask.id();
         jiraKey = activeTask.jiraKey();
         if (!activeTask.listId().isEmpty()) {
@@ -704,8 +718,16 @@ void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSe
 }
 
 void AppController::onActiveTaskTimeUpdated(uint totalSeconds) {
-    if (m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
-        m_taskManager.todoModel()->setTaskTimerValue(m_activeTodoRow, totalSeconds);
+    const qint64 timedTaskId = m_timer.activeTaskId();
+    int row = -1;
+    if (timedTaskId >= 0) {
+        row = findActiveTodoRowById(timedTaskId);
+    }
+    if (row < 0 && m_activeTodoRow >= 0 && m_activeTodoRow < m_taskManager.todoModel()->rowCount()) {
+        row = m_activeTodoRow;
+    }
+    if (row >= 0 && row < m_taskManager.todoModel()->rowCount()) {
+        m_taskManager.todoModel()->setTaskTimerValue(row, totalSeconds);
     }
 }
 

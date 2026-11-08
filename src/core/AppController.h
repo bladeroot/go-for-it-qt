@@ -46,11 +46,14 @@ class AppController : public QObject {
     Q_PROPERTY(int unviewedTodoCount READ unviewedTodoCount NOTIFY todoCountsChanged)
     Q_PROPERTY(int totalTodoCount READ totalTodoCount NOTIFY totalTodoCountChanged)
     Q_PROPERTY(QVariantList availableLanguages READ availableLanguages NOTIFY languageChanged)
+    Q_PROPERTY(bool isDatabaseReady READ isDatabaseReady CONSTANT)
 
 public:
     explicit AppController(const QString& logFilePath = {},
                            const QString& customDbPath = {},
                            QObject* parent = nullptr);
+
+    [[nodiscard]] bool isDatabaseReady() const noexcept { return m_databaseReady; }
 
     [[nodiscard]] SettingsManager* settings() noexcept { return &m_settings; }
     [[nodiscard]] ShortcutManager* shortcuts() noexcept { return &m_shortcuts; }
@@ -147,6 +150,7 @@ private:
     ShortcutManager m_shortcuts;
     TaskTimer m_timer;
     NotificationService m_notifications;
+    bool m_databaseReady = false;
     ListManagerModel m_listManager;
     IssueTrackerService m_issueTracker;
     TaskManager m_taskManager;
