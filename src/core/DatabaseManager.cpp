@@ -732,12 +732,29 @@ bool DatabaseManager::updateListStatusMapping(const QString& listId, const QVari
     return q.exec() && q.numRowsAffected() > 0;
 }
 
-bool DatabaseManager::removeList(const QString& listId) {
-    if (listId.isEmpty()) return false;
+bool DatabaseManager::removeList(const QString& listId, bool* notFound) {
+    if (notFound) {
+        *notFound = false;
+    }
+    if (listId.isEmpty()) {
+        if (notFound) {
+            *notFound = true;
+        }
+        return false;
+    }
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM lists WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), listId);
-    return q.exec() && q.numRowsAffected() > 0;
+    if (!q.exec()) {
+        return false;
+    }
+    if (q.numRowsAffected() <= 0) {
+        if (notFound) {
+            *notFound = true;
+        }
+        return false;
+    }
+    return true;
 }
 
 bool DatabaseManager::updateListsOrder(const QVector<TodoListEntry>& entries) {

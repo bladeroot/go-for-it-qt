@@ -70,7 +70,7 @@ public:
     [[nodiscard]] QVector<TodoListEntry> loadLists() const;
     bool saveList(const TodoListEntry& entry, int sortOrder);
     bool updateListStatusMapping(const QString& listId, const QVariantMap& mapping);
-    bool removeList(const QString& listId);
+    bool removeList(const QString& listId, bool* notFound = nullptr);
     bool updateListsOrder(const QVector<TodoListEntry>& entries);
 
     // Tasks CRUD

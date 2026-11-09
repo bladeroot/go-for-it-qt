@@ -229,9 +229,13 @@ void ListManagerModel::removeListById(const QString& id) {
     const int idx = indexOfId(id);
     if (idx < 0) return;
 
-    if (!DatabaseManager::instance().removeList(id)) {
-        emit errorOccurred(tr("Failed to remove list from database."));
-        return;
+    bool notFound = false;
+    if (!DatabaseManager::instance().removeList(id, &notFound)) {
+        if (!notFound) {
+            emit errorOccurred(tr("Failed to remove list from database."));
+            reloadFromDatabase();
+            return;
+        }
     }
 
     beginRemoveRows(QModelIndex(), idx, idx);

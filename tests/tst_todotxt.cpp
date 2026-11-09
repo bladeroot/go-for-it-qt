@@ -4171,6 +4171,26 @@ private slots:
 
         QVERIFY(missingDeleteRejected && missingMappingUpdateRejected && missingOnboardingUpdateRejected);
     }
+
+    // KB-28: since c816a12 removeList() returns false when the row is already gone, and
+    // ListManagerModel::removeListById then keeps the entry in memory. A list deleted by
+    // another process on the same database (GUI and TUI side by side) can no longer be
+    // removed from the UI until restart.
+    void testRemovingListAlreadyDeletedElsewhereDropsItFromModel() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb28_ghost_list.db")));
+        ListManagerModel* lm = ctrl.listManager();
+        const QString listId = lm->addList(QStringLiteral("KB28 Ghost"));
+        QVERIFY(!listId.isEmpty());
+        const int before = lm->rowCount();
+
+        // Another process deletes the list directly in the shared database.
+        QVERIFY(DatabaseManager::instance().removeList(listId));
+
+        lm->removeListById(listId);
+
+        QCOMPARE(lm->indexOfId(listId), -1);
+        QCOMPARE(lm->rowCount(), before - 1);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
