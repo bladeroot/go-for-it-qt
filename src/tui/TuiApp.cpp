@@ -48,6 +48,21 @@ QString statusLabel(const QString& status) {
     if (status == QStringLiteral("canceled")) return TuiApp::tr("Canceled / Rejected");
     return TuiApp::tr("To-Do");
 }
+
+QString defaultBillingExportPath(const QString& filename) {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty() || !QDir(dir).exists()) {
+        dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    }
+    if (dir.isEmpty() || !QDir(dir).exists()) {
+        dir = QDir::homePath();
+    }
+    if (!dir.isEmpty()) {
+        QDir().mkpath(dir);
+        return QDir(dir).filePath(filename);
+    }
+    return filename;
+}
 } // namespace
 
 TuiApp::TuiApp(AppController* controller, QObject* parent)
@@ -1399,14 +1414,14 @@ void TuiApp::handleDashboardKey(const QByteArray& seq) {
                              : (m_dashboardPeriod == 2) ? QStringLiteral("month") : QStringLiteral("all");
 
     if (seq == "c") {
-        const QString outPath = QStringLiteral("/tmp/billing-%1.csv").arg(periodName);
+        const QString outPath = defaultBillingExportPath(QStringLiteral("billing-%1.csv").arg(periodName));
         if (m_app->analytics()->exportBillingCsv(outPath, periodName, m_app->currentListId())) {
             m_statusMessage = tr("Billing CSV exported to %1").arg(outPath);
         }
         return;
     }
     if (seq == "p") {
-        const QString outPath = QStringLiteral("/tmp/billing-%1.pdf").arg(periodName);
+        const QString outPath = defaultBillingExportPath(QStringLiteral("billing-%1.pdf").arg(periodName));
         if (m_app->analytics()->exportBillingPdf(outPath, periodName, m_app->currentListId())) {
             m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
         }
@@ -1466,7 +1481,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     }
     if (cmdLine.startsWith(QStringLiteral("export-csv"))) {
         const QString rest = cmdLine.mid(10).trimmed();
-        const QString outPath = !rest.isEmpty() ? rest : QStringLiteral("/tmp/billing-report.csv");
+        const QString outPath = !rest.isEmpty() ? rest : defaultBillingExportPath(QStringLiteral("billing-report.csv"));
         if (m_app->analytics()->exportBillingCsv(outPath, QStringLiteral("month"), m_app->currentListId())) {
             m_statusMessage = tr("Billing CSV exported to %1").arg(outPath);
         } else {
@@ -1476,7 +1491,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     }
     if (cmdLine.startsWith(QStringLiteral("export-pdf"))) {
         const QString rest = cmdLine.mid(10).trimmed();
-        const QString outPath = !rest.isEmpty() ? rest : QStringLiteral("/tmp/billing-report.pdf");
+        const QString outPath = !rest.isEmpty() ? rest : defaultBillingExportPath(QStringLiteral("billing-report.pdf"));
         if (m_app->analytics()->exportBillingPdf(outPath, QStringLiteral("month"), m_app->currentListId())) {
             m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
         } else {

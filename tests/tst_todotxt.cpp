@@ -19,6 +19,7 @@
 #include <QTcpSocket>
 #include <QDesktopServices>
 #include <QtTest>
+#include <sys/stat.h>
 #include <functional>
 #include <memory>
 
@@ -4208,6 +4209,32 @@ private slots:
 
         QCOMPARE(lm->indexOfId(listId), -1);
         QCOMPARE(lm->rowCount(), before - 1);
+    }
+
+    // KB-30: billing exports contain task names, tracked time and list/client names. The
+    // TUI writes them to predictable world-writable paths (/tmp/billing-<period>.csv|pdf,
+    // /tmp/billing-report.csv|pdf) and AnalyticsService creates the files with the default
+    // umask, so on a typical 022 umask any local user can read the report.
+    void testBillingExportFilesAreOwnerOnly() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb30_billing.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB30 Client"));
+        ctrl.selectListById(listId);
+
+        const mode_t oldMask = ::umask(022);
+        const QString csvPath = m_testSandbox.filePath(QStringLiteral("kb30-billing.csv"));
+        const QString pdfPath = m_testSandbox.filePath(QStringLiteral("kb30-billing.pdf"));
+        QFile::remove(csvPath);
+        QFile::remove(pdfPath);
+        const bool csvOk = ctrl.analytics()->exportBillingCsv(csvPath, QStringLiteral("all"), listId);
+        const bool pdfOk = ctrl.analytics()->exportBillingPdf(pdfPath, QStringLiteral("all"), listId);
+        ::umask(oldMask);
+
+        QVERIFY(csvOk);
+        QVERIFY(pdfOk);
+        const QFileDevice::Permissions othersOrGroup =
+            QFileDevice::ReadGroup | QFileDevice::ReadOther | QFileDevice::WriteGroup | QFileDevice::WriteOther;
+        QVERIFY((QFile::permissions(csvPath) & othersOrGroup) == 0);
+        QVERIFY((QFile::permissions(pdfPath) & othersOrGroup) == 0);
     }
 };
 
