@@ -4148,6 +4148,29 @@ private slots:
         QCOMPARE(failSpy.count(), 1);
         server.close();
     }
+
+    // KB-27: mutating a row that no longer exists must not be reported as a
+    // successful persistence operation. Callers otherwise keep stale in-memory
+    // list state after an external deletion or race.
+    void testListMutationsRejectMissingRows() {
+        DatabaseManager& db = DatabaseManager::instance();
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb27_missing_lists.db"));
+        QFile::remove(dbPath);
+        QVERIFY(db.initialize(dbPath));
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb27-list");
+        entry.name = QStringLiteral("KB27 list");
+        QVERIFY(db.saveList(entry, 0));
+        QVERIFY(db.removeList(entry.id));
+
+        const bool missingDeleteRejected = !db.removeList(entry.id);
+        const bool missingMappingUpdateRejected =
+            !db.updateListStatusMapping(entry.id, {{QStringLiteral("todo"), QStringLiteral("Open")}});
+        const bool missingOnboardingUpdateRejected = !db.setOnboardingCompleted(entry.id);
+
+        QVERIFY(missingDeleteRejected && missingMappingUpdateRejected && missingOnboardingUpdateRejected);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

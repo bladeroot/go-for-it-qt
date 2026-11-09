@@ -724,18 +724,20 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
 }
 
 bool DatabaseManager::updateListStatusMapping(const QString& listId, const QVariantMap& mapping) {
+    if (listId.isEmpty()) return false;
     QSqlQuery q(db());
     q.prepare(QStringLiteral("UPDATE lists SET status_mapping = :status_mapping WHERE id = :id"));
     q.bindValue(QStringLiteral(":status_mapping"), nonNullString(serializeStatusMapping(mapping)));
     q.bindValue(QStringLiteral(":id"), listId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::removeList(const QString& listId) {
+    if (listId.isEmpty()) return false;
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM lists WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), listId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 bool DatabaseManager::updateListsOrder(const QVector<TodoListEntry>& entries) {
@@ -912,7 +914,7 @@ bool DatabaseManager::setOnboardingCompleted(const QString& listId, bool complet
     q.prepare(QStringLiteral("UPDATE lists SET onboarding_completed = :val WHERE id = :id"));
     q.bindValue(QStringLiteral(":val"), completed ? 1 : 0);
     q.bindValue(QStringLiteral(":id"), listId);
-    return q.exec();
+    return q.exec() && q.numRowsAffected() > 0;
 }
 
 qint64 DatabaseManager::insertTask(const QString& listId, const TxtTask& task, int sortOrder) {
