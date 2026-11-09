@@ -3813,6 +3813,57 @@ private slots:
         QVERIFY(!openKeys.contains(QStringLiteral("YT-101")));
         server.close();
     }
+
+    // KB-19: KB-18 was fixed only for exactly 100 issues. With two non-empty pages
+    // (>100 open issues) limitReached is still forced, so a stable list never reconciles
+    // and remotely closed issues stay open locally forever.
+    void testYouTrackLargeStableListStillReconcilesClosedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        // Stable server state: YT-1..YT-150 open; YT-151 was closed remotely.
+        serveHttp(server, [](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            int skip = 0;
+            const int skipIdx = target.indexOf("skip=");
+            if (skipIdx >= 0) {
+                skip = target.mid(skipIdx + 5).split('&').value(0).toInt();
+            }
+            QJsonArray arr;
+            for (int n = skip + 1; n <= qMin(skip + 100, 150); ++n) {
+                arr.append(QJsonObject{
+                    {QStringLiteral("idReadable"), QStringLiteral("YT-%1").arg(n)},
+                    {QStringLiteral("summary"), QStringLiteral("Issue %1").arg(n)}
+                });
+            }
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb19_youtrack.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb19_yt");
+        entry.name = QStringLiteral("KB19 YouTrack");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        for (int n = 1; n <= 151; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("YT-%1").arg(n));
+            QVERIFY(db.insertTask(entry.id, t, n - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("YT-150")));
+        QVERIFY(!openKeys.contains(QStringLiteral("YT-151")));
+        server.close();
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

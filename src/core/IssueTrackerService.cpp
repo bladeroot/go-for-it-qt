@@ -1805,12 +1805,14 @@ struct IssueTrackerService::JiraSyncState {
 
 struct IssueTrackerService::YouTrackSyncState {
     QVector<RemoteIssueItem> allItems;
+    QStringList firstPageKeys;
     int skip = 0;
     int pagesFetched = 0;
     int nonEmptyPages = 0;
     bool limitReached = false;
     bool hasError = false;
     bool explicitZeroTotal = false;
+    bool isVerifyingFirstPage = false;
 };
 
 struct IssueTrackerService::GitHubSyncState {
@@ -2065,6 +2067,11 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
         if (reply->error() != QNetworkReply::NoError) {
+            if (state->isVerifyingFirstPage) {
+                state->limitReached = true;
+                processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                return;
+            }
             if (state->pagesFetched == 0) {
                 endSyncOperation();
                 const QString errMsg = tr("YouTrack sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
@@ -2083,9 +2090,32 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         if (!doc.isArray()) {
             state->hasError = true;
         }
+
+        if (state->isVerifyingFirstPage) {
+            if (!doc.isArray()) {
+                state->limitReached = true;
+            } else {
+                const auto verifyItems = parseYouTrackIssuesJson(bodyBytes);
+                QStringList verifyKeys;
+                for (const auto& it : verifyItems) {
+                    verifyKeys.append(it.key);
+                }
+                if (verifyKeys != state->firstPageKeys) {
+                    state->limitReached = true;
+                }
+            }
+            processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
+            return;
+        }
+
         const int rawCount = doc.isArray() ? doc.array().size() : 0;
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
         state->allItems.append(items);
+        if (state->pagesFetched == 0) {
+            for (const auto& it : items) {
+                state->firstPageKeys.append(it.key);
+            }
+        }
         state->pagesFetched++;
         if (rawCount > 0) {
             state->nonEmptyPages++;
@@ -2106,8 +2136,53 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
             }
         }
 
-        if (state->nonEmptyPages > 1) {
-            state->limitReached = true;
+        if (state->nonEmptyPages > 1 && !state->hasError && !state->limitReached) {
+            // Check boundary gaps between consecutive pages
+            bool boundaryGapDetected = false;
+            DatabaseManager& db = DatabaseManager::instance();
+            const auto localTasks = db.loadTasks(entry.id, false);
+            QSet<QString> localKeys;
+            for (const TxtTask& t : localTasks) {
+                if (!t.jiraKey().isEmpty()) {
+                    localKeys.insert(t.jiraKey());
+                }
+            }
+
+            for (int p = 1; p < state->nonEmptyPages; ++p) {
+                const int boundaryIdx = p * 100;
+                if (boundaryIdx < state->allItems.size()) {
+                    const QString prevKey = state->allItems.at(boundaryIdx - 1).key;
+                    const QString nextKey = state->allItems.at(boundaryIdx).key;
+                    const int dash1 = prevKey.lastIndexOf(QLatin1Char('-'));
+                    const int dash2 = nextKey.lastIndexOf(QLatin1Char('-'));
+                    if (dash1 > 0 && dash2 > 0 && prevKey.left(dash1) == nextKey.left(dash2)) {
+                        const int num1 = prevKey.mid(dash1 + 1).toInt();
+                        const int num2 = nextKey.mid(dash2 + 1).toInt();
+                        const QString prefix = prevKey.left(dash1 + 1);
+                        for (int n = num1 + 1; n < num2; ++n) {
+                            if (localKeys.contains(prefix + QString::number(n))) {
+                                boundaryGapDetected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (boundaryGapDetected) {
+                    break;
+                }
+            }
+
+            if (boundaryGapDetected) {
+                state->limitReached = true;
+                processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                return;
+            }
+
+            // Re-request page 1 ($skip=0) to verify no shift occurred on the first page
+            state->isVerifyingFirstPage = true;
+            state->skip = 0;
+            fetchYouTrackPage(entry, state, baseUrl, ytQuery);
+            return;
         }
 
         processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
