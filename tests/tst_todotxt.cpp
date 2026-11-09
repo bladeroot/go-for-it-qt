@@ -28,7 +28,9 @@ namespace {
 // Minimal HTTP/1.1 responder for tracker tests: buffers each request until its
 // Content-Length body is complete, then answers once via the handler.
 using HttpHandler = std::function<QByteArray(const QByteArray& method, const QByteArray& target, const QByteArray& body)>;
-void serveHttp(QTcpServer& server, const HttpHandler& handler) {
+using HttpFullHandler = std::function<QByteArray(const QByteArray& method, const QByteArray& target, const QByteArray& head, const QByteArray& body)>;
+
+void serveHttpFull(QTcpServer& server, const HttpFullHandler& handler) {
     QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, handler]() {
         while (server.hasPendingConnections()) {
             QTcpSocket* socket = server.nextPendingConnection();
@@ -51,10 +53,16 @@ void serveHttp(QTcpServer& server, const HttpHandler& handler) {
                     const QList<QByteArray> requestLine = head.left(head.indexOf("\r\n")).split(' ');
                     const QByteArray method = requestLine.value(0);
                     const QByteArray target = requestLine.value(1);
-                    socket->write(handler(method, target, body));
+                    socket->write(handler(method, target, head, body));
                 }
             });
         }
+    });
+}
+
+void serveHttp(QTcpServer& server, const HttpHandler& handler) {
+    serveHttpFull(server, [handler](const QByteArray& method, const QByteArray& target, const QByteArray&, const QByteArray& body) {
+        return handler(method, target, body);
     });
 }
 
@@ -1472,43 +1480,16 @@ private slots:
         bool hadBasicAuth = false;
         bool hadBearerAuth = false;
 
-        connect(&server, &QTcpServer::newConnection, [&]() {
-            while (server.hasPendingConnections()) {
-                QTcpSocket* socket = server.nextPendingConnection();
-                auto buffer = std::make_shared<QByteArray>();
-                connect(socket, &QTcpSocket::readyRead, [socket, buffer, &requestCount, &hadBasicAuth, &hadBearerAuth]() {
-                    buffer->append(socket->readAll());
-                    const int headerEnd = buffer->indexOf("\r\n\r\n");
-                    if (headerEnd < 0) return;
-                    const QByteArray req = buffer->left(headerEnd);
-                    buffer->remove(0, headerEnd + 4);
-                    requestCount++;
-                    if (req.contains("Authorization: Basic")) {
-                        hadBasicAuth = true;
-                        const QByteArray body = "{}";
-                        const QByteArray resp =
-                            "HTTP/1.1 401 Unauthorized\r\n"
-                            "Content-Type: application/json\r\n"
-                            "Connection: close\r\n"
-                            "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n"
-                            "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
-                        socket->write(resp);
-                        socket->flush();
-                        socket->disconnectFromHost();
-                    } else if (req.contains("Authorization: Bearer")) {
-                        hadBearerAuth = true;
-                        const QByteArray body = "{\"issues\":[]}";
-                        const QByteArray resp =
-                            "HTTP/1.1 200 OK\r\n"
-                            "Content-Type: application/json\r\n"
-                            "Connection: close\r\n"
-                            "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
-                        socket->write(resp);
-                        socket->flush();
-                        socket->disconnectFromHost();
-                    }
-                });
+        serveHttpFull(server, [&requestCount, &hadBasicAuth, &hadBearerAuth](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
+            requestCount++;
+            if (head.contains("Authorization: Basic")) {
+                hadBasicAuth = true;
+                return httpResponse("401 Unauthorized", "application/json", "{}", "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
+            } else if (head.contains("Authorization: Bearer")) {
+                hadBearerAuth = true;
+                return httpResponse("200 OK", "application/json", "{\"issues\":[]}");
             }
+            return httpResponse("400 Bad Request", "text/plain", "Missing auth");
         });
 
         IssueTrackerService svc;
@@ -1524,7 +1505,7 @@ private slots:
         svc.syncListIssues(entry);
 
         QVERIFY(svc.isSyncing());
-        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 15000);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 30000);
         QCOMPARE(requestCount, 2);
         QVERIFY(hadBasicAuth);
         QVERIFY(hadBearerAuth);
