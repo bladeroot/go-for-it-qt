@@ -313,6 +313,9 @@ bool AnalyticsService::exportBillingCsv(const QString& filePath,
 
     const QFileInfo targetInfo(filePath);
     if (targetInfo.isDir()) return false;
+    if (!targetInfo.dir().exists()) {
+        targetInfo.dir().mkpath(QStringLiteral("."));
+    }
 
     const QVariantMap stats = getProductivityStats(period, listId);
     const QVariantList tasks = stats.value(QStringLiteral("taskBreakdown")).toList();
