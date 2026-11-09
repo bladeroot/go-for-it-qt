@@ -1480,13 +1480,13 @@ private slots:
         bool hadBasicAuth = false;
         bool hadBearerAuth = false;
 
-        serveHttpFull(server, [&requestCount, &hadBasicAuth, &hadBearerAuth](const QByteArray& method, const QByteArray& target, const QByteArray& head, const QByteArray&) {
+        serveHttpFull(server, [&requestCount, &hadBasicAuth, &hadBearerAuth](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
             requestCount++;
-            qDebug() << "MOCK SERVER REQ #" << requestCount << ":" << method << target << "AUTH:" << (head.contains("Authorization: Basic") ? "Basic" : head.contains("Authorization: Bearer") ? "Bearer" : "None");
-            if (head.contains("Authorization: Basic")) {
+            const QByteArray lowerHead = head.toLower();
+            if (lowerHead.contains("authorization: basic")) {
                 hadBasicAuth = true;
                 return httpResponse("401 Unauthorized", "application/json", "{}", "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
-            } else if (head.contains("Authorization: Bearer")) {
+            } else if (lowerHead.contains("authorization: bearer")) {
                 hadBearerAuth = true;
                 return httpResponse("200 OK", "application/json", "{\"issues\":[]}");
             }
@@ -1507,7 +1507,7 @@ private slots:
 
         QVERIFY(svc.isSyncing());
         QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 30000);
-        QVERIFY(requestCount >= 2);
+        QCOMPARE(requestCount, 2);
         QVERIFY(hadBasicAuth);
         QVERIFY(hadBearerAuth);
         QCOMPARE(syncSpy.count(), 1);
@@ -4105,6 +4105,47 @@ private slots:
 
         QVERIFY(stillOpen);
         QCOMPARE(afterSetting, previousSetting);
+    }
+
+    // KB-26 guard: 6803fd5 relaxed testJiraBearerAuthRetryWithLocalServer to
+    // requestCount >= 2, so it no longer catches a Jira auth-retry loop. When both Basic
+    // and Bearer are rejected, exactly one Basic and one Bearer attempt are expected,
+    // followed by a single syncFailed and no further requests.
+    void testJiraAuthRetryIsBoundedWhenBothSchemesFail() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        int basicCount = 0;
+        int bearerCount = 0;
+        int otherCount = 0;
+        serveHttpFull(server, [&basicCount, &bearerCount, &otherCount](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
+            if (head.contains("Authorization: Basic")) ++basicCount;
+            else if (head.contains("Authorization: Bearer")) ++bearerCount;
+            else ++otherCount;
+            return httpResponse("401 Unauthorized", "application/json", "{}",
+                                "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
+        });
+
+        IssueTrackerService svc;
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb26_jira");
+        entry.name = QStringLiteral("KB26 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("token");
+
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 30000);
+        QTest::qWait(300);   // let any stray retry reach the server
+
+        QCOMPARE(basicCount, 1);
+        QCOMPARE(bearerCount, 1);
+        QCOMPARE(otherCount, 0);
+        QCOMPARE(failSpy.count(), 1);
+        server.close();
     }
 };
 
