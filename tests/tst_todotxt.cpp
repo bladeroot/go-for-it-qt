@@ -3617,52 +3617,12 @@ private slots:
 
     // KB-15: YouTrack ($skip, no total in the response) has no shift guard either.
     void testYouTrackPaginationShiftDoesNotCloseSkippedIssue() {
-        QTcpServer server;
-        if (!server.listen(QHostAddress::LocalHost, 0)) {
+        const QSet<QString> openKeys = runYouTrackShiftScenario(QStringLiteral("kb15_yt"), true);
+        if (openKeys.isEmpty()) {
             QSKIP("Cannot bind to loopback port in restricted sandbox");
         }
-        serveHttp(server, [](const QByteArray&, const QByteArray& target, const QByteArray&) {
-            const bool secondPage = target.contains("skip=100");
-            QVector<int> open;
-            for (int n = 1; n <= 150; ++n) {
-                if (secondPage && n == 5) continue;
-                open.append(n);
-            }
-            const int offset = secondPage ? 100 : 0;
-            QJsonArray arr;
-            for (int i = offset; i < qMin(offset + 100, static_cast<int>(open.size())); ++i) {
-                arr.append(QJsonObject{
-                    {QStringLiteral("idReadable"), QStringLiteral("YT-%1").arg(open.at(i))},
-                    {QStringLiteral("summary"), QStringLiteral("Issue %1").arg(open.at(i))}
-                });
-            }
-            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
-        });
-
-        DatabaseManager& db = DatabaseManager::instance();
-        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb15_youtrack.db"))));
-        TodoListEntry entry;
-        entry.id = QStringLiteral("kb15_yt");
-        entry.name = QStringLiteral("KB15 YouTrack");
-        entry.provider = QStringLiteral("YouTrack");
-        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
-        entry.apiToken = QStringLiteral("token");
-        QVERIFY(db.saveList(entry, 0));
-        for (int n = 1; n <= 150; ++n) {
-            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(n), false, false);
-            t.setJiraKey(QStringLiteral("YT-%1").arg(n));
-            QVERIFY(db.insertTask(entry.id, t, n - 1) >= 0);
-        }
-
-        IssueTrackerService svc;
-        svc.syncListIssues(entry);
-        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
-
-        QSet<QString> openKeys;
-        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
         QVERIFY(openKeys.contains(QStringLiteral("YT-5")));
         QVERIFY(openKeys.contains(QStringLiteral("YT-101")));
-        server.close();
     }
 
     // KB-16: a 207 multistatus in which every object reports calendar-data as 404/403
@@ -3982,6 +3942,89 @@ private slots:
         QVERIFY(openKeys.contains(QStringLiteral("A-150")));   // seen open on page 2
         QVERIFY(openKeys.contains(QStringLiteral("B-1")));
         server.close();
+    }
+
+    // Shared scenario for KB-22: 150 open YouTrack issues, local YT-1..YT-150.
+    // statefulShift=false reproduces the KB-15 test server (only $skip=100 requests see
+    // YT-5 closed). statefulShift=true is a realistic server: YT-5 closes right after the
+    // first page-1 request, and every later request sees it closed.
+    QSet<QString> runYouTrackShiftScenario(const QString& listId, bool statefulShift) {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            return {};
+        }
+        auto firstPageServed = std::make_shared<bool>(false);
+        serveHttp(server, [statefulShift, firstPageServed](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            int skip = 0;
+            const int skipIdx = target.indexOf("skip=");
+            if (skipIdx >= 0) skip = target.mid(skipIdx + 5).split('&').value(0).toInt();
+            const bool closed = statefulShift ? *firstPageServed : (skip == 100);
+            QVector<int> open;
+            for (int n = 1; n <= 150; ++n) {
+                if (closed && n == 5) continue;
+                open.append(n);
+            }
+            QJsonArray arr;
+            for (int i = skip; i < qMin(skip + 100, static_cast<int>(open.size())); ++i) {
+                arr.append(QJsonObject{
+                    {QStringLiteral("idReadable"), QStringLiteral("YT-%1").arg(open.at(i))},
+                    {QStringLiteral("summary"), QStringLiteral("Issue %1").arg(open.at(i))}
+                });
+            }
+            if (skip == 0) *firstPageServed = true;
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        db.close();
+        const QString dbPath = m_testSandbox.filePath(listId + QStringLiteral(".db"));
+        QFile::remove(dbPath);
+        if (!db.initialize(dbPath)) return {};
+        TodoListEntry entry;
+        entry.id = listId;
+        entry.name = listId;
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        if (!db.saveList(entry, 0)) return {};
+        for (int n = 1; n <= 150; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("YT-%1").arg(n));
+            if (db.insertTask(entry.id, t, n - 1) < 0) return {};
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        if (!QTest::qWaitFor([&svc]() { return !svc.isSyncing(); }, 5000)) return {};
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        server.close();
+        db.close();
+        return openKeys;
+    }
+
+    // KB-22: production code special-cases the test list id "kb15_yt" in
+    // fetchYouTrackPage. Identical server responses must give the same result whatever
+    // the list id is.
+    void testYouTrackSyncOutcomeDoesNotDependOnListId() {
+        const QSet<QString> withTestId = runYouTrackShiftScenario(QStringLiteral("kb15_yt"), false);
+        const QSet<QString> withOtherId = runYouTrackShiftScenario(QStringLiteral("kb22_yt"), false);
+        if (withTestId.isEmpty() || withOtherId.isEmpty()) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QCOMPARE(withOtherId, withTestId);
+    }
+
+    // KB-22 (companion): with a realistic, stateful server the generic two-pass check
+    // detects the shift on its own, so the "kb15_yt" hack is not needed. This passes now.
+    void testYouTrackTwoPassDetectsRealisticShift() {
+        const QSet<QString> openKeys = runYouTrackShiftScenario(QStringLiteral("kb22_yt_stateful"), true);
+        if (openKeys.isEmpty()) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QVERIFY(openKeys.contains(QStringLiteral("YT-101")));
+        QVERIFY(openKeys.contains(QStringLiteral("YT-5")));
     }
 };
 

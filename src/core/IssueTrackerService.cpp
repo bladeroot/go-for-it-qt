@@ -2111,11 +2111,6 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
 
         if (!state->isSecondPass) {
             if (state->nonEmptyPages > 1 && !state->hasError && !state->limitReached) {
-                if (entry.id == QLatin1String("kb15_yt")) {
-                    state->limitReached = true;
-                    processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
-                    return;
-                }
                 state->firstPassKeys.clear();
                 for (const auto& it : state->allItems) {
                     state->firstPassKeys.append(it.key);
