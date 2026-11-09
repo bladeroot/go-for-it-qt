@@ -3864,6 +3864,125 @@ private slots:
         QVERIFY(!openKeys.contains(QStringLiteral("YT-151")));
         server.close();
     }
+
+    // KB-20: the KB-19 boundary heuristic treats any locally open key numerically between
+    // the last key of page k and the first key of page k+1 as a "shift". An issue that was
+    // closed remotely and sits exactly at a page boundary therefore blocks reconciliation on
+    // every sync, even though the server state is stable, so it never closes locally.
+    void testYouTrackClosedIssueAtPageBoundaryIsReconciled() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        // Stable server state: YT-1..YT-151 except YT-101 (closed remotely) => 150 open.
+        QVector<int> open;
+        for (int n = 1; n <= 151; ++n) {
+            if (n != 101) open.append(n);
+        }
+        serveHttp(server, [open](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            int skip = 0;
+            const int skipIdx = target.indexOf("skip=");
+            if (skipIdx >= 0) skip = target.mid(skipIdx + 5).split('&').value(0).toInt();
+            QJsonArray arr;
+            for (int i = skip; i < qMin(skip + 100, static_cast<int>(open.size())); ++i) {
+                arr.append(QJsonObject{
+                    {QStringLiteral("idReadable"), QStringLiteral("YT-%1").arg(open.at(i))},
+                    {QStringLiteral("summary"), QStringLiteral("Issue %1").arg(open.at(i))}
+                });
+            }
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb20_youtrack.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb20_yt");
+        entry.name = QStringLiteral("KB20 YouTrack");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        for (int n = 1; n <= 151; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("YT-%1").arg(n));
+            QVERIFY(db.insertTask(entry.id, t, n - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("YT-100")));
+        QVERIFY(openKeys.contains(QStringLiteral("YT-102")));
+        QVERIFY(!openKeys.contains(QStringLiteral("YT-101")));
+        server.close();
+    }
+
+    // KB-21: the KB-19 checks (re-fetch of page 1 + same-project numeric boundary gaps)
+    // miss a shift that starts on page 2 when the page 2/3 boundary crosses projects.
+    // The skipped first issue of page 3 is then reconciled as done.
+    void testYouTrackCrossProjectShiftOnLaterPageDoesNotCloseSkippedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        // Server order (created asc): A-1..A-200, then B-1..B-50. A-150 is closed right
+        // after page 2 ($skip=100) has been served, so page 3 starts at B-2 instead of B-1.
+        auto page2Served = std::make_shared<bool>(false);
+        serveHttp(server, [page2Served](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            int skip = 0;
+            const int skipIdx = target.indexOf("skip=");
+            if (skipIdx >= 0) skip = target.mid(skipIdx + 5).split('&').value(0).toInt();
+            QStringList open;
+            for (int n = 1; n <= 200; ++n) {
+                if (*page2Served && n == 150) continue;
+                open.append(QStringLiteral("A-%1").arg(n));
+            }
+            for (int n = 1; n <= 50; ++n) open.append(QStringLiteral("B-%1").arg(n));
+            QJsonArray arr;
+            for (int i = skip; i < qMin(skip + 100, static_cast<int>(open.size())); ++i) {
+                arr.append(QJsonObject{
+                    {QStringLiteral("idReadable"), open.at(i)},
+                    {QStringLiteral("summary"), open.at(i)}
+                });
+            }
+            if (skip == 100) *page2Served = true;
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb21_youtrack.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb21_yt");
+        entry.name = QStringLiteral("KB21 YouTrack");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        int order = 0;
+        for (int n = 1; n <= 200; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("A-%1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("A-%1").arg(n));
+            QVERIFY(db.insertTask(entry.id, t, order++) >= 0);
+        }
+        for (int n = 1; n <= 50; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("B-%1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("B-%1").arg(n));
+            QVERIFY(db.insertTask(entry.id, t, order++) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("A-150")));   // seen open on page 2
+        QVERIFY(openKeys.contains(QStringLiteral("B-1")));
+        server.close();
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
