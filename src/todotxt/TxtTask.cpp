@@ -1,4 +1,5 @@
 #include "TxtTask.h"
+#include <limits>
 #include <QRegularExpression>
 #include <QStringList>
 #include <QVariantMap>
@@ -334,17 +335,37 @@ bool TxtTask::parseDurationValue(const QString& str, quint32& outSeconds) {
         return false;
     }
 
-    quint32 total = 0;
+    quint64 total = 0;
     if (!match.captured(1).isEmpty()) {
-        total += match.captured(1).toUInt() * 3600U;
+        bool ok = false;
+        const quint64 h = match.captured(1).toULongLong(&ok);
+        if (!ok || h > (std::numeric_limits<quint32>::max() / 3600ULL)) {
+            return false;
+        }
+        total += h * 3600ULL;
     }
     if (!match.captured(2).isEmpty()) {
-        total += match.captured(2).toUInt() * 60U;
+        bool ok = false;
+        const quint64 m = match.captured(2).toULongLong(&ok);
+        if (!ok || m > (std::numeric_limits<quint32>::max() / 60ULL)) {
+            return false;
+        }
+        total += m * 60ULL;
     }
     if (!match.captured(3).isEmpty()) {
-        total += match.captured(3).toUInt();
+        bool ok = false;
+        const quint64 s = match.captured(3).toULongLong(&ok);
+        if (!ok || s > std::numeric_limits<quint32>::max()) {
+            return false;
+        }
+        total += s;
     }
-    outSeconds = total;
+
+    if (total > std::numeric_limits<quint32>::max()) {
+        return false;
+    }
+
+    outSeconds = static_cast<quint32>(total);
     return true;
 }
 

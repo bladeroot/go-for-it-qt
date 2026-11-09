@@ -135,6 +135,24 @@ private slots:
         QCOMPARE(task.toTodoTxt(true), line);
     }
 
+    // KB-29: duration components that do not fit in quint32 seconds must remain
+    // ordinary text. Silently wrapping them produces an unrelated, plausible
+    // timer value and removes the user's original token from the description.
+    void testDurationTokensRejectArithmeticOverflow() {
+        const QString hugeHours = QStringLiteral("1193047h");
+        const TxtTask durationTask = TxtTask::fromSimpleTxt(
+            QStringLiteral("Estimate duration:") + hugeHours, false, false);
+        const TxtTask timerTask = TxtTask::fromTodoTxt(
+            QStringLiteral("Track timer:") + hugeHours, false);
+
+        const bool durationRejected = durationTask.duration() == 0
+            && durationTask.description().contains(QStringLiteral("duration:") + hugeHours);
+        const bool timerRejected = timerTask.timerValue() == 0
+            && timerTask.description().contains(QStringLiteral("timer:") + hugeHours);
+
+        QVERIFY(durationRejected && timerRejected);
+    }
+
     void testSimpleTxtAndComparison() {
         TxtTask tA = TxtTask::fromSimpleTxt(QStringLiteral("(A) Urgent task @work duration:25m"), false, false);
         TxtTask tC = TxtTask::fromSimpleTxt(QStringLiteral("(C) Later task +home"), false, false);
