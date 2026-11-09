@@ -389,7 +389,7 @@ void TaskManager::loadFromDatabase(bool addDefaultsIfEmpty) {
     }
 
     DatabaseManager& db = DatabaseManager::instance();
-    if (m_listIds.size() == 1 && !m_listId.isEmpty() && addDefaultsIfEmpty && db.countAllTasksInList(m_listId) == 0) {
+    if (m_listIds.size() == 1 && !m_listId.isEmpty() && addDefaultsIfEmpty && !db.isOnboardingCompleted(m_listId) && db.countAllTasksInList(m_listId) == 0) {
         const QStringList defaults = {
             QStringLiteral("Choose a task from the list or add a new one @GoForIt"),
             QStringLiteral("Switch to the Timer tab and start working +Productivity duration:25m"),
@@ -410,12 +410,16 @@ void TaskManager::loadFromDatabase(bool addDefaultsIfEmpty) {
                 if (!db.commitTransaction()) {
                     db.rollbackTransaction();
                     emit errorOccurred(tr("Failed to commit initial tasks transaction."));
+                } else {
+                    db.setOnboardingCompleted(m_listId);
                 }
             } else {
                 db.rollbackTransaction();
                 emit errorOccurred(tr("Failed to save initial tasks to database."));
             }
         }
+    } else if (!m_listId.isEmpty() && !db.isOnboardingCompleted(m_listId) && db.countAllTasksInList(m_listId) > 0) {
+        db.setOnboardingCompleted(m_listId);
     }
 
     const QStringList queryIds = m_listIds.isEmpty() ? QStringList{m_listId} : m_listIds;

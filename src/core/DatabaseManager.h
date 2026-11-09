@@ -79,6 +79,8 @@ public:
     [[nodiscard]] QVector<TxtTask> loadTasks(const QString& listId, bool done) const;
     [[nodiscard]] int countAllTasksInLists(const QStringList& listIds) const;
     [[nodiscard]] int countAllTasksInList(const QString& listId) const;
+    [[nodiscard]] bool isOnboardingCompleted(const QString& listId) const;
+    bool setOnboardingCompleted(const QString& listId, bool completed = true);
     qint64 insertTask(const QString& listId, const TxtTask& task, int sortOrder);
     qint64 insertTaskOnTopAndReorder(const QString& listId, const TxtTask& task, const QVector<TxtTask>& existingTasks);
     bool updateTask(const TxtTask& task);
@@ -123,6 +125,7 @@ private:
     ~DatabaseManager();
 
     bool createSchema();
+    bool createSchemaForDb(QSqlDatabase database);
     [[nodiscard]] QSqlDatabase db() const;
 
     QString m_connectionName = QStringLiteral("gofi_sqlite_conn");

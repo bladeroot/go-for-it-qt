@@ -209,6 +209,26 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
         return true;
     }
 
+    if (targetPath != QStringLiteral(":memory:")) {
+        static qint64 s_probeId = 0;
+        const QString probeConnName = QStringLiteral("gofi_probe_%1_%2").arg(QCoreApplication::applicationPid()).arg(++s_probeId);
+        bool probeOk = false;
+        {
+            QSqlDatabase probeDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), probeConnName);
+            probeDb.setDatabaseName(targetPath);
+            if (probeDb.open()) {
+                probeOk = createSchemaForDb(probeDb);
+                probeDb.close();
+            }
+        }
+        QSqlDatabase::removeDatabase(probeConnName);
+
+        if (!probeOk) {
+            m_initFailed = true;
+            return false;
+        }
+    }
+
     if (QSqlDatabase::contains(m_connectionName)) {
         {
             QSqlDatabase oldDb = QSqlDatabase::database(m_connectionName, false);
@@ -231,7 +251,7 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
         QFile::setPermissions(m_dbPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     }
 
-    const bool schemaOk = createSchema();
+    const bool schemaOk = createSchemaForDb(database);
     if (!schemaOk) {
         m_initFailed = true;
         return false;
@@ -267,7 +287,10 @@ QSqlDatabase DatabaseManager::db() const {
 }
 
 bool DatabaseManager::createSchema() {
-    QSqlDatabase database = QSqlDatabase::database(m_connectionName);
+    return createSchemaForDb(db());
+}
+
+bool DatabaseManager::createSchemaForDb(QSqlDatabase database) {
     QSqlQuery q(database);
 
     q.exec(QStringLiteral("PRAGMA foreign_keys = ON;"));
@@ -318,6 +341,7 @@ bool DatabaseManager::createSchema() {
     if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("sync_status_to_remote INTEGER NOT NULL DEFAULT 0"))) return false;
     if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("status_mapping TEXT NOT NULL DEFAULT ''"))) return false;
     if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("priority_mapping TEXT NOT NULL DEFAULT ''"))) return false;
+    if (!ensureColumn(QStringLiteral("lists"), QStringLiteral("onboarding_completed INTEGER NOT NULL DEFAULT 0"))) return false;
 
     if (!q.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS tasks ("
@@ -436,6 +460,12 @@ bool DatabaseManager::relocateDatabase(const QString& newDbPath, bool copyExisti
         if (QFile::exists(cleanTarget)) {
             QFile::remove(cleanTarget);
         }
+        if (QFile::exists(cleanTarget + QStringLiteral("-wal"))) {
+            QFile::remove(cleanTarget + QStringLiteral("-wal"));
+        }
+        if (QFile::exists(cleanTarget + QStringLiteral("-shm"))) {
+            QFile::remove(cleanTarget + QStringLiteral("-shm"));
+        }
         if (!QFile::rename(tempTarget, cleanTarget)) {
             if (!QFile::copy(tempTarget, cleanTarget)) {
                 QFile::remove(tempTarget);
@@ -445,11 +475,15 @@ bool DatabaseManager::relocateDatabase(const QString& newDbPath, bool copyExisti
         }
     }
 
+    if (!initialize(cleanTarget)) {
+        return false;
+    }
+
     QSettings boot(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
     boot.setValue(QStringLiteral("Storage/databasePath"), cleanTarget);
     boot.sync();
 
-    return initialize(cleanTarget);
+    return true;
 }
 
 bool DatabaseManager::exportDatabaseBackup(const QString& destinationFilePath) const {
@@ -859,6 +893,26 @@ int DatabaseManager::countAllTasksInLists(const QStringList& listIds) const {
 int DatabaseManager::countAllTasksInList(const QString& listId) const {
     if (listId.isEmpty()) return 0;
     return countAllTasksInLists(QStringList{listId});
+}
+
+bool DatabaseManager::isOnboardingCompleted(const QString& listId) const {
+    if (listId.isEmpty()) return false;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("SELECT onboarding_completed FROM lists WHERE id = :id"));
+    q.bindValue(QStringLiteral(":id"), listId);
+    if (q.exec() && q.next()) {
+        return q.value(0).toInt() != 0;
+    }
+    return false;
+}
+
+bool DatabaseManager::setOnboardingCompleted(const QString& listId, bool completed) {
+    if (listId.isEmpty()) return false;
+    QSqlQuery q(db());
+    q.prepare(QStringLiteral("UPDATE lists SET onboarding_completed = :val WHERE id = :id"));
+    q.bindValue(QStringLiteral(":val"), completed ? 1 : 0);
+    q.bindValue(QStringLiteral(":id"), listId);
+    return q.exec();
 }
 
 qint64 DatabaseManager::insertTask(const QString& listId, const TxtTask& task, int sortOrder) {

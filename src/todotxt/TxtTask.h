@@ -123,6 +123,7 @@ public:
     static bool parseDurationValue(const QString& str, quint32& outSeconds);
     static QString formatDurationValue(quint32 seconds);
     static QString formatTimerValue(quint32 seconds);
+    static bool isSafeUriScheme(const QString& scheme);
 
 private:
     static bool isDateToken(const QString& token);
@@ -130,7 +131,6 @@ private:
     static bool isProjectToken(const QString& token);
     static bool isContextToken(const QString& token);
     static bool isCommonUriScheme(const QString& scheme);
-    static bool isSafeUriScheme(const QString& scheme);
 
     static TxtPart tokenizePart(const QString& token);
     void parseDescriptionTokens(const QStringList& tokens, int startIndex);

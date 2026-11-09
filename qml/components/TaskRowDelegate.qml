@@ -219,7 +219,7 @@ ItemDelegate {
                 if (link.startsWith("+") || link.startsWith("@")) {
                     rowDelegate.filterTagClicked(link)
                 } else {
-                    Qt.openUrlExternally(link)
+                    app.openUrlExternally(link)
                 }
             }
 

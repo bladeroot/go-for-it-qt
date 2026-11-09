@@ -1017,6 +1017,10 @@ void AppController::openTaskInBrowser(bool fromDoneList, int proxyRow) {
 
 void AppController::openUrlExternally(const QUrl& url) {
     if (!url.isValid() || url.isEmpty()) return;
+    if (!TxtTask::isSafeUriScheme(url.scheme())) {
+        m_issueTracker.setStatusMessage(tr("Refused to open unsafe URL scheme: %1").arg(url.scheme()));
+        return;
+    }
     const bool opened = QDesktopServices::openUrl(url);
     if (!opened) {
         QProcess::startDetached(QStringLiteral("xdg-open"), {url.toString()});

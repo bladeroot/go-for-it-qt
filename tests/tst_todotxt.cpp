@@ -17,6 +17,7 @@
 #include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QDesktopServices>
 #include <QtTest>
 #include <functional>
 #include <memory>
@@ -64,6 +65,15 @@ QByteArray httpResponse(const QByteArray& status, const QByteArray& contentType,
            "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
 }
 } // namespace
+
+// Captures URLs that would be handed to the desktop, so tests never open anything.
+class UrlOpenSpy : public QObject {
+    Q_OBJECT
+public:
+    QList<QUrl> opened;
+public slots:
+    void handle(const QUrl& url) { opened.append(url); }
+};
 
 class TestTodoTxt : public QObject {
     Q_OBJECT
@@ -4025,6 +4035,85 @@ private slots:
         }
         QVERIFY(openKeys.contains(QStringLiteral("YT-101")));
         QVERIFY(openKeys.contains(QStringLiteral("YT-5")));
+    }
+
+    // KB-23: TaskManager::loadFromDatabase inserts the three onboarding tasks whenever a
+    // local list has zero tasks. setActiveList is called with addDefaultTodosIfNew = true
+    // on every selection of a local list, so a user who deletes all tasks gets the
+    // defaults back the next time the list is opened.
+    void testDefaultTasksNotReaddedAfterUserEmptiesList() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb23_defaults.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB23 Local"));
+        QVERIFY(!listId.isEmpty());
+        ctrl.selectListById(listId);
+        const int initial = ctrl.todoProxyModel()->rowCount();
+        QVERIFY(initial > 0);   // onboarding tasks for a brand-new list are fine
+
+        while (ctrl.todoProxyModel()->rowCount() > 0) {
+            QVERIFY(ctrl.removeTask(false, 0));
+        }
+        QCOMPARE(DatabaseManager::instance().countAllTasksInList(listId), 0);
+
+        ctrl.selectListById(listId);   // user re-opens the now empty list
+        QCOMPARE(DatabaseManager::instance().countAllTasksInList(listId), 0);
+    }
+
+    // KB-24: links from tracker-controlled text (task details / comments rendered as
+    // Markdown in TaskDetailsDialog.qml) reach Qt.openUrlExternally / app.openUrlExternally
+    // without the http/https/mailto whitelist that TxtTask::isSafeUriScheme applies to
+    // task rows. AppController::openUrlExternally must refuse other schemes.
+    void testOpenUrlExternallyRejectsUnsafeSchemes() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb24_urls.db")));
+        UrlOpenSpy spy;
+        const QStringList schemes = {QStringLiteral("file"), QStringLiteral("smb"), QStringLiteral("https")};
+        for (const QString& scheme : schemes) {
+            QDesktopServices::setUrlHandler(scheme, &spy, "handle");
+        }
+        ctrl.openUrlExternally(QUrl(QStringLiteral("https://example.com/issue/1")));
+        ctrl.openUrlExternally(QUrl(QStringLiteral("file:///etc/passwd")));
+        ctrl.openUrlExternally(QUrl(QStringLiteral("smb://attacker.example/share")));
+        for (const QString& scheme : schemes) {
+            QDesktopServices::unsetUrlHandler(scheme);
+        }
+
+        QVERIFY(spy.opened.contains(QUrl(QStringLiteral("https://example.com/issue/1"))));
+        QCOMPARE(spy.opened.size(), 1);
+    }
+
+    // KB-25: relocateDatabase writes Storage/databasePath to settings.ini and lets
+    // initialize() close the current connection before the new database is known to open.
+    // A failed relocation leaves the app without a database and persists the broken path
+    // for the next start.
+    void testFailedDatabaseRelocationKeepsCurrentDatabase() {
+        DatabaseManager& db = DatabaseManager::instance();
+        const QString goodPath = m_testSandbox.filePath(QStringLiteral("kb25_current.db"));
+        QVERIFY(db.initialize(goodPath));
+
+        QSettings boot(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
+        const QVariant previousSetting = boot.value(QStringLiteral("Storage/databasePath"));
+
+        // A path below a regular file can never be created or opened.
+        const QString blocker = m_testSandbox.filePath(QStringLiteral("kb25_blocker"));
+        {
+            QFile f(blocker);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("x");
+        }
+        const QString badTarget = blocker + QStringLiteral("/sub/goforit.db");
+
+        QVERIFY(!db.relocateDatabase(badTarget, false));
+
+        boot.sync();
+        const QVariant afterSetting = boot.value(QStringLiteral("Storage/databasePath"));
+        const bool stillOpen = db.isOpen() && db.databasePath() == goodPath;
+
+        // Restore global state for the following tests before asserting.
+        if (previousSetting.isValid()) boot.setValue(QStringLiteral("Storage/databasePath"), previousSetting);
+        else boot.remove(QStringLiteral("Storage/databasePath"));
+        boot.sync();
+
+        QVERIFY(stillOpen);
+        QCOMPARE(afterSetting, previousSetting);
     }
 };
 

@@ -176,7 +176,7 @@ Dialog {
                         text: detailsArea.text.trim() !== ""
                             ? detailsArea.text
                             : qsTr("*No description yet — click **✎ Edit MD** or **📂 Open .md...** above.*")
-                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                        onLinkActivated: function(link) { app.openUrlExternally(link) }
                     }
                 }
 
@@ -235,7 +235,7 @@ Dialog {
                             textFormat: Text.MarkdownText
                             wrapMode: Text.WordWrap
                             text: modelData.body || ""
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                            onLinkActivated: function(link) { app.openUrlExternally(link) }
                         }
                     }
                 }
