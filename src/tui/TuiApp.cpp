@@ -206,16 +206,58 @@ void TuiApp::onStdinActivated() {
     const ssize_t n = ::read(STDIN_FILENO, buf, sizeof(buf));
     if (n <= 0) return;
 
-    const QByteArray raw(buf, static_cast<int>(n));
+    m_stdinPending.append(buf, static_cast<int>(n));
+
     // Dispatch escape sequences or individual UTF-8 characters
-    if (raw.startsWith('\033')) {
-        handleKeySequence(raw);
-    } else {
-        const QString utf8Str = QString::fromUtf8(raw);
-        for (int i = 0; i < utf8Str.size(); ++i) {
-            const QString ch = utf8Str.mid(i, 1);
-            handleKeySequence(ch.toUtf8());
+    if (m_stdinPending.startsWith('\033')) {
+        handleKeySequence(m_stdinPending);
+        m_stdinPending.clear();
+        render();
+        return;
+    }
+
+    int validBytes = m_stdinPending.size();
+    if (validBytes > 0) {
+        const int lookBack = qMin(4, validBytes);
+        for (int i = 1; i <= lookBack; ++i) {
+            const unsigned char byte = static_cast<unsigned char>(m_stdinPending.at(validBytes - i));
+            if ((byte & 0x80) == 0x00) {
+                // ASCII byte - complete
+                break;
+            }
+            if ((byte & 0xC0) == 0xC0) {
+                // Leading byte of a multi-byte sequence
+                const int leadPos = validBytes - i;
+                int expectedLen = 0;
+                if ((byte & 0xE0) == 0xC0) expectedLen = 2;
+                else if ((byte & 0xF0) == 0xE0) expectedLen = 3;
+                else if ((byte & 0xF8) == 0xF0) expectedLen = 4;
+
+                const int availableLen = validBytes - leadPos;
+                if (availableLen < expectedLen) {
+                    validBytes = leadPos;
+                }
+                break;
+            }
         }
+    }
+
+    if (validBytes <= 0) {
+        return;
+    }
+
+    const QByteArray ready = m_stdinPending.left(validBytes);
+    m_stdinPending = m_stdinPending.mid(validBytes);
+
+    const QString utf8Str = QString::fromUtf8(ready);
+    for (int i = 0; i < utf8Str.size(); ) {
+        int len = 1;
+        if (utf8Str.at(i).isHighSurrogate() && (i + 1 < utf8Str.size()) && utf8Str.at(i + 1).isLowSurrogate()) {
+            len = 2;
+        }
+        const QString ch = utf8Str.mid(i, len);
+        handleKeySequence(ch.toUtf8());
+        i += len;
     }
     render();
 }
@@ -295,7 +337,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         if (prev == 'c' && (seq == "w" || seq == "c")) {
             if (count > 0) {
                 const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
-                m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::DescriptionRole).toString();
+                m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::SimpleTextRole).toString();
                 m_inputCursor = static_cast<int>(m_inputBuffer.size());
                 m_mode = Mode::EditTask;
             }
@@ -429,7 +471,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
     if (seq == "i" || seq == "e") {
         if (count > 0) {
             const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
-            m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::DescriptionRole).toString();
+            m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::SimpleTextRole).toString();
             m_inputCursor = static_cast<int>(m_inputBuffer.size());
             m_mode = Mode::EditTask;
         }
@@ -683,8 +725,12 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
     // Backspace
     if (seq == "\x7f" || seq == "\x08") {
         if (m_inputCursor > 0) {
-            m_inputBuffer.remove(m_inputCursor - 1, 1);
-            --m_inputCursor;
+            int removeLen = 1;
+            if (m_inputCursor >= 2 && m_inputBuffer.at(m_inputCursor - 1).isLowSurrogate() && m_inputBuffer.at(m_inputCursor - 2).isHighSurrogate()) {
+                removeLen = 2;
+            }
+            m_inputBuffer.remove(m_inputCursor - removeLen, removeLen);
+            m_inputCursor -= removeLen;
             if (m_mode == Mode::Search) {
                 m_app->todoProxyModel()->setFilterQuery(m_inputBuffer);
                 m_app->doneProxyModel()->setFilterQuery(m_inputBuffer);
@@ -695,11 +741,19 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
     }
     // Left / Right arrows in input line
     if (seq == "\033[D") {
-        m_inputCursor = qMax(0, m_inputCursor - 1);
+        if (m_inputCursor >= 2 && m_inputBuffer.at(m_inputCursor - 1).isLowSurrogate() && m_inputBuffer.at(m_inputCursor - 2).isHighSurrogate()) {
+            m_inputCursor -= 2;
+        } else {
+            m_inputCursor = qMax(0, m_inputCursor - 1);
+        }
         return;
     }
     if (seq == "\033[C") {
-        m_inputCursor = qMin(static_cast<int>(m_inputBuffer.size()), m_inputCursor + 1);
+        if (m_inputCursor + 1 < m_inputBuffer.size() && m_inputBuffer.at(m_inputCursor).isHighSurrogate() && m_inputBuffer.at(m_inputCursor + 1).isLowSurrogate()) {
+            m_inputCursor += 2;
+        } else {
+            m_inputCursor = qMin(static_cast<int>(m_inputBuffer.size()), m_inputCursor + 1);
+        }
         return;
     }
     // Ctrl+U clears input line
@@ -716,13 +770,18 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
     // Printable UTF-8 character
     if (!seq.startsWith('\033')) {
         const QString ch = QString::fromUtf8(seq);
-        if (!ch.isEmpty() && ch.at(0).isPrint()) {
-            m_inputBuffer.insert(m_inputCursor, ch);
-            m_inputCursor += static_cast<int>(ch.size());
-            if (m_mode == Mode::Search) {
-                m_app->todoProxyModel()->setFilterQuery(m_inputBuffer);
-                m_app->doneProxyModel()->setFilterQuery(m_inputBuffer);
-                clampSelection();
+        if (!ch.isEmpty()) {
+            const char32_t ucs4 = (ch.size() >= 2 && ch.at(0).isHighSurrogate() && ch.at(1).isLowSurrogate())
+                                      ? QChar::surrogateToUcs4(ch.at(0), ch.at(1))
+                                      : ch.at(0).unicode();
+            if (QChar::isPrint(ucs4)) {
+                m_inputBuffer.insert(m_inputCursor, ch);
+                m_inputCursor += static_cast<int>(ch.size());
+                if (m_mode == Mode::Search) {
+                    m_app->todoProxyModel()->setFilterQuery(m_inputBuffer);
+                    m_app->doneProxyModel()->setFilterQuery(m_inputBuffer);
+                    clampSelection();
+                }
             }
         }
     }

@@ -80,6 +80,7 @@ private:
     QTimer m_resizeTimer;
     struct termios m_origTermios {};
     bool m_rawModeActive = false;
+    QByteArray m_stdinPending;
 
     int m_rows = 24;
     int m_cols = 80;

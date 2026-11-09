@@ -42,7 +42,7 @@ bool NotificationService::isAudioPlaybackEnabled() {
 }
 
 QString NotificationService::notifyPayloadTitle(const QString& title) {
-    return title.toHtmlEscaped();
+    return title;
 }
 
 QString NotificationService::notifyPayloadBody(const QString& body) {

@@ -21,6 +21,10 @@
 #include <QDesktopServices>
 #include <QtTest>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdio>
 #include <functional>
 #include <memory>
 
@@ -4300,10 +4304,175 @@ private slots:
         const QString rawTitle = QStringLiteral("Alert <script> & 'check'");
         const QString rawBody = QStringLiteral("Click <a href=\"x\">here</a> & win");
 
-        QCOMPARE(NotificationService::notifyPayloadTitle(rawTitle),
-                 QStringLiteral("Alert &lt;script&gt; &amp; 'check'"));
+        QCOMPARE(NotificationService::notifyPayloadTitle(rawTitle), rawTitle);
         QCOMPARE(NotificationService::notifyPayloadBody(rawBody),
                  QStringLiteral("Click &lt;a href=&quot;x&quot;&gt;here&lt;/a&gt; &amp; win"));
+    }
+
+    // KB-35: the Desktop Notifications spec defines the summary (title) as plain text;
+    // only the body may contain markup. 79cc64d escapes the title too, so list and
+    // task names with '&', '<', '>' or '"' (e.g. "Updates in 'R&D'") are displayed with
+    // literal entities ("R&amp;D") by GNOME Shell, KDE Plasma, dunst, etc.
+    void testNotificationTitleIsNotHtmlEscaped() {
+        const QString title = QStringLiteral("Updates in 'R&D <beta>'");
+        QCOMPARE(NotificationService::notifyPayloadTitle(title), title);
+        // The body must stay escaped (KB-33).
+        QCOMPARE(NotificationService::notifyPayloadBody(QStringLiteral("<a href=\"x\">R&D</a>")),
+                 QStringLiteral("&lt;a href=&quot;x&quot;&gt;R&amp;D&lt;/a&gt;"));
+    }
+
+    // KB-36: AnalyticsService::getProductivityStats aggregates the task breakdown by
+    // jiraKey, or by description when there is no key, ignoring the list. In an all-lists
+    // report (listId empty: "All Lists" view, TUI dashboard without a selected list),
+    // identically named tasks of different lists/clients ("Code review" for client A and B)
+    // or identical keys from two trackers ("PROJ-1") collapse into one row that carries the
+    // list name of whichever record came last. The billing CSV/PDF then bills the summed
+    // time to a single client.
+    void testBillingBreakdownKeepsTasksOfDifferentListsApart() {
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb36_breakdown.db"))));
+        ActivityLog log;
+        const QDateTime t0 = QDateTime::currentDateTimeUtc().addSecs(-7200);
+        QVERIFY(log.logTask(QStringLiteral("kb36_a"), QStringLiteral("Client A"), -1, QString(),
+                            QStringLiteral("Code review"), t0, 1800, t0.addSecs(1800)) >= 0);
+        QVERIFY(log.logTask(QStringLiteral("kb36_b"), QStringLiteral("Client B"), -1, QString(),
+                            QStringLiteral("Code review"), t0.addSecs(3600), 600, t0.addSecs(4200)) >= 0);
+
+        AnalyticsService analytics;
+        const QVariantList rows = analytics.getProductivityStats(QStringLiteral("all"), QString())
+                                      .value(QStringLiteral("taskBreakdown")).toList();
+        QSet<QString> lists;
+        for (const QVariant& r : rows) lists.insert(r.toMap().value(QStringLiteral("listName")).toString());
+
+        QCOMPARE(rows.size(), 2);
+        QVERIFY(lists.contains(QStringLiteral("Client A")) && lists.contains(QStringLiteral("Client B")));
+    }
+
+    // KB-37: per CLAUDE.md every code path that writes to a remote tracker must be a no-op
+    // under QStandardPaths::isTestModeEnabled(). updateIssueStatusRemote has the guard, but
+    // postWorklog, updateIssueDescription and postIssueComment do not, so tests (and any
+    // test-mode run) send real POST/PUT requests: AppController::onTimerStopped ->
+    // postWorklog, updateTaskDetails -> updateIssueDescription, addTaskComment ->
+    // postIssueComment. Lists in tests point at hosts such as jira.example.com, which resolve.
+    void testTrackerWritesAreNoOpsInTestMode() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        int requests = 0;
+        serveHttpFull(server, [&requests](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            ++requests;
+            return httpResponse("201 Created", "application/json", "{}");
+        });
+        QVERIFY(QStandardPaths::isTestModeEnabled());
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb37_jira");
+        entry.name = QStringLiteral("KB37 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("token");
+        entry.autoWorklog = true;
+
+        IssueTrackerService svc;
+        const QDateTime start = QDateTime::currentDateTimeUtc().addSecs(-1500);
+        svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), start, 1500);
+        svc.updateIssueDescription(entry, QStringLiteral("KB-1"), QStringLiteral("new details"));
+        svc.postIssueComment(entry, QStringLiteral("KB-1"), QStringLiteral("a comment"));
+        QTest::qWait(500);
+
+        QCOMPARE(requests, 0);
+        server.close();
+    }
+
+    // KB-38: the TUI edit commands (cw/cc/i/e in TuiApp::handleNormalKey) pre-fill the
+    // input line with DescriptionRole, which excludes the "(A)" priority and the
+    // "duration:" token, and save it via AppController::updateTaskText ->
+    // TxtTask::updateFromSimpleTxt, which resets priority and duration from the text.
+    // Opening the editor and pressing Enter without any change therefore silently drops
+    // the task's priority and estimate. The GUI pre-fills SimpleTextRole and keeps both.
+    void testTuiStyleTitleEditKeepsPriorityAndDuration() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb38_tui_edit.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB38"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+        ctrl.addNewTask(QStringLiteral("(A) Write report duration:30m"));
+        QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+
+        auto* proxy = ctrl.todoProxyModel();
+        const QModelIndex idx = proxy->index(0, 0);
+        QCOMPARE(proxy->data(idx, TaskStoreModel::PriorityRole).toInt(), 0);
+        QCOMPARE(proxy->data(idx, TaskStoreModel::DurationRole).toUInt(), 1800u);
+
+        // Exactly what TuiApp does for "cw" followed by Enter without edits:
+        const QString prefilled = proxy->data(idx, TaskStoreModel::SimpleTextRole).toString();
+        QVERIFY(ctrl.updateTaskText(false, 0, prefilled));
+
+        const QModelIndex after = proxy->index(0, 0);
+        QCOMPARE(proxy->data(after, TaskStoreModel::PriorityRole).toInt(), 0);
+        QCOMPARE(proxy->data(after, TaskStoreModel::DurationRole).toUInt(), 1800u);
+    }
+
+    // KB-39: TuiApp::onStdinActivated reads stdin in 128-byte chunks and decodes each
+    // chunk on its own, then feeds the text to the key handlers one QChar at a time:
+    //  - a multi-byte UTF-8 character split across two reads (pasting a longer Cyrillic
+    //    title) turns into U+FFFD replacement characters;
+    //  - characters outside the BMP (emoji such as U+1F4DD) are split into lone UTF-16
+    //    surrogates, which QString::toUtf8() turns into '?'.
+    // The test drives the real TuiApp through a pipe on stdin: "a" (insert mode),
+    // the title, Enter.
+    void testTuiInputKeepsMultibyteAndNonBmpCharacters() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb39_tui_input.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB39"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int devNull = ::open("/dev/null", O_WRONLY);
+        QVERIFY(savedStdin >= 0 && savedStdout >= 0 && devNull >= 0);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(devNull, STDOUT_FILENO);   // TuiApp::render() writes ANSI frames to stdout
+
+        // 127 ASCII bytes push the 2-byte Cyrillic "Ж" across the 128-byte read boundary.
+        const QString title = QString(127, QLatin1Char('x')) + QStringLiteral("Ж звіт ")
+                              + QString::fromUcs4(U"\U0001F4DD");
+        QStringList added;
+        {
+            TuiApp tui(&ctrl);
+            auto feed = [&](const QByteArray& bytes) {
+                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())),
+                         static_cast<ssize_t>(bytes.size()));
+                // Drain everything currently in the pipe, one read per activation.
+                for (int i = 0; i < 8; ++i) {
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending <= 0) break;
+                    QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                }
+            };
+            feed("a");
+            feed(title.toUtf8());
+            feed("\r");
+            for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
+                added << ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0),
+                                                     TaskStoreModel::DescriptionRole).toString();
+            }
+        }
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(devNull);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        QCOMPARE(added.size(), 1);
+        QCOMPARE(added.first(), title);
     }
 };
 

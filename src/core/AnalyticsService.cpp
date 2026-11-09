@@ -126,6 +126,7 @@ QVariantMap AnalyticsService::getProductivityStats(const QString& period, const 
     QMap<QString, quint64> contextMap;
 
     struct TaskAgg {
+        QString listId;
         QString description;
         QString jiraKey;
         QString listName;
@@ -172,8 +173,10 @@ QVariantMap AnalyticsService::getProductivityStats(const QString& period, const 
         }
 
         // Task Aggregation
-        const QString aggKey = (!r.jiraKey.isEmpty() ? r.jiraKey : r.taskDescription.trimmed());
+        const QString taskIdentifier = (!r.jiraKey.isEmpty() ? r.jiraKey : r.taskDescription.trimmed());
+        const QString aggKey = r.listId + QLatin1Char('\x1f') + taskIdentifier;
         TaskAgg& item = taskMap[aggKey];
+        item.listId = r.listId;
         item.description = r.taskDescription;
         item.jiraKey = r.jiraKey;
         item.listName = r.listName;
@@ -226,6 +229,7 @@ QVariantMap AnalyticsService::getProductivityStats(const QString& period, const 
         const double hours = static_cast<double>(t.seconds) / 3600.0;
         taskBreakdown.append(QVariantMap{
             {QStringLiteral("key"), it.key()},
+            {QStringLiteral("listId"), t.listId},
             {QStringLiteral("description"), t.description},
             {QStringLiteral("jiraKey"), t.jiraKey},
             {QStringLiteral("listName"), t.listName},

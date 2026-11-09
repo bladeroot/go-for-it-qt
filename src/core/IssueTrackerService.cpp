@@ -2895,6 +2895,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                                       quint32 runtimeSeconds)
 {
     Q_UNUSED(taskId)
+    if (QStandardPaths::isTestModeEnabled()) return;
     if (!listEntry.autoWorklog || issueKey.isEmpty() || runtimeSeconds == 0) {
         return;
     }
@@ -3368,6 +3369,7 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
                                                  bool forceBearerAuth,
                                                  bool useV2Fallback)
 {
+    if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
     if (baseUrl.isEmpty()) return;
@@ -3764,6 +3766,7 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                                            bool forceBearerAuth,
                                            bool useV2Fallback)
 {
+    if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty() || markdownComment.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
     if (baseUrl.isEmpty()) return;
