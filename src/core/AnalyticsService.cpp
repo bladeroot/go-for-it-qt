@@ -10,8 +10,8 @@
 #include <QPageSize>
 #include <QPdfWriter>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
-#include <QTemporaryFile>
 #include <QTextDocument>
 #include <QTextStream>
 #include <QTimeZone>
@@ -311,10 +311,13 @@ bool AnalyticsService::exportBillingCsv(const QString& filePath,
 {
     if (filePath.trimmed().isEmpty()) return false;
 
+    const QFileInfo targetInfo(filePath);
+    if (targetInfo.isDir()) return false;
+
     const QVariantMap stats = getProductivityStats(period, listId);
     const QVariantList tasks = stats.value(QStringLiteral("taskBreakdown")).toList();
 
-    QFile file(filePath);
+    QSaveFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
         return false;
     }
@@ -361,6 +364,14 @@ bool AnalyticsService::exportBillingCsv(const QString& filePath,
         << totalDuration << "\","
         << QString::number(totalHours, 'f', 2) << ","
         << totalSessions << ",\"\",\"\n";
+
+    out.flush();
+    if (!file.commit()) {
+        return false;
+    }
+    if (!QFile::setPermissions(filePath, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        return false;
+    }
 
     return true;
 }
@@ -460,21 +471,19 @@ bool AnalyticsService::exportBillingPdf(const QString& filePath,
     html += QStringLiteral("</body></html>");
 
     const QFileInfo targetInfo(filePath);
+    if (targetInfo.isDir()) return false;
     if (!targetInfo.dir().exists()) {
         targetInfo.dir().mkpath(QStringLiteral("."));
     }
 
-    QTemporaryFile tempFile(targetInfo.dir().filePath(QStringLiteral(".billing-XXXXXX.pdf")));
-    tempFile.setAutoRemove(false);
-    if (!tempFile.open()) {
+    QSaveFile saveFile(filePath);
+    if (!saveFile.open(QIODevice::WriteOnly)) {
         return false;
     }
-    const QString tempPath = tempFile.fileName();
-    tempFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    tempFile.close();
+    saveFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 
     {
-        QPdfWriter writer(tempPath);
+        QPdfWriter writer(&saveFile);
         writer.setPageSize(QPageSize(QPageSize::A4));
         writer.setPageOrientation(QPageLayout::Portrait);
         writer.setPageMargins(QMarginsF(12, 12, 12, 12), QPageLayout::Millimeter);
@@ -486,14 +495,16 @@ bool AnalyticsService::exportBillingPdf(const QString& filePath,
         doc.print(&writer);
     }
 
-    if (QFile::exists(filePath)) {
-        QFile::remove(filePath);
+    if (!saveFile.commit()) {
+        return false;
     }
-    if (!QFile::rename(tempPath, filePath)) {
-        QFile::copy(tempPath, filePath);
-        QFile::remove(tempPath);
+    if (!QFile::setPermissions(filePath, QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        return false;
     }
-    QFile::setPermissions(filePath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    const QFileInfo fi(filePath);
+    if (!fi.exists() || fi.size() == 0) {
+        return false;
+    }
 
     return true;
 }

@@ -4236,6 +4236,26 @@ private slots:
         QVERIFY((QFile::permissions(csvPath) & othersOrGroup) == 0);
         QVERIFY((QFile::permissions(pdfPath) & othersOrGroup) == 0);
     }
+
+    // KB-31: exportBillingPdf (since 27dc901) ignores a failed QFile::rename/QFile::copy
+    // of the temporary PDF, deletes the temporary file and still returns true. The UI
+    // and TUI then report "exported" although no report exists. Reproduced with a target
+    // path that is an existing directory (also: read-only target, vanished directory).
+    void testBillingPdfExportReportsFailureWhenTargetCannotBeWritten() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb31_billing.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB31 Client"));
+        ctrl.selectListById(listId);
+
+        const QString dirTarget = m_testSandbox.filePath(QStringLiteral("kb31-target-is-a-dir.pdf"));
+        QVERIFY(QDir().mkpath(dirTarget));
+
+        const bool csvOk = ctrl.analytics()->exportBillingCsv(dirTarget, QStringLiteral("all"), listId);
+        QVERIFY(!csvOk);   // CSV export already reports this failure correctly
+
+        const bool pdfOk = ctrl.analytics()->exportBillingPdf(dirTarget, QStringLiteral("all"), listId);
+        QVERIFY(QFileInfo(dirTarget).isDir());   // nothing was written over the directory
+        QVERIFY(!pdfOk);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
