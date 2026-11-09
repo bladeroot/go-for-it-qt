@@ -163,6 +163,8 @@ void TxtTask::updateFromSimpleTxt(const QString& line) {
         m_description.clear();
         m_parts.clear();
         m_priority = NoPriority;
+        m_dueDate = QDate();
+        m_duration = 0;
         return;
     }
 
@@ -175,6 +177,7 @@ void TxtTask::updateFromSimpleTxt(const QString& line) {
     }
 
     m_duration = 0;
+    m_dueDate = QDate();
     parseDescriptionTokens(tokens, idx);
 }
 
@@ -446,6 +449,7 @@ TxtPart TxtTask::tokenizePart(const QString& token) {
 
 void TxtTask::parseDescriptionTokens(const QStringList& tokens, int startIndex) {
     m_parts.clear();
+    m_dueDate = QDate();
     for (int i = startIndex; i < tokens.size(); ++i) {
         TxtPart part = tokenizePart(tokens[i]);
         if (part.type == TxtPartType::Tag) {

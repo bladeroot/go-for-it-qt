@@ -41,6 +41,14 @@ bool NotificationService::isAudioPlaybackEnabled() {
     return true;
 }
 
+QString NotificationService::notifyPayloadTitle(const QString& title) {
+    return title.toHtmlEscaped();
+}
+
+QString NotificationService::notifyPayloadBody(const QString& body) {
+    return body.toHtmlEscaped();
+}
+
 void NotificationService::playSoundFile(const QString& presetOrPath, double volume) {
     if (!isAudioPlaybackEnabled() || presetOrPath.isEmpty()) {
         return;
@@ -192,8 +200,8 @@ void NotificationService::sendDesktopNotification(const QString& title, const QS
     msg << QStringLiteral("Go for It Qt")
         << uint(0)
         << QStringLiteral("go-for-it-qt")
-        << title
-        << body
+        << notifyPayloadTitle(title)
+        << notifyPayloadBody(body)
         << QStringList()
         << QVariantMap()
         << int(4000);

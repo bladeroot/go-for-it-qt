@@ -1,3 +1,4 @@
+#include "core/ActivityLog.h"
 #include "core/AmbientSoundService.h"
 #include "core/AnalyticsService.h"
 #include "core/AppController.h"
@@ -4255,6 +4256,54 @@ private slots:
         const bool pdfOk = ctrl.analytics()->exportBillingPdf(dirTarget, QStringLiteral("all"), listId);
         QVERIFY(QFileInfo(dirTarget).isDir());   // nothing was written over the directory
         QVERIFY(!pdfOk);
+    }
+
+    // KB-32: TxtTask::updateFromSimpleTxt resets priority and duration but keeps the old
+    // m_dueDate. Removing "due:YYYY-MM-DD" from a task's text (UI edit, TUI edit,
+    // TaskStoreModel::setData(DescriptionRole)) leaves the task overdue / due today until
+    // the list is reloaded, so the overdue badge, smart filters and due reminders
+    // (AppController::checkDueReminders) still fire for a task that no longer has a due date.
+    void testEditingTextRemovesDueDate() {
+        TxtTask task = TxtTask::fromSimpleTxt(QStringLiteral("Pay bills due:2020-01-01"), false, false);
+        QVERIFY(task.dueDate().isValid());
+        QVERIFY(task.isOverdue(QDate(2026, 1, 1)));
+
+        task.updateFromSimpleTxt(QStringLiteral("Pay bills"));
+        QCOMPARE(task.description(), QStringLiteral("Pay bills"));
+        QVERIFY(!task.dueDate().isValid());
+        QVERIFY(!task.isOverdue(QDate(2026, 1, 1)));
+    }
+
+    // KB-34: the per-list activity log CSV (TodoListEntry::activityLogPath, written on
+    // every timer stop by ActivityLog::logTaskInFile) holds the same data as the billing
+    // reports fixed in KB-30 (list name, task description, tracked time, timestamps) but
+    // is still created with the process umask, i.e. 0644 / world-readable.
+    void testActivityLogCsvIsOwnerOnly() {
+        const QString logPath = m_testSandbox.filePath(QStringLiteral("kb34/activity.csv"));
+        QFile::remove(logPath);
+        const mode_t oldMask = ::umask(022);
+        const QDateTime stop = QDateTime::currentDateTimeUtc();
+        const bool ok = ActivityLog::logTaskInFile(logPath, QStringLiteral("KB34 Client"),
+                                                   QStringLiteral("Confidential task"),
+                                                   stop.addSecs(-60), 60, stop);
+        ::umask(oldMask);
+        QVERIFY(ok);
+        const QFileDevice::Permissions othersOrGroup =
+            QFileDevice::ReadGroup | QFileDevice::ReadOther | QFileDevice::WriteGroup | QFileDevice::WriteOther;
+        QVERIFY((QFile::permissions(logPath) & othersOrGroup) == 0);
+    }
+
+    // KB-33: notification bodies and titles must be escaped before being sent to
+    // org.freedesktop.Notifications to prevent malicious markup or injection from
+    // remote task descriptions and tracker issue titles.
+    void testNotificationPayloadEscapesMarkup() {
+        const QString rawTitle = QStringLiteral("Alert <script> & 'check'");
+        const QString rawBody = QStringLiteral("Click <a href=\"x\">here</a> & win");
+
+        QCOMPARE(NotificationService::notifyPayloadTitle(rawTitle),
+                 QStringLiteral("Alert &lt;script&gt; &amp; 'check'"));
+        QCOMPARE(NotificationService::notifyPayloadBody(rawBody),
+                 QStringLiteral("Click &lt;a href=&quot;x&quot;&gt;here&lt;/a&gt; &amp; win"));
     }
 };
 

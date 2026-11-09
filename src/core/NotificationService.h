@@ -18,6 +18,8 @@ public:
 
     static void setAudioPlaybackEnabled(bool enabled);
     [[nodiscard]] static bool isAudioPlaybackEnabled();
+    [[nodiscard]] static QString notifyPayloadTitle(const QString& title);
+    [[nodiscard]] static QString notifyPayloadBody(const QString& body);
 
     Q_INVOKABLE void playSoundFile(const QString& presetOrPath, double volume = 1.0);
     Q_INVOKABLE void notifyTaskEvent(const QString& title, const QString& body);

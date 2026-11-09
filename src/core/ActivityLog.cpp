@@ -67,6 +67,9 @@ bool ActivityLog::logTaskInFile(const QString& filePath,
     if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) {
         return false;
     }
+    if (!file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+        return false;
+    }
 
     QTextStream out(&file);
     if (writeHeader) {
