@@ -57,9 +57,10 @@ void serveHttp(QTcpServer& server, const HttpHandler& handler) {
     });
 }
 
-QByteArray httpResponse(const QByteArray& status, const QByteArray& contentType, const QByteArray& body) {
+QByteArray httpResponse(const QByteArray& status, const QByteArray& contentType, const QByteArray& body,
+                        const QByteArray& extraHeaders = QByteArray()) {
     return "HTTP/1.1 " + status + "\r\n"
-           "Content-Type: " + contentType + "\r\n"
+           "Content-Type: " + contentType + "\r\n" + extraHeaders +
            "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
 }
 } // namespace
@@ -3549,6 +3550,168 @@ private slots:
         const int sentStatus = QJsonDocument::fromJson(putBody).object()
             .value(QStringLiteral("issue")).toObject().value(QStringLiteral("status_id")).toInt();
         QCOMPARE(sentStatus, 6);
+        server.close();
+    }
+
+    // KB-15: the KB-13 shift guard (first-page total vs. later totals) was added only for
+    // Jira, GitHub and Redmine. GitLab (page + X-Next-Page) still closes a skipped issue.
+    void testGitLabPaginationShiftDoesNotCloseSkippedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        const quint16 port = server.serverPort();
+        serveHttp(server, [port](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            if (target.contains("/merge_requests")) {
+                return httpResponse("200 OK", "application/json", "[]", "X-Total: 0\r\n");
+            }
+            // Issue 5 is closed after page 1 was served; later issues shift up by one.
+            const bool secondPage = target.contains("page=2");
+            QVector<int> open;
+            for (int iid = 1; iid <= 150; ++iid) {
+                if (secondPage && iid == 5) continue;
+                open.append(iid);
+            }
+            const int offset = secondPage ? 100 : 0;
+            QJsonArray arr;
+            for (int i = offset; i < qMin(offset + 100, static_cast<int>(open.size())); ++i) {
+                const int iid = open.at(i);
+                arr.append(QJsonObject{
+                    {QStringLiteral("iid"), iid},
+                    {QStringLiteral("title"), QStringLiteral("Issue %1").arg(iid)},
+                    {QStringLiteral("state"), QStringLiteral("opened")},
+                    {QStringLiteral("web_url"), QStringLiteral("http://127.0.0.1:%1/grp/proj/-/issues/%2").arg(port).arg(iid)}
+                });
+            }
+            QByteArray headers = "X-Total: " + QByteArray::number(open.size()) + "\r\n";
+            if (!secondPage) headers += "X-Next-Page: 2\r\n";
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact), headers);
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb15_gitlab.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb15_gl");
+        entry.name = QStringLiteral("KB15 GitLab");
+        entry.provider = QStringLiteral("GitLab");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
+        entry.jiraJql = QStringLiteral("grp/proj");
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        for (int iid = 1; iid <= 150; ++iid) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(iid), false, false);
+            t.setJiraKey(QStringLiteral("GL#grp/proj#%1").arg(iid));
+            QVERIFY(db.insertTask(entry.id, t, iid - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("GL#grp/proj#5")));   // seen open on page 1
+        QVERIFY(openKeys.contains(QStringLiteral("GL#grp/proj#101")));
+        server.close();
+    }
+
+    // KB-15: YouTrack ($skip, no total in the response) has no shift guard either.
+    void testYouTrackPaginationShiftDoesNotCloseSkippedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttp(server, [](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            const bool secondPage = target.contains("skip=100");
+            QVector<int> open;
+            for (int n = 1; n <= 150; ++n) {
+                if (secondPage && n == 5) continue;
+                open.append(n);
+            }
+            const int offset = secondPage ? 100 : 0;
+            QJsonArray arr;
+            for (int i = offset; i < qMin(offset + 100, static_cast<int>(open.size())); ++i) {
+                arr.append(QJsonObject{
+                    {QStringLiteral("idReadable"), QStringLiteral("YT-%1").arg(open.at(i))},
+                    {QStringLiteral("summary"), QStringLiteral("Issue %1").arg(open.at(i))}
+                });
+            }
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb15_youtrack.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb15_yt");
+        entry.name = QStringLiteral("KB15 YouTrack");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        for (int n = 1; n <= 150; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("YT-%1").arg(n));
+            QVERIFY(db.insertTask(entry.id, t, n - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("YT-5")));
+        QVERIFY(openKeys.contains(QStringLiteral("YT-101")));
+        server.close();
+    }
+
+    // KB-16: a 207 multistatus in which every object reports calendar-data as 404/403
+    // (PROPFIND fallback on servers that only serve calendar-data via REPORT, or revoked
+    // read access) contains resources but no VTODO data; it must not be treated as an
+    // explicitly empty calendar.
+    void testNextcloudMultistatusWithoutCalendarDataDoesNotCloseTasks() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttp(server, [](const QByteArray& method, const QByteArray&, const QByteArray&) {
+            if (method == "REPORT") {
+                return httpResponse("405 Method Not Allowed", "text/plain", "REPORT not supported");
+            }
+            const QByteArray xml =
+                "<?xml version=\"1.0\"?>"
+                "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
+                "<d:response><d:href>/remote.php/dav/calendars/user/tasks/</d:href>"
+                "<d:propstat><d:prop><c:calendar-data/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"
+                "<d:response><d:href>/remote.php/dav/calendars/user/tasks/uid-1.ics</d:href>"
+                "<d:propstat><d:prop><c:calendar-data/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"
+                "<d:response><d:href>/remote.php/dav/calendars/user/tasks/uid-2.ics</d:href>"
+                "<d:propstat><d:prop><c:calendar-data/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"
+                "</d:multistatus>";
+            return httpResponse("207 Multi-Status", "application/xml; charset=utf-8", xml);
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb16_nextcloud.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb16_nc");
+        entry.name = QStringLiteral("KB16 Nextcloud");
+        entry.provider = QStringLiteral("Nextcloud");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1/remote.php/dav/calendars/user/tasks/").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user");
+        entry.apiToken = QStringLiteral("app-password");
+        QVERIFY(db.saveList(entry, 0));
+        for (int i = 1; i <= 2; ++i) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("NC task %1").arg(i), false, false);
+            t.setJiraKey(QStringLiteral("NC#uid-%1").arg(i));
+            QVERIFY(db.insertTask(entry.id, t, i - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 2);
         server.close();
     }
 };

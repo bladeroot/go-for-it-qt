@@ -177,20 +177,74 @@ int resolveRedmineStatusId(const QVariantMap& statusMapping, bool done) {
     return fallbackId;
 }
 
-bool isValidCalDavMultistatus(int statusCode, const QByteArray& bodyBytes) {
-    if (statusCode == 207) {
-        QXmlStreamReader xml(bodyBytes);
-        while (!xml.atEnd()) {
-            if (xml.readNext() == QXmlStreamReader::StartElement) {
-                return (xml.name().compare(QLatin1String("multistatus"), Qt::CaseInsensitive) == 0);
+struct CalDavMultistatusInfo {
+    bool isMultistatus = false;
+    int objectResponseCount = 0;
+    int successfulCalendarDataCount = 0;
+};
+
+CalDavMultistatusInfo inspectCalDavMultistatus(int statusCode, const QByteArray& bodyBytes) {
+    CalDavMultistatusInfo info;
+    if (statusCode == 200 && (bodyBytes.contains("BEGIN:VCALENDAR") || bodyBytes.contains("multistatus"))) {
+        info.isMultistatus = true;
+        if (bodyBytes.contains("BEGIN:VTODO") || bodyBytes.contains("BEGIN:VEVENT")) {
+            info.successfulCalendarDataCount = 1;
+            info.objectResponseCount = 1;
+        }
+        return info;
+    }
+    if (statusCode != 207) {
+        return info;
+    }
+
+    QXmlStreamReader xml(bodyBytes);
+    bool inResponse = false;
+    bool inPropstat = false;
+    bool inProp = false;
+    bool hasCalendarData = false;
+    QString currentHref;
+    QString currentStatus;
+
+    while (!xml.atEnd()) {
+        const auto token = xml.readNext();
+        if (token == QXmlStreamReader::StartElement) {
+            const QString name = xml.name().toString();
+            if (name.compare(QLatin1String("multistatus"), Qt::CaseInsensitive) == 0) {
+                info.isMultistatus = true;
+            } else if (name.compare(QLatin1String("response"), Qt::CaseInsensitive) == 0) {
+                inResponse = true;
+                currentHref.clear();
+            } else if (name.compare(QLatin1String("href"), Qt::CaseInsensitive) == 0 && inResponse && !inPropstat) {
+                currentHref = xml.readElementText().trimmed();
+            } else if (name.compare(QLatin1String("propstat"), Qt::CaseInsensitive) == 0) {
+                inPropstat = true;
+                currentStatus.clear();
+                hasCalendarData = false;
+            } else if (name.compare(QLatin1String("prop"), Qt::CaseInsensitive) == 0) {
+                inProp = true;
+            } else if (name.compare(QLatin1String("calendar-data"), Qt::CaseInsensitive) == 0 && inProp) {
+                hasCalendarData = true;
+            } else if (name.compare(QLatin1String("status"), Qt::CaseInsensitive) == 0 && inPropstat) {
+                currentStatus = xml.readElementText().trimmed();
+            }
+        } else if (token == QXmlStreamReader::EndElement) {
+            const QString name = xml.name().toString();
+            if (name.compare(QLatin1String("propstat"), Qt::CaseInsensitive) == 0) {
+                inPropstat = false;
+                if (hasCalendarData && currentStatus.contains(QLatin1String("200"))) {
+                    info.successfulCalendarDataCount++;
+                }
+            } else if (name.compare(QLatin1String("prop"), Qt::CaseInsensitive) == 0) {
+                inProp = false;
+            } else if (name.compare(QLatin1String("response"), Qt::CaseInsensitive) == 0) {
+                inResponse = false;
+                if (!currentHref.isEmpty() && !currentHref.endsWith(QLatin1Char('/'))) {
+                    info.objectResponseCount++;
+                }
             }
         }
-        return false;
     }
-    if (statusCode == 200 && (bodyBytes.contains("BEGIN:VCALENDAR") || bodyBytes.contains("multistatus"))) {
-        return true;
-    }
-    return false;
+    return info;
 }
 
 // Extracts Markdown from either a Jira v2 string or Jira v3 Atlassian Document Format (ADF) JSON object
@@ -1773,6 +1827,10 @@ struct IssueTrackerService::GitLabCombinedSyncState {
     QVector<RemoteIssueItem> items;
     int completedRequests = 0;
     int initialTotal = -1;
+    int initialIssuesTotal = -1;
+    int initialMrTotal = -1;
+    int issuesParsedCount = 0;
+    int mrParsedCount = 0;
     bool hasError = false;
     QString errorMsg;
     bool limitReached = false;
@@ -2042,6 +2100,10 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
             } else {
                 state->limitReached = true;
             }
+        }
+
+        if (state->pagesFetched > 1) {
+            state->limitReached = true;
         }
 
         processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
@@ -2356,6 +2418,12 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
                 emit syncFailed(entry.id, combinedState->errorMsg);
                 return;
             }
+            if (combinedState->initialIssuesTotal >= 0 && combinedState->issuesParsedCount < combinedState->initialIssuesTotal) {
+                combinedState->limitReached = true;
+            }
+            if (combinedState->initialMrTotal >= 0 && combinedState->mrParsedCount < combinedState->initialMrTotal) {
+                combinedState->limitReached = true;
+            }
             const bool explicitZero = !combinedState->hasError && combinedState->items.isEmpty();
             processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached, combinedState->hasError, explicitZero);
         };
@@ -2389,6 +2457,31 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
 
         const auto parsed = isMr ? parseGitLabMergeRequestsJson(bodyBytes) : parseGitLabIssuesJson(bodyBytes);
         combinedState->items.append(parsed);
+
+        const QByteArray totalHdr = reply->rawHeader("x-total").trimmed();
+        const int streamTotal = totalHdr.isEmpty() ? -1 : totalHdr.toInt();
+        if (page == 1) {
+            if (isMr) {
+                combinedState->initialMrTotal = streamTotal;
+            } else {
+                combinedState->initialIssuesTotal = streamTotal;
+            }
+        } else {
+            const int initial = isMr ? combinedState->initialMrTotal : combinedState->initialIssuesTotal;
+            if (initial >= 0) {
+                if (streamTotal != initial) {
+                    combinedState->limitReached = true;
+                }
+            } else {
+                combinedState->limitReached = true;
+            }
+        }
+
+        if (isMr) {
+            combinedState->mrParsedCount += parsed.size();
+        } else {
+            combinedState->issuesParsedCount += parsed.size();
+        }
 
         const QByteArray nextPageHdr = reply->rawHeader("x-next-page").trimmed();
         const int nextPage = nextPageHdr.toInt();
@@ -2726,7 +2819,8 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                         return;
                     }
                     const QByteArray bodyBytes = propReply->readAll();
-                    if (!isValidCalDavMultistatus(propStatusCode, bodyBytes)) {
+                    const CalDavMultistatusInfo info = inspectCalDavMultistatus(propStatusCode, bodyBytes);
+                    if (!info.isMultistatus) {
                         endSyncOperation();
                         const QString errMsg = tr("Nextcloud returned non-CalDAV response (%1).").arg(propStatusCode);
                         setStatusMessage(errMsg);
@@ -2734,8 +2828,9 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                         return;
                     }
                     const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-                    const bool explicitZero = items.isEmpty();
-                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, false, explicitZero);
+                    const bool hasError = (info.objectResponseCount > 0 && items.isEmpty());
+                    const bool explicitZero = (info.objectResponseCount == 0 && items.isEmpty());
+                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, hasError, explicitZero);
                 });
                 return;
             }
@@ -2748,7 +2843,8 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
         }
 
         const QByteArray bodyBytes = reply->readAll();
-        if (!isValidCalDavMultistatus(statusCode, bodyBytes)) {
+        const CalDavMultistatusInfo info = inspectCalDavMultistatus(statusCode, bodyBytes);
+        if (!info.isMultistatus) {
             endSyncOperation();
             const QString errMsg = tr("Nextcloud returned non-CalDAV response (%1).").arg(statusCode);
             setStatusMessage(errMsg);
@@ -2756,8 +2852,9 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
             return;
         }
         const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-        const bool explicitZero = items.isEmpty();
-        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, false, explicitZero);
+        const bool hasError = (info.objectResponseCount > 0 && items.isEmpty());
+        const bool explicitZero = (info.objectResponseCount == 0 && items.isEmpty());
+        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, hasError, explicitZero);
     });
 }
 
