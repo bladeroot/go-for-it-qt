@@ -11,12 +11,58 @@
 #include "todotxt/TaskStoreModel.h"
 #include "todotxt/TxtTask.h"
 #include "tui/TuiApp.h"
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest>
+#include <functional>
+#include <memory>
 
 using namespace gofi;
+
+namespace {
+// Minimal HTTP/1.1 responder for tracker tests: buffers each request until its
+// Content-Length body is complete, then answers once via the handler.
+using HttpHandler = std::function<QByteArray(const QByteArray& method, const QByteArray& target, const QByteArray& body)>;
+void serveHttp(QTcpServer& server, const HttpHandler& handler) {
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, handler]() {
+        while (server.hasPendingConnections()) {
+            QTcpSocket* socket = server.nextPendingConnection();
+            auto buffer = std::make_shared<QByteArray>();
+            QObject::connect(socket, &QTcpSocket::readyRead, socket, [socket, buffer, handler]() {
+                buffer->append(socket->readAll());
+                while (true) {
+                    const int headerEnd = buffer->indexOf("\r\n\r\n");
+                    if (headerEnd < 0) return;
+                    const QByteArray head = buffer->left(headerEnd);
+                    qsizetype contentLength = 0;
+                    for (const QByteArray& line : head.split('\n')) {
+                        if (line.trimmed().toLower().startsWith("content-length:")) {
+                            contentLength = line.mid(line.indexOf(':') + 1).trimmed().toLongLong();
+                        }
+                    }
+                    if (buffer->size() < headerEnd + 4 + contentLength) return;
+                    const QByteArray body = buffer->mid(headerEnd + 4, contentLength);
+                    buffer->remove(0, headerEnd + 4 + contentLength);
+                    const QList<QByteArray> requestLine = head.left(head.indexOf("\r\n")).split(' ');
+                    const QByteArray method = requestLine.value(0);
+                    const QByteArray target = requestLine.value(1);
+                    socket->write(handler(method, target, body));
+                }
+            });
+        }
+    });
+}
+
+QByteArray httpResponse(const QByteArray& status, const QByteArray& contentType, const QByteArray& body) {
+    return "HTTP/1.1 " + status + "\r\n"
+           "Content-Type: " + contentType + "\r\n"
+           "Content-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body;
+}
+} // namespace
 
 class TestTodoTxt : public QObject {
     Q_OBJECT
@@ -3345,6 +3391,165 @@ private slots:
         QTest::qWait(300);
         timer.stop();
         QCOMPARE(timer.activeTaskTimerValue(), 1u);
+    }
+
+    // KB-12: a 2xx CalDAV answer that is not a multistatus with VTODOs (e.g. an HTML
+    // login page reached through a redirect) must not be treated as "explicitly empty".
+    void testNextcloudNonCalDavBodyDoesNotCloseTasks() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttp(server, [](const QByteArray&, const QByteArray&, const QByteArray&) {
+            return httpResponse("200 OK", "text/html; charset=utf-8",
+                                "<!DOCTYPE html><html><body>Nextcloud login</body></html>");
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb12_nextcloud.db"))));
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb12_nc");
+        entry.name = QStringLiteral("KB12 Nextcloud");
+        entry.provider = QStringLiteral("Nextcloud");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1/remote.php/dav/calendars/user/tasks/").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user");
+        entry.apiToken = QStringLiteral("app-password");
+        QVERIFY(db.saveList(entry, 0));
+
+        for (int i = 1; i <= 2; ++i) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("NC task %1").arg(i), false, false);
+            t.setJiraKey(QStringLiteral("NC#uid-%1").arg(i));
+            QVERIFY(db.insertTask(entry.id, t, i - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 2);
+        server.close();
+    }
+
+    // KB-13: offset pagination skips an item when an earlier item leaves the result set
+    // between page requests; reconciliation must not close the skipped, still-open issue.
+    void testRedminePaginationShiftDoesNotCloseSkippedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        auto issueJson = [](int id) {
+            return QJsonObject{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("subject"), QStringLiteral("Issue %1").arg(id)},
+                {QStringLiteral("status"), QJsonObject{{QStringLiteral("id"), 1}, {QStringLiteral("name"), QStringLiteral("New")}}},
+                {QStringLiteral("project"), QJsonObject{{QStringLiteral("name"), QStringLiteral("Proj")}, {QStringLiteral("identifier"), QStringLiteral("proj")}}}
+            };
+        };
+        // Page 1 is served while issues 1..150 are open. Before page 2 is requested,
+        // issue 5 is closed remotely, so every later issue shifts one position up.
+        serveHttp(server, [&issueJson](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            if (!target.startsWith("/issues.json")) {
+                return httpResponse("404 Not Found", "application/json", "{}");
+            }
+            QVector<int> open;
+            const bool secondPage = target.contains("offset=");
+            for (int id = 1; id <= 150; ++id) {
+                if (secondPage && id == 5) continue;
+                open.append(id);
+            }
+            const int offset = secondPage ? 100 : 0;
+            QJsonArray issues;
+            for (int i = offset; i < qMin(offset + 100, static_cast<int>(open.size())); ++i) {
+                issues.append(issueJson(open.at(i)));
+            }
+            const QJsonObject root{
+                {QStringLiteral("issues"), issues},
+                {QStringLiteral("total_count"), static_cast<int>(open.size())},
+                {QStringLiteral("offset"), offset},
+                {QStringLiteral("limit"), 100}
+            };
+            return httpResponse("200 OK", "application/json", QJsonDocument(root).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb13_redmine.db"))));
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb13_rm");
+        entry.name = QStringLiteral("KB13 Redmine");
+        entry.provider = QStringLiteral("Redmine");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        entry.statusMapping[QStringLiteral("_statuses_fetched")] = 1;
+        entry.statusMapping[QStringLiteral("_id_New")] = 1;
+        QVERIFY(db.saveList(entry, 0));
+
+        for (int id = 1; id <= 150; ++id) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(id), false, false);
+            t.setJiraKey(QStringLiteral("RM#proj#%1").arg(id));
+            QVERIFY(db.insertTask(entry.id, t, id - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) {
+            openKeys.insert(t.jiraKey());
+        }
+        // Issue 5 was still open when page 1 was served, so it legitimately stays open
+        // until the next sync; nothing else was closed remotely.
+        QVERIFY(openKeys.contains(QStringLiteral("RM#proj#5")));
+        QVERIFY(openKeys.contains(QStringLiteral("RM#proj#101")));
+        server.close();
+    }
+
+    // KB-14: when no preferred status name matches, the learned is_closed fallback must
+    // skip rejected/canceled statuses, like the explicit-mapping path already does.
+    void testRedmineLearnedClosedFallbackSkipsRejected() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QByteArray putBody;
+        QByteArray putTarget;
+        serveHttp(server, [&putBody, &putTarget](const QByteArray& method, const QByteArray& target, const QByteArray& body) {
+            if (method == "PUT") {
+                putBody = body;
+                putTarget = target;
+            }
+            return httpResponse("204 No Content", "application/json", QByteArray());
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb14_rm");
+        entry.name = QStringLiteral("KB14 Redmine");
+        entry.provider = QStringLiteral("Redmine");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        entry.syncStatusToRemote = true;
+        // Learned from /issue_statuses.json; no explicit "<name>: done" mapping and no
+        // status literally named Closed/Resolved.
+        entry.statusMapping[QStringLiteral("_statuses_fetched")] = 1;
+        entry.statusMapping[QStringLiteral("_id_Done")] = 6;
+        entry.statusMapping[QStringLiteral("_id_Rejected")] = 10;
+        entry.statusMapping[QStringLiteral("_is_closed_6")] = 1;
+        entry.statusMapping[QStringLiteral("_is_closed_10")] = 1;
+
+        IssueTrackerService svc;
+        // updateIssueStatusRemote is a no-op in test mode; lift it only for this local request.
+        QStandardPaths::setTestModeEnabled(false);
+        svc.updateIssueStatusRemote(entry, QStringLiteral("RM#proj#42"), true, QStringLiteral("done"));
+        QStandardPaths::setTestModeEnabled(true);
+
+        QTRY_VERIFY_WITH_TIMEOUT(!putBody.isEmpty(), 5000);
+        QCOMPARE(putTarget, QByteArray("/issues/42.json"));
+        const int sentStatus = QJsonDocument::fromJson(putBody).object()
+            .value(QStringLiteral("issue")).toObject().value(QStringLiteral("status_id")).toInt();
+        QCOMPARE(sentStatus, 6);
+        server.close();
     }
 };
 

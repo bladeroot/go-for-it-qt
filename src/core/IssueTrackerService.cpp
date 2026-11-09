@@ -8,6 +8,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QXmlStreamReader>
 
 namespace gofi {
 
@@ -54,6 +55,142 @@ QString escapeIcsText(const QString& str) {
         else out += c;
     }
     return out;
+}
+
+int resolveRedmineStatusId(const QVariantMap& statusMapping, bool done) {
+    const int fallbackId = done ? 5 : 1;
+    const QString targetCategory = done ? QStringLiteral("done") : QStringLiteral("todo");
+
+    QStringList preferredOrder;
+    if (done) {
+        preferredOrder << QStringLiteral("closed") << QStringLiteral("resolved") << QStringLiteral("done") << QStringLiteral("fixed");
+    } else {
+        preferredOrder << QStringLiteral("new") << QStringLiteral("open");
+    }
+
+    // 1. Explicit user mapping matching preferred names
+    QString selectedStatusName;
+    for (const QString& pref : preferredOrder) {
+        for (auto it = statusMapping.cbegin(); it != statusMapping.cend(); ++it) {
+            if (it.key().startsWith(QLatin1Char('_'))) continue;
+            if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0 &&
+                it.key().compare(pref, Qt::CaseInsensitive) == 0) {
+                selectedStatusName = it.key();
+                break;
+            }
+        }
+        if (!selectedStatusName.isEmpty()) break;
+    }
+
+    // 2. Explicit user mapping matching any status in category (skipping reject/cancel for done)
+    if (selectedStatusName.isEmpty()) {
+        for (auto it = statusMapping.cbegin(); it != statusMapping.cend(); ++it) {
+            if (it.key().startsWith(QLatin1Char('_'))) continue;
+            if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0) {
+                if (done && (it.key().contains(QStringLiteral("reject"), Qt::CaseInsensitive) ||
+                             it.key().contains(QStringLiteral("cancel"), Qt::CaseInsensitive) ||
+                             it.key().contains(QStringLiteral("declin"), Qt::CaseInsensitive) ||
+                             it.key().contains(QStringLiteral("won't"), Qt::CaseInsensitive))) {
+                    continue;
+                }
+                selectedStatusName = it.key();
+                break;
+            }
+        }
+    }
+
+    if (!selectedStatusName.isEmpty()) {
+        const QString idKey = QStringLiteral("_id_") + selectedStatusName;
+        if (statusMapping.contains(idKey)) {
+            bool ok = false;
+            const int mappedId = statusMapping.value(idKey).toInt(&ok);
+            if (ok && mappedId > 0) {
+                return mappedId;
+            }
+        }
+    }
+
+    // 3. Auto-learned _id_<name> matching preferred names
+    for (const QString& pref : preferredOrder) {
+        for (auto it = statusMapping.cbegin(); it != statusMapping.cend(); ++it) {
+            if (it.key().startsWith(QStringLiteral("_id_"))) {
+                const QString rawName = it.key().mid(4);
+                if (rawName.compare(pref, Qt::CaseInsensitive) == 0) {
+                    bool ok = false;
+                    const int mappedId = it.value().toInt(&ok);
+                    if (ok && mappedId > 0) {
+                        return mappedId;
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. If done, search among all learned _is_closed_<id> keys, filtering out rejected/canceled
+    if (done) {
+        QHash<int, QString> idToName;
+        for (auto it = statusMapping.cbegin(); it != statusMapping.cend(); ++it) {
+            if (it.key().startsWith(QStringLiteral("_id_"))) {
+                bool ok = false;
+                const int id = it.value().toInt(&ok);
+                if (ok && id > 0) {
+                    idToName.insert(id, it.key().mid(4));
+                }
+            }
+        }
+
+        QList<int> candidateIds;
+        for (auto it = statusMapping.cbegin(); it != statusMapping.cend(); ++it) {
+            if (it.key().startsWith(QStringLiteral("_is_closed_"))) {
+                bool ok = false;
+                const int id = it.key().mid(11).toInt(&ok);
+                if (ok && id > 0) {
+                    const QString name = idToName.value(id);
+                    if (!name.contains(QStringLiteral("reject"), Qt::CaseInsensitive) &&
+                        !name.contains(QStringLiteral("cancel"), Qt::CaseInsensitive) &&
+                        !name.contains(QStringLiteral("declin"), Qt::CaseInsensitive) &&
+                        !name.contains(QStringLiteral("won't"), Qt::CaseInsensitive)) {
+                        candidateIds.append(id);
+                    }
+                }
+            }
+        }
+
+        std::sort(candidateIds.begin(), candidateIds.end());
+
+        // Check if any candidate name contains done / closed / resolved / fixed
+        for (int id : candidateIds) {
+            const QString name = idToName.value(id);
+            if (name.contains(QStringLiteral("done"), Qt::CaseInsensitive) ||
+                name.contains(QStringLiteral("closed"), Qt::CaseInsensitive) ||
+                name.contains(QStringLiteral("resolved"), Qt::CaseInsensitive) ||
+                name.contains(QStringLiteral("fixed"), Qt::CaseInsensitive)) {
+                return id;
+            }
+        }
+
+        if (!candidateIds.isEmpty()) {
+            return candidateIds.first();
+        }
+    }
+
+    return fallbackId;
+}
+
+bool isValidCalDavMultistatus(int statusCode, const QByteArray& bodyBytes) {
+    if (statusCode == 207) {
+        QXmlStreamReader xml(bodyBytes);
+        while (!xml.atEnd()) {
+            if (xml.readNext() == QXmlStreamReader::StartElement) {
+                return (xml.name().compare(QLatin1String("multistatus"), Qt::CaseInsensitive) == 0);
+            }
+        }
+        return false;
+    }
+    if (statusCode == 200 && (bodyBytes.contains("BEGIN:VCALENDAR") || bodyBytes.contains("multistatus"))) {
+        return true;
+    }
+    return false;
 }
 
 // Extracts Markdown from either a Jira v2 string or Jira v3 Atlassian Document Format (ADF) JSON object
@@ -1605,6 +1742,8 @@ struct IssueTrackerService::JiraSyncState {
     int startAt = 0;
     QString nextPageToken;
     int pagesFetched = 0;
+    int totalCount = -1;
+    int initialTotalCount = -1;
     bool limitReached = false;
     bool hasError = false;
     bool explicitZeroTotal = false;
@@ -1624,6 +1763,7 @@ struct IssueTrackerService::GitHubSyncState {
     int page = 1;
     int pagesFetched = 0;
     int totalCount = -1;
+    int initialTotalCount = -1;
     bool limitReached = false;
     bool hasError = false;
     bool explicitZeroTotal = false;
@@ -1632,6 +1772,7 @@ struct IssueTrackerService::GitHubSyncState {
 struct IssueTrackerService::GitLabCombinedSyncState {
     QVector<RemoteIssueItem> items;
     int completedRequests = 0;
+    int initialTotal = -1;
     bool hasError = false;
     QString errorMsg;
     bool limitReached = false;
@@ -1642,6 +1783,7 @@ struct IssueTrackerService::RedmineSyncState {
     int offset = 0;
     int pagesFetched = 0;
     int totalCount = -1;
+    int initialTotalCount = -1;
     bool limitReached = false;
     bool hasError = false;
     bool explicitZeroTotal = false;
@@ -1749,7 +1891,11 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
                 return;
             } else {
                 state->hasError = true;
-                processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
+            state->limitReached = true;
+        }
+
+        processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
                 return;
             }
         }
@@ -1764,6 +1910,12 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
                 state->hasError = true;
             }
             const int total = rootObj.value(QStringLiteral("total")).toInt(-1);
+            state->totalCount = total;
+            if (state->pagesFetched == 0) {
+                state->initialTotalCount = total;
+            } else if (state->initialTotalCount >= 0 && total != state->initialTotalCount) {
+                state->limitReached = true;
+            }
             const int maxResults = rootObj.value(QStringLiteral("maxResults")).toInt(100);
             const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
             const bool isLast = rootObj.value(QStringLiteral("isLast")).toBool(true);
@@ -1799,6 +1951,10 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
             } else {
                 state->limitReached = true;
             }
+        }
+
+        if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
+            state->limitReached = true;
         }
 
         processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
@@ -2078,7 +2234,11 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
                 return;
             } else {
                 state->hasError = true;
-                processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
+            state->limitReached = true;
+        }
+
+        processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
                 return;
             }
         }
@@ -2099,6 +2259,11 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
             }
             const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
             state->totalCount = totalCount;
+            if (state->pagesFetched == 0) {
+                state->initialTotalCount = totalCount;
+            } else if (state->initialTotalCount >= 0 && totalCount != state->initialTotalCount) {
+                state->limitReached = true;
+            }
             const QJsonArray itemsArray = rootObj.value(QStringLiteral("items")).toArray();
             if (state->pagesFetched == 0 && totalCount == 0 && !state->hasError && itemsArray.isEmpty()) {
                 state->explicitZeroTotal = true;
@@ -2121,6 +2286,10 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
             } else {
                 state->limitReached = true;
             }
+        }
+
+        if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
+            state->limitReached = true;
         }
 
         processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
@@ -2292,7 +2461,11 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
                 return;
             } else {
                 state->hasError = true;
-                processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
+            state->limitReached = true;
+        }
+
+        processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
                 return;
             }
         }
@@ -2307,6 +2480,11 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
             const QJsonObject rootObj = doc.object();
             const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
             state->totalCount = totalCount;
+            if (state->pagesFetched == 0) {
+                state->initialTotalCount = totalCount;
+            } else if (state->initialTotalCount >= 0 && totalCount != state->initialTotalCount) {
+                state->limitReached = true;
+            }
             const int limit = rootObj.value(QStringLiteral("limit")).toInt(100);
             const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
             if (state->pagesFetched == 0 && totalCount == 0 && issuesArr.isEmpty()) {
@@ -2410,6 +2588,10 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
             }
         }
 
+        if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
+            state->limitReached = true;
+        }
+
         processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
     });
 }
@@ -2480,6 +2662,7 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
         QNetworkReply* reply = m_nam.get(req);
         connect(reply, &QNetworkReply::finished, this, [this, reply, entry]() {
             reply->deleteLater();
+            const int getStatusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             if (reply->error() != QNetworkReply::NoError) {
                 endSyncOperation();
                 const QString errMsg = tr("Nextcloud sync error: %1").arg(reply->errorString());
@@ -2488,8 +2671,15 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                 return;
             }
             const QByteArray bodyBytes = reply->readAll();
+            if (getStatusCode != 200 || !bodyBytes.contains("BEGIN:VCALENDAR")) {
+                endSyncOperation();
+                const QString errMsg = tr("Nextcloud returned non-CalDAV response (%1).").arg(getStatusCode);
+                setStatusMessage(errMsg);
+                emit syncFailed(entry.id, errMsg);
+                return;
+            }
             const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-            processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty());
+            processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, false, false);
         });
         return;
     }
@@ -2527,6 +2717,7 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                 QNetworkReply* propReply = m_nam.sendCustomRequest(propReq, "PROPFIND", propXml);
                 connect(propReply, &QNetworkReply::finished, this, [this, propReply, entry]() {
                     propReply->deleteLater();
+                    const int propStatusCode = propReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
                     if (propReply->error() != QNetworkReply::NoError) {
                         endSyncOperation();
                         const QString errMsg = tr("Nextcloud CalDAV error: %1").arg(propReply->errorString());
@@ -2535,9 +2726,16 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                         return;
                     }
                     const QByteArray bodyBytes = propReply->readAll();
+                    if (!isValidCalDavMultistatus(propStatusCode, bodyBytes)) {
+                        endSyncOperation();
+                        const QString errMsg = tr("Nextcloud returned non-CalDAV response (%1).").arg(propStatusCode);
+                        setStatusMessage(errMsg);
+                        emit syncFailed(entry.id, errMsg);
+                        return;
+                    }
                     const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-                    const bool explicitZero = !bodyBytes.trimmed().isEmpty() && items.isEmpty();
-                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty(), explicitZero);
+                    const bool explicitZero = items.isEmpty();
+                    processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, false, explicitZero);
                 });
                 return;
             }
@@ -2550,9 +2748,16 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
         }
 
         const QByteArray bodyBytes = reply->readAll();
+        if (!isValidCalDavMultistatus(statusCode, bodyBytes)) {
+            endSyncOperation();
+            const QString errMsg = tr("Nextcloud returned non-CalDAV response (%1).").arg(statusCode);
+            setStatusMessage(errMsg);
+            emit syncFailed(entry.id, errMsg);
+            return;
+        }
         const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-        const bool explicitZero = !bodyBytes.trimmed().isEmpty() && items.isEmpty();
-        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, bodyBytes.trimmed().isEmpty(), explicitZero);
+        const bool explicitZero = items.isEmpty();
+        processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, false, explicitZero);
     });
 }
 
@@ -3417,85 +3622,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         QNetworkRequest req(url);
         applyAuthHeader(req, listEntry);
 
-        int statusId = done ? 5 : 1;
-        const QString targetCategory = done ? QStringLiteral("done") : QStringLiteral("todo");
-
-        QStringList preferredOrder;
-        if (done) {
-            preferredOrder << QStringLiteral("closed") << QStringLiteral("resolved");
-        } else {
-            preferredOrder << QStringLiteral("new") << QStringLiteral("open");
-        }
-
-        QString selectedStatusName;
-        for (const QString& pref : preferredOrder) {
-            for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
-                if (it.key().startsWith(QStringLiteral("_id_"))) continue;
-                if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0 &&
-                    it.key().compare(pref, Qt::CaseInsensitive) == 0) {
-                    selectedStatusName = it.key();
-                    break;
-                }
-            }
-            if (!selectedStatusName.isEmpty()) break;
-        }
-        if (selectedStatusName.isEmpty()) {
-            for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
-                if (it.key().startsWith(QStringLiteral("_id_"))) continue;
-                if (it.value().toString().compare(targetCategory, Qt::CaseInsensitive) == 0) {
-                    if (done && (it.key().contains(QStringLiteral("reject"), Qt::CaseInsensitive) ||
-                                 it.key().contains(QStringLiteral("cancel"), Qt::CaseInsensitive))) {
-                        continue;
-                    }
-                    selectedStatusName = it.key();
-                    break;
-                }
-            }
-        }
-
-        if (!selectedStatusName.isEmpty()) {
-            const QString idKey = QStringLiteral("_id_") + selectedStatusName;
-            if (listEntry.statusMapping.contains(idKey)) {
-                bool ok = false;
-                const int mappedId = listEntry.statusMapping.value(idKey).toInt(&ok);
-                if (ok && mappedId > 0) {
-                    statusId = mappedId;
-                }
-            }
-        } else {
-            // KB-2a: User has no explicit mapping; check auto-learned _id_* keys matching preferred names
-            bool foundLearned = false;
-            for (const QString& pref : preferredOrder) {
-                for (auto it = listEntry.statusMapping.cbegin(); it != listEntry.statusMapping.cend(); ++it) {
-                    if (it.key().startsWith(QStringLiteral("_id_"))) {
-                        const QString rawName = it.key().mid(4);
-                        if (rawName.compare(pref, Qt::CaseInsensitive) == 0) {
-                            bool ok = false;
-                            const int mappedId = it.value().toInt(&ok);
-                            if (ok && mappedId > 0) {
-                                statusId = mappedId;
-                                foundLearned = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (foundLearned) break;
-            }
-            if (!foundLearned && done) {
-                // If closing and no preferred name matched, pick first learned is_closed status
-                for (auto it = listEntry.statusMapping.cbegin(); it != listEntry.statusMapping.cend(); ++it) {
-                    if (it.key().startsWith(QStringLiteral("_is_closed_"))) {
-                        bool ok = false;
-                        const int mappedId = it.key().mid(11).toInt(&ok);
-                        if (ok && mappedId > 0) {
-                            statusId = mappedId;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        const int statusId = resolveRedmineStatusId(listEntry.statusMapping, done);
 
         QJsonObject payload{
             {QStringLiteral("issue"), QJsonObject{{QStringLiteral("status_id"), statusId}}}
