@@ -4120,8 +4120,9 @@ private slots:
         int bearerCount = 0;
         int otherCount = 0;
         serveHttpFull(server, [&basicCount, &bearerCount, &otherCount](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
-            if (head.contains("Authorization: Basic")) ++basicCount;
-            else if (head.contains("Authorization: Bearer")) ++bearerCount;
+            const QByteArray lower = head.toLower();
+            if (lower.contains("authorization: basic")) ++basicCount;
+            else if (lower.contains("authorization: bearer")) ++bearerCount;
             else ++otherCount;
             return httpResponse("401 Unauthorized", "application/json", "{}",
                                 "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
