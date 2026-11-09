@@ -3714,6 +3714,105 @@ private slots:
         QCOMPARE(db.loadTasks(entry.id, false).size(), 2);
         server.close();
     }
+
+    // KB-17: a multistatus where only some objects return calendar-data (the others
+    // report 404/403) yields a non-empty but incomplete item list. The objects without
+    // data must not be reconciled as closed.
+    void testNextcloudPartialCalendarDataDoesNotCloseMissingTasks() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttp(server, [](const QByteArray& method, const QByteArray&, const QByteArray&) {
+            if (method == "REPORT") {
+                return httpResponse("405 Method Not Allowed", "text/plain", "REPORT not supported");
+            }
+            const QByteArray xml =
+                "<?xml version=\"1.0\"?>"
+                "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
+                "<d:response><d:href>/remote.php/dav/calendars/user/tasks/uid-1.ics</d:href>"
+                "<d:propstat><d:prop><c:calendar-data>BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VTODO\nUID:uid-1\nSUMMARY:NC task 1\nSTATUS:NEEDS-ACTION\nEND:VTODO\nEND:VCALENDAR\n</c:calendar-data></d:prop>"
+                "<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+                "<d:response><d:href>/remote.php/dav/calendars/user/tasks/uid-2.ics</d:href>"
+                "<d:propstat><d:prop><c:calendar-data/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"
+                "</d:multistatus>";
+            return httpResponse("207 Multi-Status", "application/xml; charset=utf-8", xml);
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb17_nextcloud.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb17_nc");
+        entry.name = QStringLiteral("KB17 Nextcloud");
+        entry.provider = QStringLiteral("Nextcloud");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1/remote.php/dav/calendars/user/tasks/").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user");
+        entry.apiToken = QStringLiteral("app-password");
+        QVERIFY(db.saveList(entry, 0));
+        for (int i = 1; i <= 2; ++i) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("NC task %1").arg(i), false, false);
+            t.setJiraKey(QStringLiteral("NC#uid-%1").arg(i));
+            QVERIFY(db.insertTask(entry.id, t, i - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("NC#uid-1")));
+        QVERIFY(openKeys.contains(QStringLiteral("NC#uid-2")));
+        server.close();
+    }
+
+    // KB-18: the KB-15 fix sets limitReached whenever YouTrack needed more than one page,
+    // so lists with >= 100 open issues (exactly 100 included: the empty second page counts)
+    // never reconcile, and remotely closed issues stay open locally forever.
+    void testYouTrackMultiPageListStillReconcilesClosedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        // Stable server state: YT-1..YT-100 open (exactly one full page); YT-101 was closed.
+        serveHttp(server, [](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            QJsonArray arr;
+            if (!target.contains("skip=")) {
+                for (int n = 1; n <= 100; ++n) {
+                    arr.append(QJsonObject{
+                        {QStringLiteral("idReadable"), QStringLiteral("YT-%1").arg(n)},
+                        {QStringLiteral("summary"), QStringLiteral("Issue %1").arg(n)}
+                    });
+                }
+            }
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb18_youtrack.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb18_yt");
+        entry.name = QStringLiteral("KB18 YouTrack");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        for (int n = 1; n <= 101; ++n) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(n), false, false);
+            t.setJiraKey(QStringLiteral("YT-%1").arg(n));
+            QVERIFY(db.insertTask(entry.id, t, n - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("YT-100")));
+        QVERIFY(!openKeys.contains(QStringLiteral("YT-101")));
+        server.close();
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

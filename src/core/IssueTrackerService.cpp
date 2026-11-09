@@ -1807,6 +1807,7 @@ struct IssueTrackerService::YouTrackSyncState {
     QVector<RemoteIssueItem> allItems;
     int skip = 0;
     int pagesFetched = 0;
+    int nonEmptyPages = 0;
     bool limitReached = false;
     bool hasError = false;
     bool explicitZeroTotal = false;
@@ -2086,6 +2087,9 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
         state->allItems.append(items);
         state->pagesFetched++;
+        if (rawCount > 0) {
+            state->nonEmptyPages++;
+        }
         state->skip += rawCount;
 
         if (state->pagesFetched == 1 && rawCount == 0 && !state->hasError) {
@@ -2102,7 +2106,7 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
             }
         }
 
-        if (state->pagesFetched > 1) {
+        if (state->nonEmptyPages > 1) {
             state->limitReached = true;
         }
 
@@ -2828,7 +2832,8 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
                         return;
                     }
                     const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-                    const bool hasError = (info.objectResponseCount > 0 && items.isEmpty());
+                    const bool hasError = (info.successfulCalendarDataCount < info.objectResponseCount) ||
+                                          (info.objectResponseCount > 0 && items.isEmpty());
                     const bool explicitZero = (info.objectResponseCount == 0 && items.isEmpty());
                     processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, hasError, explicitZero);
                 });
@@ -2852,7 +2857,8 @@ void IssueTrackerService::fetchNextcloudTasks(const TodoListEntry& entry) {
             return;
         }
         const QVector<RemoteIssueItem> items = parseNextcloudTasksIcs(bodyBytes);
-        const bool hasError = (info.objectResponseCount > 0 && items.isEmpty());
+        const bool hasError = (info.successfulCalendarDataCount < info.objectResponseCount) ||
+                              (info.objectResponseCount > 0 && items.isEmpty());
         const bool explicitZero = (info.objectResponseCount == 0 && items.isEmpty());
         processSyncedItems(entry, items, QStringLiteral("Nextcloud"), false, hasError, explicitZero);
     });
