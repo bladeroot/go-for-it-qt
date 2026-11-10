@@ -1,3 +1,15 @@
+go-for-it-qt (2.0.1-1) unstable; urgency=medium
+
+  * Maintenance Release 2.0.1: resolves 87 stability and synchronization defects.
+  * Implement remote completion/reopening status sync for Jira, YouTrack, and Nextcloud.
+  * Extend remote list recognition to Redmine, Todoist, and Nextcloud.
+  * Fix TUI duration integer overflow on large input values.
+  * Normalize minimum integer durations in schedule bounds.
+  * Fix GitHub search queries with non-state qualifiers.
+  * Improve ANSI sequence handling and terminal width truncation in TUI.
+
+ -- Yurii Myronchuk <bladeroot@gmail.com>  Tue, 10 Nov 2026 10:30:00 +0100
+
 go-for-it-qt (2.0.0-1) unstable; urgency=medium
 
   * Major Release 2.0.0: Full C++20 / Qt 6 rewrite with GUI and TUI clients.

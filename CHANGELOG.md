@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.1] - 2026-11-10
+
+### 🛡️ Comprehensive Stability, Synchronization & Quality Fixes (KB-1 – KB-87)
+This maintenance release resolves 87 review defects identified during systematic auditing, accompanied by complete regression test coverage:
+
+- **Issue Tracker Synchronization**:
+  - Implemented remote issue completion and reopening status synchronization for Jira (via transitions API), YouTrack (via commands API), and Nextcloud CalDAV (via VTODO STATUS) (KB-86).
+  - Extended remote list recognition in `AppController::isCurrentListRemote()` to cover Redmine, Todoist, and Nextcloud (KB-87).
+  - Preserved repository qualifier prefixing and default `is:open` constraints on GitHub search queries with non-state filters like `is:issue` (KB-77, KB-84).
+  - Handled multi-page pagination shifts and closed-issue reconciliation across Jira, YouTrack, GitHub, GitLab, and Redmine (KB-1 through KB-14).
+  - Preserved custom closed status names for Redmine mappings (KB-82).
+  - Confined Nextcloud ICS updates strictly to VTODO property blocks, preserving alarms and multi-line descriptions (KB-63, KB-64, KB-65).
+  - Preserved unclosed code fences and prevented empty text nodes in Markdown-to-ADF Jira parser (KB-61, KB-62).
+  - Added Bearer token fallback for Jira worklog and priority queries upon 401 response (KB-44, KB-48, KB-52).
+
+- **Terminal UI (TUI)**:
+  - Clamped minute input in settings to prevent integer arithmetic overflow when converting to seconds (KB-85).
+  - Handled ANSI escape sequences correctly in visible display width calculation and line truncation (KB-76).
+  - Truncated Markdown headings, tables, list titles, and preview pane rows to terminal column width (KB-70, KB-73, KB-80).
+  - Fixed list picker to open highlighted row on Enter without stale preselection (KB-79).
+  - Flushed and logged running timer sessions upon TUI exit (`q`, `:q`, `:wq`) (KB-78).
+  - Masked API token input in list editor (KB-68).
+  - Supported multibyte UTF-8 and non-BMP Unicode characters in input buffers (KB-38, KB-39).
+
+- **Core & Timer Reliability**:
+  - Normalized minimum integer durations (`INT_MIN`) in schedule calculations to avoid signed overflow and Debug assertions (KB-83).
+  - Bound TaskDetailsDialog modifications strictly to task ID instead of shifting proxy rows (KB-71).
+  - Updated GUI shortcut bindings dynamically via notifying `shortcutMap` property (KB-72).
+  - Aligned productivity heatmap start date to Monday with exact day counts and localized weekday labels (KB-81).
+  - Populated documented environment variables (`GOFI_REMAINING_SEC`, `GOFI_DURATION_SEC`) in system hooks (KB-69).
+  - Preserved Pomodoro cycle and active task state when re-selecting the current list (KB-59, KB-67).
+  - Enforced strict owner-only file permissions (`0600`) on billing exports and activity logs (KB-30, KB-33).
+
+See [RESOLVEDBUGS.md](RESOLVEDBUGS.md) for the full catalog and test slot references.
+
+---
+
 ## [2.0.0] - 2026-11-07
 
 ### 🚀 Major Architecture Rewrite (C++20 & Qt 6)
