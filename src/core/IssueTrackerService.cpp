@@ -589,6 +589,14 @@ quint8 IssueTrackerService::mapPriorityName(const QString& priorityName) {
         }
     }
 
+    // Re-check P-code on stripped string for scoped labels like "priority::P1", "prio:P0", "priority/p2"
+    if (hadPrefix) {
+        const auto pMatchAfter = pCodeNameRe.match(p);
+        if (pMatchAfter.hasMatch()) {
+            return pMatchAfter.captured(1).toUShort();
+        }
+    }
+
     // Check P-0 to P-4 or hadPrefix with 0..4
     if (p == QStringLiteral("p-0") || (hadPrefix && p == QStringLiteral("0"))) {
         return 0; // (A)
@@ -681,6 +689,29 @@ quint8 IssueTrackerService::mapRemotePriorityToLocal(const QString& remotePriori
                 return parseLocalPrio(it.value().toString());
             }
         }
+
+        // Check if p is a number matching range keys like "2-4" or number-prefixed keys like "1 (Highest)"
+        bool isNum = false;
+        const int pVal = p.toInt(&isNum);
+        if (isNum) {
+            for (auto it = customMapping.constBegin(); it != customMapping.constEnd(); ++it) {
+                const QString k = it.key().trimmed();
+                static const QRegularExpression rangeRe(QStringLiteral("^(\\d+)\\s*-\\s*(\\d+)"));
+                const auto m = rangeRe.match(k);
+                if (m.hasMatch()) {
+                    const int low = m.captured(1).toInt();
+                    const int high = m.captured(2).toInt();
+                    if (pVal >= low && pVal <= high) {
+                        return parseLocalPrio(it.value().toString());
+                    }
+                }
+                static const QRegularExpression numPrefixRe(QStringLiteral("^(\\d+)\\b"));
+                const auto nm = numPrefixRe.match(k);
+                if (nm.hasMatch() && nm.captured(1).toInt() == pVal) {
+                    return parseLocalPrio(it.value().toString());
+                }
+            }
+        }
     }
 
     return mapPriorityName(p);
@@ -737,18 +768,22 @@ QVariantList IssueTrackerService::defaultPrioritiesForProvider(const QString& pr
         };
     } else if (provider == QStringLiteral("Todoist")) {
         presets = {
-            {"Priority 4 (P1 Urgent)", "A"},
-            {"Priority 3 (P2 High)", "B"},
-            {"Priority 2 (P3 Medium)", "C"},
-            {"Priority 1 (P4 Normal)", "none"}
+            {"Priority 4", "A"},
+            {"Priority 3", "B"},
+            {"Priority 2", "C"},
+            {"Priority 1", "none"}
         };
     } else if (provider == QStringLiteral("Nextcloud")) {
         presets = {
-            {"1 (Highest)", "A"},
-            {"2-4 (High)", "B"},
-            {"5 (Medium)", "C"},
-            {"6-8 (Low)", "D"},
-            {"9 (Lowest)", "E"}
+            {"1", "A"},
+            {"2", "B"},
+            {"3", "B"},
+            {"4", "B"},
+            {"5", "C"},
+            {"6", "D"},
+            {"7", "D"},
+            {"8", "D"},
+            {"9", "E"}
         };
     }
 
@@ -865,7 +900,7 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
 
     const QString baseUrl = normalizeBaseUrl(serverUrl);
     if (baseUrl.isEmpty()) {
-        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        emit remotePrioritiesError(tr("Please enter the Server URL first."));
         return;
     }
 
@@ -881,16 +916,41 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
         applyAuthHeader(req, tempEntry, false);
 
         QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, provider, existingMapping]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, tempEntry, baseUrl, existingMapping]() {
             reply->deleteLater();
-            if (reply->error() == QNetworkReply::NoError) {
-                const QVariantList list = parseJiraPrioritiesJson(reply->readAll(), existingMapping);
-                if (!list.isEmpty()) {
-                    emit remotePrioritiesLoaded(list);
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray seraphReason = reply->rawHeader("X-Seraph-Loginreason");
+            const bool seraphAuthFailed = seraphReason.contains("AUTHENTICATED_FAILED") || seraphReason.contains("AUTHENTICATION_DENIED");
+            if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
+                if (!tempEntry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
+                    // Retry with Bearer token (Jira Server/DC PAT)
+                    QNetworkRequest bearerReq(QUrl(baseUrl + QStringLiteral("/rest/api/2/priority")));
+                    applyAuthHeader(bearerReq, tempEntry, true);
+                    QNetworkReply* retryReply = m_nam.get(bearerReq);
+                    connect(retryReply, &QNetworkReply::finished, this, [this, retryReply, existingMapping, seraphAuthFailed]() {
+                        retryReply->deleteLater();
+                        const QByteArray retrySeraph = retryReply->rawHeader("X-Seraph-Loginreason");
+                        const bool retrySeraphFailed = retrySeraph.contains("AUTHENTICATED_FAILED") || retrySeraph.contains("AUTHENTICATION_DENIED");
+                        if (retryReply->error() != QNetworkReply::NoError || retrySeraphFailed) {
+                            if (seraphAuthFailed || retrySeraphFailed) {
+                                emit remotePrioritiesError(tr("Jira authentication failed: please check your Jira Email (e.g. corporate email) and API Token."));
+                            } else {
+                                emit remotePrioritiesError(tr("Failed to load Jira priorities: %1").arg(retryReply->errorString()));
+                            }
+                            return;
+                        }
+                        emit remotePrioritiesLoaded(parseJiraPrioritiesJson(retryReply->readAll(), existingMapping));
+                    });
                     return;
                 }
+                if (seraphAuthFailed) {
+                    emit remotePrioritiesError(tr("Jira authentication failed: please check your Jira Email and API Token."));
+                } else {
+                    emit remotePrioritiesError(tr("Failed to load Jira priorities (%1): %2").arg(httpStatus).arg(reply->errorString()));
+                }
+                return;
             }
-            emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+            emit remotePrioritiesLoaded(parseJiraPrioritiesJson(reply->readAll(), existingMapping));
         });
     } else if (provider == QStringLiteral("Redmine")) {
         QUrl url(baseUrl + QStringLiteral("/enumerations/issue_priorities.json"));
@@ -898,8 +958,9 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
         applyAuthHeader(req, tempEntry);
 
         QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, provider, existingMapping]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, existingMapping]() {
             reply->deleteLater();
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             if (reply->error() == QNetworkReply::NoError) {
                 const QVariantList list = parseRedminePrioritiesJson(reply->readAll(), existingMapping);
                 if (!list.isEmpty()) {
@@ -907,7 +968,7 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
                     return;
                 }
             }
-            emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+            emit remotePrioritiesError(tr("Failed to load Redmine priorities (%1): %2").arg(httpStatus).arg(reply->errorString()));
         });
     } else {
         emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
@@ -2274,7 +2335,10 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         );
         quint8 localPriority = item.priority;
         if (!entry.priorityMapping.isEmpty()) {
-            localPriority = mapRemotePriorityToLocal(item.remotePriority, entry.priorityMapping);
+            const quint8 mapped = mapRemotePriorityToLocal(item.remotePriority, entry.priorityMapping);
+            if (mapped != TxtTask::NoPriority || entry.priorityMapping.contains(item.remotePriority)) {
+                localPriority = mapped;
+            }
         }
         bool isNew = false;
         QString oldStatus;

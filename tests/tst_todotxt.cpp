@@ -4803,6 +4803,142 @@ private slots:
         }
         QCOMPARE(unmapped, QStringList());
     }
+
+    // KB-50: the KB-49 fix (17b6a8b) moved plain "P0".."P4" matching into a regex that is
+    // applied to the *original* label, before the "priority::"/"priority/"/"prio:" prefixes
+    // are stripped, and dropped p0..p4 from the post-prefix checks (only "p-0".."p-4" and
+    // bare digits remain). Scoped labels such as "priority::P1" (the usual GitLab style),
+    // "priority/p2" or "prio:P0", which mapped before, now give no priority at all.
+    void testScopedPriorityCodeLabelsMap() {
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("P1")), quint8(1));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("priority::1")), quint8(1));
+        QStringList unmapped;
+        const QList<QPair<QString, quint8>> cases = {
+            {QStringLiteral("priority::P1"), 1},
+            {QStringLiteral("priority/p2"), 2},
+            {QStringLiteral("prio:P0"), 0},
+            {QStringLiteral("severity::P3"), 3}
+        };
+        for (const auto& c : cases) {
+            if (IssueTrackerService::mapPriorityName(c.first) != c.second) unmapped << c.first;
+        }
+        QCOMPARE(unmapped, QStringList());
+    }
+
+    // KB-51: defaultPrioritiesForProvider offers display names as mapping keys that the
+    // sync code never produces. Todoist items carry remotePriority "Priority 4".."Priority 1"
+    // but the defaults are "Priority 4 (P1 Urgent)" etc.; Nextcloud items carry "1".."9" but
+    // the defaults are "1 (Highest)", "2-4 (High)" etc. TxtListEditDialog loads these defaults
+    // whenever the stored mapping is empty, so merely opening and saving the list makes the
+    // mapping non-empty; processSyncedItems then ignores item.priority, finds no matching key
+    // and falls back to mapPriorityName, which maps none of these values: every Todoist and
+    // Nextcloud task loses its priority on the next sync, and editing the mapping rows has no
+    // effect.
+    void testDefaultPriorityMappingMatchesSyncedValues() {
+        IssueTrackerService svc;
+        const auto toMap = [](const QVariantList& rows) {
+            QVariantMap m;
+            for (const QVariant& r : rows) {
+                const QVariantMap row = r.toMap();
+                m.insert(row.value(QStringLiteral("remoteName")).toString(), row.value(QStringLiteral("localPriority")));
+            }
+            return m;
+        };
+        const QVariantMap todoist = toMap(svc.defaultPrioritiesForProvider(QStringLiteral("Todoist"), {}));
+        const QVariantMap nextcloud = toMap(svc.defaultPrioritiesForProvider(QStringLiteral("Nextcloud"), {}));
+        QVERIFY(!todoist.isEmpty());
+        QVERIFY(!nextcloud.isEmpty());
+
+        QStringList wrong;
+        // Values exactly as parseTodoistTasksJson / parseNextcloud* put them into remotePriority.
+        if (IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("Priority 4"), todoist) != 0) wrong << QStringLiteral("Todoist Priority 4");
+        if (IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("Priority 3"), todoist) != 1) wrong << QStringLiteral("Todoist Priority 3");
+        if (IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("1"), nextcloud) != 0) wrong << QStringLiteral("Nextcloud 1");
+        if (IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("3"), nextcloud) != 1) wrong << QStringLiteral("Nextcloud 3");
+        if (IssueTrackerService::mapRemotePriorityToLocal(QStringLiteral("5"), nextcloud) != 2) wrong << QStringLiteral("Nextcloud 5");
+        QCOMPARE(wrong, QStringList());
+    }
+
+    // KB-52: fetchRemotePriorities for Jira sends only Basic auth (applyAuthHeader(..., false))
+    // and on any error silently returns the generic defaults. fetchRemoteStatuses and the sync
+    // retry with Bearer on 401/403 (Jira Server/DC personal access token with the email field
+    // filled in), but the priority "Fetch" button does not, so those users get the five stock
+    // names instead of their instance's priorities, with no error shown.
+    void testJiraFetchRemotePrioritiesRetriesWithBearer() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttpFull(server, [](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
+            if (head.toLower().contains("authorization: bearer")) {
+                return httpResponse("200 OK", "application/json",
+                                    "[{\"name\":\"KB52 Custom Blocker\"},{\"name\":\"KB52 Custom Minor\"}]");
+            }
+            return httpResponse("401 Unauthorized", "application/json", "{}");
+        });
+
+        IssueTrackerService svc;
+        QSignalSpy loadedSpy(&svc, &IssueTrackerService::remotePrioritiesLoaded);
+        svc.fetchRemotePriorities(QStringLiteral("Jira"),
+                                  QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+                                  QStringLiteral("user@example.com"), QStringLiteral("pat-token"), {});
+        QTRY_COMPARE_WITH_TIMEOUT(loadedSpy.count(), 1, 5000);
+        QStringList names;
+        for (const QVariant& r : loadedSpy.at(0).at(0).toList()) {
+            names << r.toMap().value(QStringLiteral("remoteName")).toString();
+        }
+        QVERIFY2(names.contains(QStringLiteral("KB52 Custom Blocker")), qPrintable(names.join(QStringLiteral(", "))));
+        server.close();
+    }
+
+    // KB-53: AppController::importBackup (Settings > Storage > Import) and changeDatabasePath
+    // swap the whole SQLite file while a work session may be running. The session is not
+    // flushed first: the swap happens, then reloadFromDatabase/selectListById ends up in
+    // setActiveTodoRow, which stops the timer *after* the new file is already open.
+    // onTimerStopped then resolves the old TaskTimer::activeTaskId() against the new database
+    // (findActiveTodoRowById / loadTask), where the same autoincrement id names an unrelated
+    // task, and books the session (activity record, CSV log and, for tracker lists with
+    // autoWorklog, a remote worklog to that task's jira key) to it.
+    void testImportBackupDoesNotRebindRunningTimerToOtherTask() {
+        const QString backupDb = m_testSandbox.filePath(QStringLiteral("kb53_backup.db"));
+        const QString liveDb = m_testSandbox.filePath(QStringLiteral("kb53_live.db"));
+        QFile::remove(backupDb);
+        QFile::remove(liveDb);
+        {
+            AppController backup(QString(), backupDb);
+            backup.addNewTask(QStringLiteral("KB53 unrelated backup task"));
+        }
+        DatabaseManager::instance().close();
+
+        AppController controller(QString(), liveDb);
+        controller.addNewTask(QStringLiteral("KB53 original timed task"));
+        bool selected = false;
+        for (int r = 0; r < 200 && !selected; ++r) {
+            controller.setActiveTodoRow(r);
+            selected = controller.timer()->activeTaskDescription().contains(QStringLiteral("KB53 original"));
+        }
+        QVERIFY(selected);
+        const qint64 timedId = controller.timer()->activeTaskId();
+        controller.timer()->start();
+        QVERIFY(controller.timer()->isRunning());
+        QTest::qWait(1600); // the session must be >= 1 s to be logged at all
+
+        QVERIFY(controller.importBackup(backupDb));
+        QVERIFY(!controller.timer()->isRunning());
+        // Precondition of the scenario: the imported file holds a different task under the timed id.
+        const auto clash = DatabaseManager::instance().loadTask(timedId);
+        QVERIFY(clash.has_value());
+        QVERIFY(!clash->description().contains(QStringLiteral("KB53 original")));
+
+        QStringList misbooked;
+        for (const ActivityRecord& r : DatabaseManager::instance().loadActivityLogs()) {
+            if (!r.taskDescription.contains(QStringLiteral("KB53 original"))) misbooked << r.taskDescription;
+        }
+        QVERIFY2(misbooked.isEmpty(), qPrintable(misbooked.join(QStringLiteral(" | "))));
+        DatabaseManager::instance().close();
+        QFile::remove(backupDb);
+        QFile::remove(liveDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

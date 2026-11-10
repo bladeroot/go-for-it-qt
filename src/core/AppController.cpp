@@ -684,6 +684,9 @@ QString AppController::configFilePath() const {
 }
 
 bool AppController::changeDatabasePath(const QString& newDbPath, bool copyExisting) {
+    if (m_timer.isRunning()) {
+        m_timer.stop();
+    }
     if (!DatabaseManager::instance().relocateDatabase(newDbPath, copyExisting)) {
         return false;
     }
@@ -712,6 +715,9 @@ QString AppController::readMarkdownFile(const QString& filePath) const {
 }
 
 bool AppController::importBackup(const QString& sourceFilePath) {
+    if (m_timer.isRunning()) {
+        m_timer.stop();
+    }
     if (!DatabaseManager::instance().importDatabaseBackup(sourceFilePath)) {
         return false;
     }
