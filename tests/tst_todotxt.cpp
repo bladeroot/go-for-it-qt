@@ -5535,52 +5535,73 @@ private slots:
         QVERIFY(!listId.isEmpty());
         ctrl.selectListById(listId);
 
-        const QString outPath = m_testSandbox.filePath(QStringLiteral("kb68_tui_out.txt"));
-        int fds[2];
-        QCOMPARE(::pipe(fds), 0);
+        // TuiApp only renders on a real terminal, so run it on a pseudo-terminal and read the
+        // frames from the master side.
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        QVERIFY(master >= 0);
+        QCOMPARE(::grantpt(master), 0);
+        QCOMPARE(::unlockpt(master), 0);
+        const char* slaveName = ::ptsname(master);
+        QVERIFY(slaveName != nullptr);
+        const int slave = ::open(slaveName, O_RDWR | O_NOCTTY);
+        QVERIFY(slave >= 0);
+        struct winsize ws {};
+        ws.ws_row = 30;
+        ws.ws_col = 120;
+        ::ioctl(slave, TIOCSWINSZ, &ws);
+        ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
+
+        QByteArray captured;
+        auto drain = [&]() {
+            char buf[8192];
+            for (;;) {
+                const ssize_t n = ::read(master, buf, sizeof(buf));
+                if (n <= 0) break;
+                captured.append(buf, static_cast<int>(n));
+            }
+        };
         const int savedStdin = ::dup(STDIN_FILENO);
         const int savedStdout = ::dup(STDOUT_FILENO);
-        const int outFd = ::open(outPath.toLocal8Bit().constData(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-        QVERIFY(savedStdin >= 0 && savedStdout >= 0 && outFd >= 0);
+        QVERIFY(savedStdin >= 0 && savedStdout >= 0);
         std::fflush(stdout);
-        ::dup2(fds[0], STDIN_FILENO);
-        ::dup2(outFd, STDOUT_FILENO);
+        ::dup2(slave, STDIN_FILENO);
+        ::dup2(slave, STDOUT_FILENO);
         {
             TuiApp tui(&ctrl);
+            const bool started = tui.start();
+            drain();
             auto feed = [&](const QByteArray& bytes) {
-                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())),
-                         static_cast<ssize_t>(bytes.size()));
+                (void)::write(master, bytes.constData(), static_cast<size_t>(bytes.size()));
+                QTest::qWait(20);
                 for (int i = 0; i < 8; ++i) {
                     int pending = 0;
                     ::ioctl(STDIN_FILENO, FIONREAD, &pending);
                     if (pending <= 0) break;
                     QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                    drain();
                 }
+                drain();
             };
-            feed("L");                       // list picker (current list selected)
-            feed("e");                       // edit list
-            for (int i = 0; i < 4; ++i) feed("j");   // row 4: API token
-            feed("\r");                      // start editing the token
-            std::fflush(stdout);
-            feed("\033");                    // cancel the edit
-            QTest::qWait(80);                // let the ESC timer fire
-            feed("q");
-            feed("q");
+            if (started) {
+                feed("L");                       // list picker (current list selected)
+                feed("e");                       // edit list
+                for (int i = 0; i < 4; ++i) feed("j");   // row 4: API token
+                feed("\r");                      // start editing the token
+                feed("\033");                    // cancel the edit
+                QTest::qWait(80);                // let the ESC timer fire
+                drain();
+            }
         }
-        std::fflush(stdout);
+        drain();
         ::dup2(savedStdin, STDIN_FILENO);
         ::dup2(savedStdout, STDOUT_FILENO);
         ::close(savedStdin);
         ::close(savedStdout);
-        ::close(outFd);
-        ::close(fds[0]);
-        ::close(fds[1]);
+        ::close(slave);
+        ::close(master);
 
-        QFile f(outPath);
-        QVERIFY(f.open(QIODevice::ReadOnly));
-        const QString screen = QString::fromUtf8(f.readAll());
+        const QString screen = QString::fromUtf8(captured);
         QVERIFY2(screen.contains(QStringLiteral("KB68")), "TUI produced no list-edit output");
-        QEXPECT_FAIL("", "KB-68: TUI prints the full API token while editing it", Continue);
         QVERIFY(!screen.contains(secret));
         QTRY_VERIFY_WITH_TIMEOUT(!ctrl.issueTracker()->isSyncing(), 5000);
     }

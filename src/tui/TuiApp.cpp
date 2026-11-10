@@ -781,7 +781,9 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             if (m_listEditRow == 0) m_editingListCfg[QStringLiteral("name")] = text;
             else if (m_listEditRow == 2) m_editingListCfg[QStringLiteral("jiraUrl")] = text;
             else if (m_listEditRow == 3) m_editingListCfg[QStringLiteral("jiraUser")] = text;
-            else if (m_listEditRow == 4) m_editingListCfg[QStringLiteral("apiToken")] = text;
+            else if (m_listEditRow == 4) {
+                if (!text.isEmpty()) m_editingListCfg[QStringLiteral("apiToken")] = text;
+            }
             else if (m_listEditRow == 5) m_editingListCfg[QStringLiteral("jiraJql")] = text;
         }
         return;
@@ -1040,7 +1042,7 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
         if (m_listEditRow == 0) m_inputBuffer = m_editingListCfg.value(QStringLiteral("name")).toString();
         else if (m_listEditRow == 2) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraUrl")).toString();
         else if (m_listEditRow == 3) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraUser")).toString();
-        else if (m_listEditRow == 4) m_inputBuffer = m_editingListCfg.value(QStringLiteral("apiToken")).toString();
+        else if (m_listEditRow == 4) m_inputBuffer.clear();
         else if (m_listEditRow == 5) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraJql")).toString();
         m_inputCursor = static_cast<int>(m_inputBuffer.size());
         m_mode = Mode::EditListField;
@@ -2491,7 +2493,11 @@ void TuiApp::render() {
     } else if (m_mode == Mode::Command) {
         out += FG_ORANGE + ESC_BOLD + QStringLiteral(":") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::EditSettingValue || m_mode == Mode::EditListField) {
-        out += FG_YELLOW + ESC_BOLD + tr("Enter value: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        QString displayInput = m_inputBuffer;
+        if (m_mode == Mode::EditListField && m_listEditRow == 4) {
+            displayInput = QString(m_inputBuffer.size(), QChar(0x2022));
+        }
+        out += FG_YELLOW + ESC_BOLD + tr("Enter value: ") + ESC_RESET + displayInput + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::StatusPicker) {
         out += FG_YELLOW + ESC_BOLD
             + tr("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")
