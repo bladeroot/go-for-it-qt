@@ -1538,14 +1538,14 @@ void TuiApp::handleDashboardKey(const QByteArray& seq) {
 
     if (seq == "c") {
         const QString outPath = defaultBillingExportPath(QStringLiteral("billing-%1.csv").arg(periodName));
-        if (m_app->analytics()->exportBillingCsv(outPath, periodName, m_app->currentListId())) {
+        if (m_app->analytics()->exportBillingCsv(outPath, periodName, m_app->activeListFilter())) {
             m_statusMessage = tr("Billing CSV exported to %1").arg(outPath);
         }
         return;
     }
     if (seq == "p") {
         const QString outPath = defaultBillingExportPath(QStringLiteral("billing-%1.pdf").arg(periodName));
-        if (m_app->analytics()->exportBillingPdf(outPath, periodName, m_app->currentListId())) {
+        if (m_app->analytics()->exportBillingPdf(outPath, periodName, m_app->activeListFilter())) {
             m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
         }
         return;
@@ -1605,7 +1605,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     if (cmdLine.startsWith(QStringLiteral("export-csv"))) {
         const QString rest = cmdLine.mid(10).trimmed();
         const QString outPath = !rest.isEmpty() ? rest : defaultBillingExportPath(QStringLiteral("billing-report.csv"));
-        if (m_app->analytics()->exportBillingCsv(outPath, QStringLiteral("month"), m_app->currentListId())) {
+        if (m_app->analytics()->exportBillingCsv(outPath, QStringLiteral("month"), m_app->activeListFilter())) {
             m_statusMessage = tr("Billing CSV exported to %1").arg(outPath);
         } else {
             m_statusMessage = tr("Failed to export CSV report.");
@@ -1615,7 +1615,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     if (cmdLine.startsWith(QStringLiteral("export-pdf"))) {
         const QString rest = cmdLine.mid(10).trimmed();
         const QString outPath = !rest.isEmpty() ? rest : defaultBillingExportPath(QStringLiteral("billing-report.pdf"));
-        if (m_app->analytics()->exportBillingPdf(outPath, QStringLiteral("month"), m_app->currentListId())) {
+        if (m_app->analytics()->exportBillingPdf(outPath, QStringLiteral("month"), m_app->activeListFilter())) {
             m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
         } else {
             m_statusMessage = tr("Failed to export PDF report.");
@@ -2143,8 +2143,8 @@ void TuiApp::render() {
             + padRight(tr(" 📊 PRODUCTIVITY DASHBOARD: %1  ([1]Day [2]Week [3]Month [4]All │ [c]CSV [p]PDF │ q/Esc:Close)").arg(periodTitle), m_cols)
             + ESC_RESET + QStringLiteral("\033[K\r\n");
 
-        const QVariantMap stats = m_app->analytics()->getProductivityStats(periodKey, m_app->currentListId());
-        const QVariantList heatmap = m_app->analytics()->getActivityHeatmap(28, m_app->currentListId());
+        const QVariantMap stats = m_app->analytics()->getProductivityStats(periodKey, m_app->activeListFilter());
+        const QVariantList heatmap = m_app->analytics()->getActivityHeatmap(28, m_app->activeListFilter());
 
         QStringList lines;
         lines.append(FG_YELLOW + ESC_BOLD + tr("  ── SUMMARY METRICS ──") + ESC_RESET);

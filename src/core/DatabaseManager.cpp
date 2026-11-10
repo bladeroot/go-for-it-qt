@@ -1459,8 +1459,25 @@ QVector<ActivityRecord> DatabaseManager::loadActivityLogs(const QDateTime& start
     if (endUtc.isValid()) {
         sql += QStringLiteral(" AND start_time_utc <= :end_time");
     }
+    QStringList targetIds;
     if (!listId.trimmed().isEmpty() && listId != QStringLiteral("__ALL__")) {
+        const QStringList rawIds = listId.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        for (const QString& rid : rawIds) {
+            const QString trimmedId = rid.trimmed();
+            if (!trimmedId.isEmpty()) {
+                targetIds.append(trimmedId);
+            }
+        }
+    }
+    if (targetIds.size() == 1) {
         sql += QStringLiteral(" AND list_id = :list_id");
+    } else if (targetIds.size() > 1) {
+        QStringList placeholders;
+        placeholders.reserve(targetIds.size());
+        for (int i = 0; i < targetIds.size(); ++i) {
+            placeholders.append(QStringLiteral(":lid_%1").arg(i));
+        }
+        sql += QStringLiteral(" AND list_id IN (%1)").arg(placeholders.join(QStringLiteral(", ")));
     }
     sql += QStringLiteral(" ORDER BY start_time_utc DESC");
 
@@ -1471,8 +1488,12 @@ QVector<ActivityRecord> DatabaseManager::loadActivityLogs(const QDateTime& start
     if (endUtc.isValid()) {
         q.bindValue(QStringLiteral(":end_time"), endUtc.toSecsSinceEpoch());
     }
-    if (!listId.trimmed().isEmpty() && listId != QStringLiteral("__ALL__")) {
-        q.bindValue(QStringLiteral(":list_id"), listId);
+    if (targetIds.size() == 1) {
+        q.bindValue(QStringLiteral(":list_id"), targetIds.first());
+    } else if (targetIds.size() > 1) {
+        for (int i = 0; i < targetIds.size(); ++i) {
+            q.bindValue(QStringLiteral(":lid_%1").arg(i), targetIds.at(i));
+        }
     }
 
     if (!q.exec()) {

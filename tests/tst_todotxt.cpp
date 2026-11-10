@@ -5372,6 +5372,93 @@ private slots:
                  && todoProps.contains(QStringLiteral("DESCRIPTION:new KB64 description")), qPrintable(put));
         server.close();
     }
+
+    // KB-65: the KB-64 fix (393a146) finds the end of the VTODO property block with
+    // ics.indexOf("BEGIN:", vtodoStart + 11), which is not anchored to the start of a line.
+    // If any property value before DESCRIPTION contains the text "BEGIN:" (a SUMMARY such as
+    // "Fix BEGIN: handling in parser"), propBlockEnd lands in the middle of that SUMMARY line:
+    // the existing DESCRIPTION is considered outside the block, and the new DESCRIPTION line is
+    // inserted inside the SUMMARY value. The PUT then corrupts the title and leaves two
+    // descriptions. postIssueComment uses the same unanchored search for COMMENT.
+    void testNextcloudDescriptionUpdateWithBeginTextInSummary() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        const QByteArray ics =
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//KB65//EN\r\nBEGIN:VTODO\r\nUID:kb65uid\r\n"
+            "SUMMARY:KB65 fix BEGIN: handling\r\nDESCRIPTION:old KB65 description\r\nSTATUS:NEEDS-ACTION\r\n"
+            "END:VTODO\r\nEND:VCALENDAR\r\n";
+        QByteArray putBody;
+        bool putSeen = false;
+        serveHttpFull(server, [&](const QByteArray& method, const QByteArray&, const QByteArray&, const QByteArray& body) {
+            if (method == "PUT") {
+                putBody = body;
+                putSeen = true;
+                return httpResponse("204 No Content", "text/plain", "");
+            }
+            return httpResponse("200 OK", "text/calendar", ics);
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb65_nc");
+        entry.provider = QStringLiteral("Nextcloud");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1/remote.php/dav/calendars/user/tasks/").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user");
+        entry.apiToken = QStringLiteral("app-password");
+
+        IssueTrackerService svc;
+        QStandardPaths::setTestModeEnabled(false); // updateIssueDescription is a no-op in test mode
+        svc.updateIssueDescription(entry, QStringLiteral("NC#kb65uid"), QStringLiteral("new KB65 description"));
+        QTRY_VERIFY_WITH_TIMEOUT(putSeen, 5000);
+        QStandardPaths::setTestModeEnabled(true);
+
+        const QString put = QString::fromUtf8(putBody);
+        QVERIFY2(put.contains(QStringLiteral("\r\nSUMMARY:KB65 fix BEGIN: handling\r\n"))
+                 && put.count(QStringLiteral("DESCRIPTION:")) == 1
+                 && put.contains(QStringLiteral("DESCRIPTION:new KB65 description")), qPrintable(put));
+        server.close();
+    }
+
+    // KB-66: in a multi-list view ("All Lists", a provider group, a custom multi-list filter)
+    // AppController keeps m_currentListId of the last single list. DashboardView passes
+    // app.currentListId to getProductivityStats / getActivityHeatmap / exportBilling*, so the
+    // dashboard header says "in All Lists" (app.currentFilterTitle) while totals, breakdowns,
+    // heatmap and the exported CSV/PDF cover only the previously selected list.
+    // (loadActivityLogs already treats "__ALL__" as "no list filter".)
+    void testDashboardInAllListsViewCoversAllLists() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb66.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listA = controller.listManager()->addList(QStringLiteral("KB66 List A"));
+        const QString listB = controller.listManager()->addList(QStringLiteral("KB66 List B"));
+        QVERIFY(!listA.isEmpty() && !listB.isEmpty());
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        QVERIFY(DatabaseManager::instance().insertActivityLog(listA, QStringLiteral("KB66 List A"), -1, QString(),
+                QStringLiteral("KB66 a"), now.addSecs(-700), 600, now.addSecs(-100), false, false) > 0);
+        QVERIFY(DatabaseManager::instance().insertActivityLog(listB, QStringLiteral("KB66 List B"), -1, QString(),
+                QStringLiteral("KB66 b"), now.addSecs(-3700), 3000, now.addSecs(-700), false, false) > 0);
+        controller.selectListById(listA);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        const QString qmlFile = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml/components/DashboardView.qml");
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlFile));
+        std::unique_ptr<QObject> view(comp.create());
+        QVERIFY2(view, qPrintable(comp.errorString()));
+        QCOMPARE(view->property("stats").toMap().value(QStringLiteral("totalSeconds")).toDouble(), 600.0);
+
+        controller.showAllLists();
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.currentFilterTitle(), tr("All Lists"));
+        const double total = view->property("stats").toMap().value(QStringLiteral("totalSeconds")).toDouble();
+        QCOMPARE(total, 3600.0);
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.issueTracker()->isSyncing(), 5000);
+        view.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
 };
 
 QTEST_MAIN(TestTodoTxt)

@@ -3866,15 +3866,22 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             getReply->deleteLater();
             if (getReply->error() != QNetworkReply::NoError) return;
             QString ics = QString::fromUtf8(getReply->readAll());
-            const int vtodoStart = ics.indexOf(QStringLiteral("BEGIN:VTODO"));
-            if (vtodoStart < 0) return;
-            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"), vtodoStart);
-            if (vtodoEnd < 0) return;
+            static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
+            const auto vtodoStartMatch = vtodoStartRe.match(ics);
+            if (!vtodoStartMatch.hasMatch()) return;
+            const int vtodoStart = vtodoStartMatch.capturedStart(1);
+            const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
+
+            static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
+            const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
+            if (!vtodoEndMatch.hasMatch()) return;
+            const int vtodoEnd = vtodoEndMatch.capturedStart(1);
 
             int propBlockEnd = vtodoEnd;
-            const int subBegin = ics.indexOf(QStringLiteral("BEGIN:"), vtodoStart + 11);
-            if (subBegin > vtodoStart && subBegin < propBlockEnd) {
-                propBlockEnd = subBegin;
+            static const QRegularExpression subBeginRe(QStringLiteral("\r?\n(BEGIN:[^\r\n]*)"));
+            const auto subBeginMatch = subBeginRe.match(ics, vtodoPropsStart);
+            if (subBeginMatch.hasMatch() && subBeginMatch.capturedStart(1) < propBlockEnd) {
+                propBlockEnd = subBeginMatch.capturedStart(1);
             }
 
             static const QRegularExpression descRe(QStringLiteral("(^|\r?\n)DESCRIPTION(?:;[^:]*)?:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*"));
@@ -4283,29 +4290,34 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             if (getReply->error() != QNetworkReply::NoError) return;
             QString ics = QString::fromUtf8(getReply->readAll());
             const QString escapedComment = escapeIcsText(markdownComment);
-            const int vtodoStart = ics.indexOf(QStringLiteral("BEGIN:VTODO"));
-            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"), vtodoStart >= 0 ? vtodoStart : 0);
-            if (vtodoEnd > 0) {
-                int insertPos = vtodoEnd;
-                if (vtodoStart >= 0) {
-                    const int subBegin = ics.indexOf(QStringLiteral("BEGIN:"), vtodoStart + 11);
-                    if (subBegin > vtodoStart && subBegin < insertPos) {
-                        insertPos = subBegin;
-                    }
-                }
-                const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
-                const QString commentLine = QStringLiteral("COMMENT:%1%2").arg(escapedComment, nl);
-                ics.insert(insertPos, commentLine);
-                QNetworkRequest putReq = req;
-                putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
-                QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
-                connect(putReply, &QNetworkReply::finished, this, [this, putReply, issueKey]() {
-                    putReply->deleteLater();
-                    if (putReply->error() == QNetworkReply::NoError) {
-                        setStatusMessage(tr("Posted comment to Nextcloud task %1.").arg(issueKey));
-                    }
-                });
+            static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
+            const auto vtodoStartMatch = vtodoStartRe.match(ics);
+            if (!vtodoStartMatch.hasMatch()) return;
+            const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
+
+            static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
+            const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
+            if (!vtodoEndMatch.hasMatch()) return;
+            const int vtodoEnd = vtodoEndMatch.capturedStart(1);
+
+            int insertPos = vtodoEnd;
+            static const QRegularExpression subBeginRe(QStringLiteral("\r?\n(BEGIN:[^\r\n]*)"));
+            const auto subBeginMatch = subBeginRe.match(ics, vtodoPropsStart);
+            if (subBeginMatch.hasMatch() && subBeginMatch.capturedStart(1) < insertPos) {
+                insertPos = subBeginMatch.capturedStart(1);
             }
+            const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
+            const QString commentLine = QStringLiteral("COMMENT:%1%2").arg(escapedComment, nl);
+            ics.insert(insertPos, commentLine);
+            QNetworkRequest putReq = req;
+            putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
+            QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
+            connect(putReply, &QNetworkReply::finished, this, [this, putReply, issueKey]() {
+                putReply->deleteLater();
+                if (putReply->error() == QNetworkReply::NoError) {
+                    setStatusMessage(tr("Posted comment to Nextcloud task %1.").arg(issueKey));
+                }
+            });
         });
     }
 }

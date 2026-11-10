@@ -9,13 +9,13 @@ ScrollView {
     clip: true
 
     property string selectedPeriod: "day" // "day", "week", "month", "all"
-    property var stats: app.analytics ? app.analytics.getProductivityStats(selectedPeriod, app.currentListId) : ({})
-    property var heatmap: app.analytics ? app.analytics.getActivityHeatmap(91, app.currentListId) : []
+    property var stats: app.analytics ? app.analytics.getProductivityStats(selectedPeriod, app.activeListFilter) : ({})
+    property var heatmap: app.analytics ? app.analytics.getActivityHeatmap(91, app.activeListFilter) : []
 
     function reloadData() {
         if (!app.analytics) return
-        stats = app.analytics.getProductivityStats(selectedPeriod, app.currentListId)
-        heatmap = app.analytics.getActivityHeatmap(91, app.currentListId)
+        stats = app.analytics.getProductivityStats(selectedPeriod, app.activeListFilter)
+        heatmap = app.analytics.getActivityHeatmap(91, app.activeListFilter)
     }
 
     Component.onCompleted: reloadData()
@@ -44,7 +44,7 @@ ScrollView {
             let path = selectedFile.toString()
             if (path.startsWith("file://")) path = path.substring(7)
             path = decodeURIComponent(path)
-            if (app.analytics.exportBillingCsv(path, dashboardRoot.selectedPeriod, app.currentListId)) {
+            if (app.analytics.exportBillingCsv(path, dashboardRoot.selectedPeriod, app.activeListFilter)) {
                 app.notifications.notifyTaskEvent(qsTr("Report Exported"), qsTr("CSV report saved successfully."))
             }
         }
@@ -60,7 +60,7 @@ ScrollView {
             let path = selectedFile.toString()
             if (path.startsWith("file://")) path = path.substring(7)
             path = decodeURIComponent(path)
-            if (app.analytics.exportBillingPdf(path, dashboardRoot.selectedPeriod, app.currentListId)) {
+            if (app.analytics.exportBillingPdf(path, dashboardRoot.selectedPeriod, app.activeListFilter)) {
                 app.notifications.notifyTaskEvent(qsTr("Report Exported"), qsTr("PDF report saved successfully."))
             }
         }

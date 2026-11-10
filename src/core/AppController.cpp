@@ -211,6 +211,16 @@ QString AppController::currentFilterTitle() const {
     return m_currentListName;
 }
 
+QString AppController::activeListFilter() const {
+    if (m_isMultiListView) {
+        if (m_activeFilterListIds.isEmpty()) {
+            return QStringLiteral("__ALL__");
+        }
+        return m_activeFilterListIds.join(QLatin1Char(','));
+    }
+    return m_currentListId;
+}
+
 void AppController::selectListById(const QString& listId) {
     const int row = m_listManager.indexOfId(listId);
     if (row < 0) return;

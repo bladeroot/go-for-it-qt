@@ -40,6 +40,8 @@ class AppController : public QObject {
     Q_PROPERTY(bool isCurrentListRemote READ isCurrentListRemote NOTIFY currentListChanged)
     Q_PROPERTY(QString currentFilterTitle READ currentFilterTitle NOTIFY currentListChanged)
     Q_PROPERTY(QStringList activeListIds READ activeListIds NOTIFY currentListChanged)
+    Q_PROPERTY(QString activeListFilter READ activeListFilter NOTIFY currentListChanged)
+    Q_PROPERTY(QString currentListFilter READ activeListFilter NOTIFY currentListChanged)
     Q_PROPERTY(QString databasePath READ databasePath NOTIFY storagePathChanged)
     Q_PROPERTY(QString configFilePath READ configFilePath CONSTANT)
     Q_PROPERTY(int activeTodoRow READ activeTodoRow WRITE setActiveTodoRow NOTIFY activeTodoRowChanged)
@@ -77,6 +79,7 @@ public:
     [[nodiscard]] bool isCurrentListRemote() const;
     [[nodiscard]] QString currentFilterTitle() const;
     [[nodiscard]] QStringList activeListIds() const { return m_activeFilterListIds; }
+    [[nodiscard]] QString activeListFilter() const;
     [[nodiscard]] QString databasePath() const;
     [[nodiscard]] QString configFilePath() const;
 
