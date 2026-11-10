@@ -2457,12 +2457,18 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
         }
         queryStr = QStringLiteral("is:open involves:@me");
     } else {
-        if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:")) && !queryStr.contains(QStringLiteral("user:"))) {
-            if (queryStr.contains(QLatin1Char('/'))) {
-                queryStr = QStringLiteral("repo:") + queryStr;
+        if (!queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:")) && !queryStr.contains(QStringLiteral("user:"))) {
+            QStringList tokens = queryStr.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+            for (QString& token : tokens) {
+                if (token.contains(QLatin1Char('/')) && !token.contains(QLatin1Char(':'))) {
+                    token = QStringLiteral("repo:") + token;
+                    break;
+                }
             }
+            queryStr = tokens.join(QLatin1Char(' '));
         }
-        if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("state:"))) {
+        static const QRegularExpression stateRe(QStringLiteral(R"(\b(is|state):(open|closed|merged|unmerged)\b)"), QRegularExpression::CaseInsensitiveOption);
+        if (!stateRe.match(queryStr).hasMatch()) {
             queryStr += QStringLiteral(" is:open");
         }
         if (entry.apiToken.trimmed().isEmpty() && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:")) && !queryStr.contains(QStringLiteral("user:"))) {

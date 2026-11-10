@@ -6125,6 +6125,42 @@ private slots:
         server.close();
     }
 
+    // KB-84: an unrelated GitHub qualifier such as is:issue must not be mistaken
+    // for an open/closed-state constraint. Otherwise the KB-77 default is omitted
+    // and closed issues are imported again.
+    void testGitHubQueryWithTypeQualifierStillRequestsOpenItemsOnly() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QString sentQuery;
+        serveHttpFull(server, [&sentQuery](const QByteArray&, const QByteArray& target,
+                                           const QByteArray&, const QByteArray&) {
+            const QUrlQuery query(QUrl(QString::fromUtf8(target)).query());
+            sentQuery = query.queryItemValue(QStringLiteral("q"), QUrl::FullyDecoded);
+            return httpResponse("200 OK", "application/json",
+                                "{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}");
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb84_gh");
+        entry.provider = QStringLiteral("GitHub");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        entry.jiraJql = QStringLiteral("owner/repo is:issue");
+
+        IssueTrackerService service;
+        service.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!sentQuery.isEmpty(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!service.isSyncing(), 5000);
+
+        const bool hasOpenState = sentQuery.contains(QStringLiteral("is:open"))
+            || sentQuery.contains(QStringLiteral("state:open"));
+        const bool hasRepository = sentQuery.contains(QStringLiteral("repo:owner/repo"));
+        QVERIFY2(hasRepository && hasOpenState, qPrintable(sentQuery));
+        server.close();
+    }
+
     // KB-78: the TUI quit commands ("q", ":q", ":wq", ":x") call QCoreApplication::quit()
     // without stopping a running work session. The GUI stops the timer before quitting (Ctrl+Q,
     // tray "Close"), but AppController has no destructor/aboutToQuit handler that does it, so in

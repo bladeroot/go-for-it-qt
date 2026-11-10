@@ -15,14 +15,14 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
    - [1.4. Test Environment Isolation & System Safety](#14-test-environment-isolation--system-safety)
    - [1.5. User Interface (GUI / QML / TUI)](#15-user-interface-gui--qml--tui)
    - [1.6. Packaging & Linux Distribution Compatibility](#16-packaging--linux-distribution-compatibility)
-2. [Part 2: Systematic Review Defects (KB-1 through KB-83)](#part-2-systematic-review-defects-kb-1-through-kb-83)
+2. [Part 2: Systematic Review Defects (KB-1 through KB-84)](#part-2-systematic-review-defects-kb-1-through-kb-84)
    - [KB-1 – KB-14: Tracker Pagination & Reconciliation](#kb-1--kb-14-tracker-pagination--reconciliation)
    - [KB-15 – KB-29: Scheme Validation, Arithmetic Bounds & List Mutation Safety](#kb-15--kb-29-scheme-validation-arithmetic-bounds--list-mutation-safety)
    - [KB-30 – KB-43: Permissions, Export Failure Handling & TUI Multibyte Input](#kb-30--kb-43-permissions-export-failure-handling--tui-multibyte-input)
    - [KB-44 – KB-56: Bearer Auth, Priority Mappings & Timer Reliability](#kb-44--kb-56-bearer-auth-priority-mappings--timer-reliability)
    - [KB-57 – KB-69: Nextcloud CalDAV, Pomodoro Continuity & Token Masking](#kb-57--kb-69-nextcloud-caldav-pomodoro-continuity--token-masking)
    - [KB-70 – KB-76: TUI Formatting, ANSI Sequences & Dialog Binding](#kb-70--kb-76-tui-formatting-ansi-sequences--dialog-binding)
-   - [KB-77 – KB-83: GitHub Queries, TUI Teardown, Heatmap, Redmine & Schedule Normalization](#kb-77--kb-83-github-queries-tui-teardown-heatmap-redmine--schedule-normalization)
+   - [KB-77 – KB-84: GitHub Queries, TUI Teardown, Heatmap, Redmine & Schedule Normalization](#kb-77--kb-84-github-queries-tui-teardown-heatmap-redmine--schedule-normalization)
 
 ---
 
@@ -157,7 +157,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 
 ---
 
-## Part 2: Systematic Review Defects (KB-1 through KB-83)
+## Part 2: Systematic Review Defects (KB-1 through KB-84)
 
 ### KB-1 – KB-14: Tracker Pagination & Reconciliation
 
@@ -255,7 +255,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 
 ---
 
-### KB-77 – KB-83: GitHub Queries, TUI Teardown, Heatmap, Redmine & Schedule Normalization
+### KB-77 – KB-84: GitHub Queries, TUI Teardown, Heatmap, Redmine & Schedule Normalization
 
 * **KB-77**: Appended `is:open` and `sort:updated-desc` to GitHub repository queries lacking explicit state filters. (*Test*: `testGitHubRepoQueryRequestsOpenItemsOnly`, commit `4691d59`).
 * **KB-78**: Recorded and flushed active timer session upon TUI exit (`q`) and application shutdown. (*Test*: `testTuiQuitLogsRunningSession`, commit `4691d59`).
@@ -263,7 +263,8 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 * **KB-80**: Truncated preview pane rows in TUI to terminal width to prevent layout overflow. (*Test*: `testTuiPreviewPaneKeepsLongTitleInsideTerminalWidth`, commit `4691d59`).
 * **KB-81**: Aligned heatmap start dates strictly to Monday, preserved exact counts (14, 28, 91), and localized weekday labels. (*Test*: `testHeatmapColumnsStartOnMonday`, commit `4691d59`).
 * **KB-82**: Retained original Redmine closed status names (e.g., `Rejected`) when mapped to category `done`. (*Test*: `testRedmineClosedStatusKeepsNameForMapping`, commit `4691d59`).
-* **KB-83**: Handled `INT_MIN` in [Schedule.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/Schedule.cpp) to prevent two's-complement overflow and negative durations. (*Test*: `testScheduleNormalizesMinimumIntegerDurations`).
+* **KB-83**: Handled `INT_MIN` in [Schedule.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/Schedule.cpp) to prevent two's-complement overflow and negative durations. (*Test*: `testScheduleNormalizesMinimumIntegerDurations`, commit `dcde392`).
+* **KB-84**: Handled GitHub queries containing non-state qualifiers (e.g. `is:issue`) so repository prefixing and default `is:open` filter are not suppressed. (*Test*: `testGitHubQueryWithTypeQualifierStillRequestsOpenItemsOnly`).
 
 ---
 
