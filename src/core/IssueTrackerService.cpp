@@ -2928,6 +2928,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                     setStatusMessage(tr("Logged %1m to Jira issue %2").arg(loggedSeconds / 60U).arg(issueKey));
                     emit worklogPosted(issueKey, loggedSeconds);
                 }
+            } else {
+                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to Jira (%1): %2")
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
             }
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
@@ -2958,6 +2965,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                     setStatusMessage(tr("Logged %1m to YouTrack issue %2").arg(minutes).arg(issueKey));
                     emit worklogPosted(issueKey, minutes * 60U);
                 }
+            } else {
+                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to YouTrack (%1): %2")
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
             }
         });
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
@@ -3015,6 +3029,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                     setStatusMessage(tr("Logged %1m to GitHub issue %2").arg(minutes).arg(issueKey));
                     emit worklogPosted(issueKey, minutes * 60U);
                 }
+            } else {
+                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to GitHub (%1): %2")
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
             }
         });
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
@@ -3075,6 +3096,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                     setStatusMessage(tr("Logged %1m to GitLab %2").arg(minutes).arg(issueKey));
                     emit worklogPosted(issueKey, minutes * 60U);
                 }
+            } else {
+                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to GitLab (%1): %2")
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
             }
         });
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
@@ -3112,6 +3140,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                     setStatusMessage(tr("Logged %1m to Redmine %2").arg(runtimeSeconds / 60U).arg(issueKey));
                     emit worklogPosted(issueKey, runtimeSeconds);
                 }
+            } else {
+                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to Redmine (%1): %2")
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
             }
         });
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
@@ -3141,6 +3176,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                     setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
                     emit worklogPosted(issueKey, minutes * 60U);
                 }
+            } else {
+                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to Todoist (%1): %2")
+                    .arg(statusCode)
+                    .arg(reply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
             }
         });
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
@@ -3161,7 +3203,15 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         QNetworkReply* getReply = m_nam.get(req);
         connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, listEntry, activityLogId, issueKey, minutes]() {
             getReply->deleteLater();
-            if (getReply->error() != QNetworkReply::NoError) return;
+            if (getReply->error() != QNetworkReply::NoError) {
+                const int statusCode = getReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const QString errMsg = tr("Failed to post worklog to Nextcloud (%1): %2")
+                    .arg(statusCode)
+                    .arg(getReply->errorString());
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
+                return;
+            }
             QString ics = QString::fromUtf8(getReply->readAll());
             const QString commentLine = QStringLiteral("COMMENT:⏱️ Logged %1m via Go for It Qt Pomodoro timer\r\n").arg(minutes);
             const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
@@ -3181,6 +3231,13 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                             setStatusMessage(tr("Logged %1m to Nextcloud task %2").arg(minutes).arg(issueKey));
                             emit worklogPosted(issueKey, minutes * 60U);
                         }
+                    } else {
+                        const int statusCode = putReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                        const QString errMsg = tr("Failed to post worklog to Nextcloud (%1): %2")
+                            .arg(statusCode)
+                            .arg(putReply->errorString());
+                        setStatusMessage(errMsg);
+                        emit syncFailed(listEntry.id, errMsg);
                     }
                 });
             }

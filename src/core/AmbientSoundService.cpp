@@ -1,10 +1,13 @@
 #include "AmbientSoundService.h"
 #include "NotificationService.h"
+#include <QAudioOutput>
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMediaPlayer>
 #include <QRandomGenerator>
+#include <QStandardPaths>
 #include <QUrl>
 #include <cmath>
 
@@ -60,7 +63,7 @@ void AmbientSoundService::setAmbientMode(const QString& mode) {
     m_mode = norm;
     emit ambientModeChanged();
 
-    if (m_mode == QStringLiteral("none")) {
+    if (m_mode == QStringLiteral("none") || QStandardPaths::isTestModeEnabled()) {
         if (m_player) m_player->stop();
         if (m_isPlaying) {
             m_isPlaying = false;
@@ -69,8 +72,28 @@ void AmbientSoundService::setAmbientMode(const QString& mode) {
         return;
     }
 
-    const QString wavPath = QStringLiteral("/tmp/gofi_ambient_%1.wav").arg(m_mode);
-    if (!QFile::exists(wavPath)) {
+    const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    QDir().mkpath(cacheDir);
+    QFile::setPermissions(cacheDir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    const QString wavPath = QDir(cacheDir).filePath(QStringLiteral("gofi_ambient_%1.wav").arg(m_mode));
+
+    bool validFile = false;
+    QFile checkFile(wavPath);
+    if (checkFile.exists()) {
+        const QFileDevice::Permissions others = QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ReadOther | QFileDevice::WriteOther;
+        if ((checkFile.permissions() & others) == 0 && checkFile.size() == (44 + 44100 * 4 * 2)) {
+            if (checkFile.open(QIODevice::ReadOnly)) {
+                const QByteArray hdr = checkFile.read(12);
+                if (hdr.size() == 12 && hdr.startsWith("RIFF") && hdr.mid(8, 4) == "WAVE") {
+                    validFile = true;
+                }
+                checkFile.close();
+            }
+        }
+    }
+
+    if (!validFile) {
+        QFile::remove(wavPath);
         generateAmbientWav(m_mode, wavPath);
     }
 
@@ -186,6 +209,7 @@ bool AmbientSoundService::generateAmbientWav(const QString& type, const QString&
     }
 
     file.close();
+    QFile::setPermissions(destinationPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
 }
 

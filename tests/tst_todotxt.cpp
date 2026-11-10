@@ -4553,6 +4553,63 @@ private slots:
         QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Trivial")), quint8(4));
         QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Lowest")), quint8(4));
     }
+
+    // KB-42: IssueTrackerService::postWorklog only handles QNetworkReply::NoError. When the
+    // tracker rejects or cannot be reached (expired token -> 401, server error -> 5xx,
+    // offline), nothing is reported (no syncFailed, no status message) and nothing retries
+    // later: activity_log.worklog_synced stays 0 and is never read again. Tracked time is
+    // silently missing from Jira/YouTrack/GitHub/GitLab.
+    void testFailedWorklogIsReported() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        int requests = 0;
+        serveHttpFull(server, [&requests](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            ++requests;
+            return httpResponse("500 Internal Server Error", "application/json", "{\"errorMessages\":[\"boom\"]}");
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb42_jira");
+        entry.name = QStringLiteral("KB42 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("token");
+        entry.autoWorklog = true;
+
+        IssueTrackerService svc;
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        // postWorklog is a no-op in test mode (KB-37); lift it only for this local request.
+        QStandardPaths::setTestModeEnabled(false);
+        svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), QDateTime::currentDateTimeUtc().addSecs(-1500), 1500);
+        QStandardPaths::setTestModeEnabled(true);
+
+        QTRY_VERIFY_WITH_TIMEOUT(requests >= 1, 5000);
+        QTest::qWait(300);
+        QCOMPARE(failSpy.count(), 1);
+        server.close();
+    }
+
+    // KB-43: AmbientSoundService::setAmbientMode generates and plays
+    // "/tmp/gofi_ambient_<mode>.wav", a predictable name in the shared world-writable /tmp,
+    // and reuses an existing file at that path without checking its owner or content.
+    // Another local user can pre-create /tmp/gofi_ambient_rain.wav (any audio, or a
+    // malformed file fed to the media decoder) and the victim's app plays it; the generated
+    // files are also shared between all users. The file is created even in test mode.
+    // Expected: generate into a per-user location (CacheLocation/AppDataLocation).
+    void testAmbientSoundIsNotGeneratedInSharedTmp() {
+        const QString sharedPath = QStringLiteral("/tmp/gofi_ambient_kb43probe.wav");
+        QFile::remove(sharedPath);
+        {
+            AmbientSoundService ambient(nullptr);
+            ambient.setAmbientMode(QStringLiteral("kb43probe"));
+        }
+        const bool createdInSharedTmp = QFile::exists(sharedPath);
+        QFile::remove(sharedPath);
+        QVERIFY(!createdInSharedTmp);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
