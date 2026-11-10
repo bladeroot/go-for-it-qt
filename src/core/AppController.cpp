@@ -216,6 +216,8 @@ void AppController::selectListById(const QString& listId) {
     if (row < 0) return;
 
     const TodoListEntry entry = m_listManager.entry(row);
+    const bool sameList = (!m_isMultiListView && m_currentListId == entry.id);
+
     m_currentListId = entry.id;
     m_currentListName = entry.name;
     m_currentListProvider = entry.provider;
@@ -232,6 +234,27 @@ void AppController::selectListById(const QString& listId) {
         isLocalList,
         entry.addCreationDates
     );
+
+    if (sameList) {
+        if (m_activeTaskId >= 0) {
+            const int found = findActiveTodoRowById(m_activeTaskId);
+            if (found >= 0) {
+                if (found != m_activeTodoRow) {
+                    m_activeTodoRow = found;
+                    emit activeTodoRowChanged();
+                }
+                syncActiveTaskToTimer();
+            } else {
+                setActiveTodoRow(m_taskManager.todoModel()->rowCount() > 0 ? 0 : -1);
+            }
+        } else if (m_activeTodoRow < 0 && m_taskManager.todoModel()->rowCount() > 0) {
+            setActiveTodoRow(0);
+        }
+        setShowingOverview(false);
+        emit currentListChanged();
+        return;
+    }
+
     setActiveTodoRow(m_taskManager.todoModel()->rowCount() > 0 ? 0 : -1);
     setShowingOverview(false);
     emit currentListChanged();

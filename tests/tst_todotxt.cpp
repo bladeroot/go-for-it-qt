@@ -5140,6 +5140,49 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }
+
+    // KB-59: saving the properties of the current list (TxtListEditDialog::onAccepted ->
+    // ListManagerModel::saveListConfig + AppController::selectListById) runs the full list
+    // selection again: ListManagerModel emits listUpdated, AppController's handler calls
+    // selectListById(id), and the dialog calls it a second time. selectListById ends with
+    // setActiveTodoRow(0), which stops a running work session and makes the first task active.
+    // So editing anything (name, CSV log path, "Record creation date", a mapping) while the
+    // timer runs on another task silently ends the session and switches the timed task.
+    // KB-1 avoided exactly this side effect for updateListStatusMapping only.
+    void testEditingCurrentListKeepsRunningTimerTask() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb59.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listId = controller.listManager()->addList(QStringLiteral("KB59 list"));
+        QVERIFY(!listId.isEmpty());
+        controller.selectListById(listId);
+        controller.addNewTask(QStringLiteral("KB59 first"));
+        controller.addNewTask(QStringLiteral("KB59 second"));
+        bool selected = false;
+        for (int r = 0; r < 10 && !selected; ++r) {
+            controller.setActiveTodoRow(r);
+            selected = controller.timer()->activeTaskDescription().contains(QStringLiteral("KB59 second"));
+        }
+        QVERIFY(selected);
+        controller.timer()->start();
+        QVERIFY(controller.timer()->isRunning());
+
+        // Exactly what TxtListEditDialog::onAccepted does after the user edits one field.
+        QVariantMap cfg = controller.listManager()->getListConfig(listId);
+        cfg.insert(QStringLiteral("addCreationDates"), !cfg.value(QStringLiteral("addCreationDates")).toBool());
+        QVERIFY(controller.listManager()->validateAndCheckConflicts(cfg).value(QStringLiteral("valid")).toBool());
+        const QString savedId = controller.listManager()->saveListConfig(cfg, QStringLiteral("keep"));
+        QCOMPARE(savedId, listId);
+        controller.selectListById(savedId);
+
+        const bool running = controller.timer()->isRunning();
+        const QString activeTask = controller.timer()->activeTaskDescription();
+        controller.timer()->stop();
+        QVERIFY(running);
+        QVERIFY2(activeTask.contains(QStringLiteral("KB59 second")), qPrintable(activeTask));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

@@ -687,6 +687,8 @@ Dialog {
             return
         }
         const savedId = app.listManager.saveListConfig(cfg, "keep")
-        app.selectListById(savedId)
+        if (savedId !== app.currentListId) {
+            app.selectListById(savedId)
+        }
     }
 }
