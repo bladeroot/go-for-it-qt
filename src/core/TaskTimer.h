@@ -37,6 +37,9 @@ public:
     [[nodiscard]] QString activeTaskDescription() const { return m_activeTaskDescription; }
     [[nodiscard]] uint activeTaskTimerValue() const noexcept { return m_activeTaskTimerSec; }
     [[nodiscard]] uint activeTaskDuration() const noexcept { return m_activeTaskDurationSec; }
+    [[nodiscard]] uint iterationDurationSeconds() const noexcept {
+        return static_cast<uint>(qMax<qint64>(0, m_iterationDurationMs / 1000LL));
+    }
 
     [[nodiscard]] const Schedule& overrideSchedule() const noexcept { return m_overrideSchedule; }
     [[nodiscard]] int overrideReminderTime() const noexcept { return m_overrideReminderTime; }

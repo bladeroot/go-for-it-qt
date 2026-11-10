@@ -408,7 +408,8 @@ void SystemHookService::triggerHook(const QString& eventName,
     env.insert(QStringLiteral("GOFI_TASK_KEY"), taskKey);
     env.insert(QStringLiteral("GOFI_TASK_ID"), taskId);
     env.insert(QStringLiteral("GOFI_PHASE"), (m_timer && m_timer->isBreakActive()) ? QStringLiteral("break") : QStringLiteral("work"));
-    env.insert(QStringLiteral("GOFI_DURATION_SEC"), QString::number(m_timer ? m_timer->remainingSeconds() : 0));
+    env.insert(QStringLiteral("GOFI_DURATION_SEC"), QString::number(m_timer ? m_timer->iterationDurationSeconds() : 0));
+    env.insert(QStringLiteral("GOFI_REMAINING_SEC"), QString::number(m_timer ? m_timer->remainingSeconds() : 0));
 
     QString customCmd;
     QString scriptName;
@@ -471,6 +472,7 @@ bool SystemHookService::testHook(const QString& eventName) {
     env.insert(QStringLiteral("GOFI_TASK_ID"), QStringLiteral("999"));
     env.insert(QStringLiteral("GOFI_PHASE"), eventName.contains(QStringLiteral("break")) ? QStringLiteral("break") : QStringLiteral("work"));
     env.insert(QStringLiteral("GOFI_DURATION_SEC"), QStringLiteral("1500"));
+    env.insert(QStringLiteral("GOFI_REMAINING_SEC"), QStringLiteral("1500"));
 
     QString customCmd;
     QString scriptName;

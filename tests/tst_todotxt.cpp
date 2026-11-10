@@ -5605,6 +5605,56 @@ private slots:
         QVERIFY(!screen.contains(secret));
         QTRY_VERIFY_WITH_TIMEOUT(!ctrl.issueTracker()->isSyncing(), 5000);
     }
+
+    // KB-69: the hook template written by ensureHooksDirectory (sample_hook.sh) documents
+    //   GOFI_DURATION_SEC  "Configured duration in seconds"
+    //   GOFI_REMAINING_SEC "Remaining time in seconds"
+    // but SystemHookService::triggerHook never sets GOFI_REMAINING_SEC and fills
+    // GOFI_DURATION_SEC with TaskTimer::remainingSeconds(). User hooks that follow the template
+    // get an empty GOFI_REMAINING_SEC, and pomodoro_completed (fired when the time is up)
+    // reports a "configured duration" of 0. The test runs a real hook process on work_start.
+    void testHookEnvironmentMatchesDocumentedVariables() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("kb69_hook.db"));
+        QFile::remove(testDb);
+        AppController controller(QString(), testDb);
+        SettingsManager* settings = controller.settings();
+        SystemHookService* hooks = controller.systemHooks();
+
+        // The documented contract comes from the template the app installs.
+        const QString hooksDir = m_testSandbox.filePath(QStringLiteral("kb69_hooks"));
+        QDir(hooksDir).removeRecursively();
+        hooks->setCustomHooksDirectory(hooksDir);
+        QFile tpl(QDir(hooksDir).filePath(QStringLiteral("sample_hook.sh")));
+        QVERIFY(tpl.open(QIODevice::ReadOnly));
+        const QString tplText = QString::fromUtf8(tpl.readAll());
+        QVERIFY(tplText.contains(QStringLiteral("GOFI_REMAINING_SEC")));
+
+        SystemHookService::setSystemIntegrationEnabled(true);
+        const auto resetIntegration = qScopeGuard([]() {
+            SystemHookService::setSystemIntegrationEnabled(false);
+        });
+        const bool oldHooks = settings->customHooksEnabled();
+        const QString oldCmd = settings->hookWorkStartCommand();
+        settings->setCustomHooksEnabled(true);
+        settings->setHookWorkStartCommand(QStringLiteral("printf 'R=[%s] D=[%s]' \"$GOFI_REMAINING_SEC\" \"$GOFI_DURATION_SEC\""));
+
+        controller.addNewTask(QStringLiteral("KB69 task"));
+        controller.setActiveTodoRow(0);
+        QSignalSpy spy(hooks, &SystemHookService::hookExecuted);
+        controller.timer()->start();                     // emits workStarted -> work_start hook
+        QVERIFY(spy.wait(3000));
+        controller.timer()->stop();
+        const QString out = spy.first().at(2).toString();
+
+        settings->setHookWorkStartCommand(oldCmd);
+        settings->setCustomHooksEnabled(oldHooks);
+        QDir(hooksDir).removeRecursively();
+
+        static const QRegularExpression remainingSet(QStringLiteral("R=\\[\\d+\\]"));
+        QVERIFY2(remainingSet.match(out).hasMatch(), qPrintable(out));
+        DatabaseManager::instance().close();
+        QFile::remove(testDb);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
