@@ -4060,6 +4060,147 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         };
         QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
         handleReply(reply);
+    } else if (listEntry.provider == QStringLiteral("Jira")) {
+        const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
+        const QString apiVer = isCloud ? QStringLiteral("3") : QStringLiteral("2");
+        const QUrl transUrl(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed() + QStringLiteral("/transitions"));
+        QNetworkRequest req(transUrl);
+        applyAuthHeader(req, listEntry);
+
+        QNetworkReply* reply = m_nam.get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done, transUrl, handleReply]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                handleReply(reply);
+                return;
+            }
+            const QJsonObject doc = QJsonDocument::fromJson(reply->readAll()).object();
+            const QJsonArray transitions = doc.value(QStringLiteral("transitions")).toArray();
+            QString selectedTransitionId;
+
+            for (const QJsonValue& val : transitions) {
+                const QJsonObject tObj = val.toObject();
+                const QString tId = tObj.value(QStringLiteral("id")).toString();
+                const QString tName = tObj.value(QStringLiteral("name")).toString();
+                const QJsonObject toObj = tObj.value(QStringLiteral("to")).toObject();
+                const QString toName = toObj.value(QStringLiteral("name")).toString();
+                const QString catKey = toObj.value(QStringLiteral("statusCategory")).toObject()
+                                           .value(QStringLiteral("key")).toString().toLower();
+
+                if (done) {
+                    if (catKey == QStringLiteral("done") ||
+                        toName.contains(QStringLiteral("Done"), Qt::CaseInsensitive) ||
+                        toName.contains(QStringLiteral("Closed"), Qt::CaseInsensitive) ||
+                        toName.contains(QStringLiteral("Resolved"), Qt::CaseInsensitive) ||
+                        tName.contains(QStringLiteral("Done"), Qt::CaseInsensitive) ||
+                        tName.contains(QStringLiteral("Close"), Qt::CaseInsensitive) ||
+                        tName.contains(QStringLiteral("Resolve"), Qt::CaseInsensitive)) {
+                        selectedTransitionId = tId;
+                        break;
+                    }
+                } else {
+                    if (catKey == QStringLiteral("new") || catKey == QStringLiteral("indeterminate") ||
+                        toName.contains(QStringLiteral("To Do"), Qt::CaseInsensitive) ||
+                        toName.contains(QStringLiteral("Open"), Qt::CaseInsensitive) ||
+                        toName.contains(QStringLiteral("Reopen"), Qt::CaseInsensitive) ||
+                        tName.contains(QStringLiteral("Reopen"), Qt::CaseInsensitive) ||
+                        tName.contains(QStringLiteral("Open"), Qt::CaseInsensitive)) {
+                        selectedTransitionId = tId;
+                        break;
+                    }
+                }
+            }
+
+            if (!selectedTransitionId.isEmpty()) {
+                QNetworkRequest postReq(transUrl);
+                applyAuthHeader(postReq, listEntry);
+                postReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+                QJsonObject payload{{QStringLiteral("transition"), QJsonObject{{QStringLiteral("id"), selectedTransitionId}}}};
+                QNetworkReply* postReply = m_nam.post(postReq, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+                handleReply(postReply);
+            }
+        });
+    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
+        QUrl url(baseUrl + QStringLiteral("/api/commands"));
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+
+        QString statusCmd = done ? QStringLiteral("State Fixed") : QStringLiteral("State Open");
+        if (!listEntry.statusMapping.isEmpty()) {
+            for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
+                const QString mapped = it.value().toString().toLower();
+                if (done && mapped == QStringLiteral("done")) {
+                    statusCmd = QStringLiteral("State %1").arg(it.key());
+                    break;
+                } else if (!done && mapped != QStringLiteral("done")) {
+                    statusCmd = QStringLiteral("State %1").arg(it.key());
+                    break;
+                }
+            }
+        }
+
+        QJsonObject payload{
+            {QStringLiteral("issues"), QJsonArray{QJsonObject{{QStringLiteral("idReadable"), issueKey.trimmed()}}}},
+            {QStringLiteral("query"), statusCmd}
+        };
+        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+        handleReply(reply);
+    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
+        QString uid = issueKey.trimmed();
+        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
+        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
+        if (uid.isEmpty()) return;
+
+        QString calUrl = listEntry.jiraUrl.trimmed();
+        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
+        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
+
+        QUrl url(itemUrl);
+        QNetworkRequest req(url);
+        applyAuthHeader(req, listEntry);
+
+        QNetworkReply* getReply = m_nam.get(req);
+        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, done, handleReply]() {
+            getReply->deleteLater();
+            if (getReply->error() != QNetworkReply::NoError) {
+                handleReply(getReply);
+                return;
+            }
+            QString ics = QString::fromUtf8(getReply->readAll());
+            static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
+            const auto vtodoStartMatch = vtodoStartRe.match(ics);
+            if (!vtodoStartMatch.hasMatch()) return;
+            const int vtodoStart = vtodoStartMatch.capturedStart(1);
+            const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
+
+            static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
+            const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
+            if (!vtodoEndMatch.hasMatch()) return;
+            const int vtodoEnd = vtodoEndMatch.capturedStart(1);
+
+            int propBlockEnd = vtodoEnd;
+            static const QRegularExpression subBeginRe(QStringLiteral("\r?\n(BEGIN:[^\r\n]*)"));
+            const auto subBeginMatch = subBeginRe.match(ics, vtodoPropsStart);
+            if (subBeginMatch.hasMatch() && subBeginMatch.capturedStart(1) < propBlockEnd) {
+                propBlockEnd = subBeginMatch.capturedStart(1);
+            }
+
+            static const QRegularExpression statusRe(QStringLiteral("(^|\r?\n)STATUS:[^\r\n]*"));
+            const QString newStatus = done ? QStringLiteral("STATUS:COMPLETED") : QStringLiteral("STATUS:NEEDS-ACTION");
+            const auto match = statusRe.match(ics, vtodoStart);
+            if (match.hasMatch() && match.capturedStart() < propBlockEnd) {
+                ics.replace(match.capturedStart(), match.capturedLength(), match.captured(1) + newStatus);
+            } else {
+                const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
+                ics.insert(propBlockEnd, newStatus + nl);
+            }
+
+            QNetworkRequest putReq = req;
+            putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
+            QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
+            handleReply(putReply);
+        });
     }
 }
 

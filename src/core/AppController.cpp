@@ -212,10 +212,9 @@ bool AppController::isCurrentListRemote() const {
         }
         return false;
     }
-    return m_currentListProvider == QStringLiteral("Jira")
-        || m_currentListProvider == QStringLiteral("YouTrack")
-        || m_currentListProvider == QStringLiteral("GitHub")
-        || m_currentListProvider == QStringLiteral("GitLab");
+    return m_currentListProvider != QStringLiteral("SQLite")
+        && m_currentListProvider != QStringLiteral("Todo.txt")
+        && !m_currentListProvider.isEmpty();
 }
 
 QString AppController::currentFilterTitle() const {

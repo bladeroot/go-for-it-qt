@@ -20,6 +20,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QDesktopServices>
+#include <QNetworkProxy>
 #include <QtTest>
 #include "ShortcutManager.h"
 #include <QQmlComponent>
@@ -93,6 +94,23 @@ public:
     QList<QUrl> opened;
 public slots:
     void handle(const QUrl& url) { opened.append(url); }
+};
+
+class ApplicationProxyGuard {
+public:
+    ApplicationProxyGuard()
+        : m_previousProxy(QNetworkProxy::applicationProxy())
+    {
+        QNetworkProxy::setApplicationProxy(
+            QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), 1));
+    }
+
+    ~ApplicationProxyGuard() {
+        QNetworkProxy::setApplicationProxy(m_previousProxy);
+    }
+
+private:
+    QNetworkProxy m_previousProxy;
 };
 
 class TestTodoTxt : public QObject {
@@ -3616,6 +3634,73 @@ private slots:
         server.close();
     }
 
+    void testRemoteStatusSyncDispatchesForJiraYouTrackAndNextcloud() {
+        QTcpServer jiraServer;
+        QTcpServer youTrackServer;
+        QTcpServer nextcloudServer;
+        if (!jiraServer.listen(QHostAddress::LocalHost, 0)
+            || !youTrackServer.listen(QHostAddress::LocalHost, 0)
+            || !nextcloudServer.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+
+        QVector<int> requestCounts(3, 0);
+        serveHttp(jiraServer, [&requestCounts](const QByteArray&, const QByteArray&, const QByteArray&) {
+            ++requestCounts[0];
+            return httpResponse("200 OK", "application/json", "{\"transitions\":[]}");
+        });
+        serveHttp(youTrackServer, [&requestCounts](const QByteArray&, const QByteArray&, const QByteArray&) {
+            ++requestCounts[1];
+            return httpResponse("200 OK", "application/json", "{}");
+        });
+        serveHttp(nextcloudServer, [&requestCounts](const QByteArray&, const QByteArray&, const QByteArray&) {
+            ++requestCounts[2];
+            return httpResponse("200 OK", "application/json", "{}");
+        });
+
+        const QStringList providers{
+            QStringLiteral("Jira"),
+            QStringLiteral("YouTrack"),
+            QStringLiteral("Nextcloud")
+        };
+        const QStringList issueKeys{
+            QStringLiteral("GOFI-123"),
+            QStringLiteral("YT-123"),
+            QStringLiteral("NC#task-123")
+        };
+        const QList<quint16> ports{
+            jiraServer.serverPort(),
+            youTrackServer.serverPort(),
+            nextcloudServer.serverPort()
+        };
+
+        const bool testModeEnabled = QStandardPaths::isTestModeEnabled();
+        QStandardPaths::setTestModeEnabled(false);
+        IssueTrackerService service;
+        QStringList providersWithoutRequests;
+        for (int i = 0; i < providers.size(); ++i) {
+            TodoListEntry entry;
+            entry.id = QStringLiteral("remote-status-%1").arg(i);
+            entry.provider = providers.at(i);
+            entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(ports.at(i));
+            entry.jiraUser = QStringLiteral("test-user");
+            entry.apiToken = QStringLiteral("test-token");
+            entry.syncStatusToRemote = true;
+
+            service.updateIssueStatusRemote(entry, issueKeys.at(i), true, QStringLiteral("done"));
+            const bool requestSent = QTest::qWaitFor(
+                [&requestCounts, i]() { return requestCounts.at(i) > 0; }, 1000);
+            if (!requestSent) {
+                providersWithoutRequests.append(providers.at(i));
+            }
+        }
+        QStandardPaths::setTestModeEnabled(testModeEnabled);
+
+        QVERIFY2(providersWithoutRequests.isEmpty(),
+                 qPrintable(QStringLiteral("No remote status request sent for: %1")
+                                .arg(providersWithoutRequests.join(QStringLiteral(", ")))));
+    }
+
     // KB-15: the KB-13 shift guard (first-page total vs. later totals) was added only for
     // Jira, GitHub and Redmine. GitLab (page + X-Next-Page) still closes a skipped issue.
     void testGitLabPaginationShiftDoesNotCloseSkippedIssue() {
@@ -5272,6 +5357,47 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
         server.close();
+    }
+
+    void testCurrentListRemoteFlagIncludesAllRemoteProviders() {
+        ApplicationProxyGuard proxyGuard;
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("remote-provider-flag.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        QVERIFY(controller.isDatabaseReady());
+
+        const QStringList providers{
+            QStringLiteral("Jira"),
+            QStringLiteral("YouTrack"),
+            QStringLiteral("GitHub"),
+            QStringLiteral("GitLab"),
+            QStringLiteral("Redmine"),
+            QStringLiteral("Todoist"),
+            QStringLiteral("Nextcloud")
+        };
+        QStringList providersNotRecognizedAsRemote;
+        for (const QString& provider : providers) {
+            const QVariantMap config{
+                {QStringLiteral("name"), QStringLiteral("Remote %1").arg(provider)},
+                {QStringLiteral("provider"), provider},
+                {QStringLiteral("jiraUrl"), QStringLiteral("http://127.0.0.1:1")},
+                {QStringLiteral("jiraUser"), QStringLiteral("test-user")},
+                {QStringLiteral("apiToken"), QStringLiteral("test-token")}
+            };
+            const QString listId = controller.listManager()->saveListConfig(config, QStringLiteral("keep"));
+            if (listId.isEmpty()) {
+                providersNotRecognizedAsRemote.append(provider + QStringLiteral(" (could not save)"));
+                continue;
+            }
+            controller.selectListById(listId);
+            if (!controller.isCurrentListRemote()) {
+                providersNotRecognizedAsRemote.append(provider);
+            }
+        }
+
+        QVERIFY2(providersNotRecognizedAsRemote.isEmpty(),
+                 qPrintable(QStringLiteral("Not recognized as remote: %1")
+                                .arg(providersNotRecognizedAsRemote.join(QStringLiteral(", ")))));
     }
 
     // KB-61: markdownToJiraAdf drops everything after an unclosed ``` fence. Lines after the
