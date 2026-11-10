@@ -4610,6 +4610,93 @@ private slots:
         QFile::remove(sharedPath);
         QVERIFY(!createdInSharedTmp);
     }
+
+    // KB-44: Jira sync retries with Bearer auth when Basic is rejected
+    // (fetchJiraPage -> fetchJiraIssues(..., forceBearerAuth=true)), but postWorklog always
+    // sends Basic (applyAuthHeader(req, listEntry)) and has no fallback. For Jira Server/DC
+    // personal access tokens with a user/email filled in, the list syncs fine while every
+    // worklog fails with 401, so tracked time never reaches Jira.
+    void testJiraWorklogFallsBackToBearerAuth() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        int basic = 0;
+        int bearer = 0;
+        serveHttpFull(server, [&basic, &bearer](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
+            const QByteArray lower = head.toLower();
+            if (lower.contains("authorization: bearer")) {
+                ++bearer;
+                return httpResponse("201 Created", "application/json", "{\"id\":\"1\"}");
+            }
+            ++basic;
+            return httpResponse("401 Unauthorized", "application/json", "{}",
+                                "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb44_jira");
+        entry.name = QStringLiteral("KB44 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("pat-token");
+        entry.autoWorklog = true;
+
+        IssueTrackerService svc;
+        QSignalSpy postedSpy(&svc, &IssueTrackerService::worklogPosted);
+        QStandardPaths::setTestModeEnabled(false);
+        svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), QDateTime::currentDateTimeUtc().addSecs(-1500), 1500);
+        QStandardPaths::setTestModeEnabled(true);
+
+        QTRY_VERIFY_WITH_TIMEOUT(basic + bearer >= 1, 5000);
+        QTest::qWait(300);
+        QCOMPARE(postedSpy.count(), 1);
+        server.close();
+    }
+
+    // KB-45: GitHub and GitLab labels are run through IssueTrackerService::mapPriorityName,
+    // which matches by substring (contains()). Very common non-priority labels therefore
+    // assign a priority: GitLab scoped labels "workflow::…" and "follow-up" / "slow-query"
+    // contain "low" -> (D); "high-availability" / "highlight" contain "high" -> (B);
+    // "normalization" contains "normal" -> (C). The first such label wins, so e.g. every
+    // MR with a workflow label gets priority (D) and sorts/filters wrongly.
+    void testNonPriorityLabelsDoNotMapToPriority() {
+        // Real priority names must keep working.
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("priority::high")), quint8(1));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Low")), quint8(3));
+
+        const QStringList unrelated = {
+            QStringLiteral("workflow::in review"),
+            QStringLiteral("follow-up"),
+            QStringLiteral("slow-query"),
+            QStringLiteral("high-availability"),
+            QStringLiteral("normalization")
+        };
+        QStringList wronglyMapped;
+        for (const QString& label : unrelated) {
+            if (IssueTrackerService::mapPriorityName(label) != TxtTask::NoPriority) wronglyMapped << label;
+        }
+        QCOMPARE(wronglyMapped, QStringList());
+    }
+
+    // KB-46: IssueTrackerService::mapRemoteStatusToLocal (used when the list has no explicit
+    // status mapping) also matches by substring, so negated or unrelated status names land
+    // in the opposite bucket: "Incomplete" contains "complete" -> done (the task is moved to
+    // the done list on every sync), "Inactive" contains "active" -> in_progress, "Unblocked"
+    // contains "block" -> paused, "Not Done" contains "done" -> done.
+    void testNegatedRemoteStatusesAreNotMisclassified() {
+        const QVariantMap noMapping;
+        QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Done"), QString(), noMapping), QStringLiteral("done"));
+        QCOMPARE(IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("In Progress"), QString(), noMapping), QStringLiteral("in_progress"));
+
+        QStringList wrong;
+        if (IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Incomplete"), QString(), noMapping) == QStringLiteral("done")) wrong << QStringLiteral("Incomplete->done");
+        if (IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Not Done"), QString(), noMapping) == QStringLiteral("done")) wrong << QStringLiteral("Not Done->done");
+        if (IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Inactive"), QString(), noMapping) == QStringLiteral("in_progress")) wrong << QStringLiteral("Inactive->in_progress");
+        if (IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Unblocked"), QString(), noMapping) == QStringLiteral("paused")) wrong << QStringLiteral("Unblocked->paused");
+        QCOMPARE(wrong, QStringList());
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

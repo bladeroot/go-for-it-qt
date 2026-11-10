@@ -434,7 +434,7 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
         } else if (!token.isEmpty()) {
             req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
         }
-    } else if (!forceBearerAuth && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
+    } else if (!forceBearerAuth && !m_jiraBearerLists.contains(entry.id) && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
         const QByteArray credentials = (user + QLatin1Char(':') + token).toUtf8().toBase64();
         req.setRawHeader("Authorization", QByteArray("Basic ") + credentials);
     } else if (!token.isEmpty()) {
@@ -494,40 +494,67 @@ QString IssueTrackerService::mapRemoteStatusToLocal(const QString& remoteStatus,
     const QString s = trimmed.toLower();
     const QString cat = categoryHint.trimmed().toLower();
 
+    // Tokenize status string into words
+    static const QRegularExpression wordRe(QStringLiteral("[^\\p{L}\\p{N}]+"));
+    const QStringList tokens = s.split(wordRe, Qt::SkipEmptyParts);
+
+    // 0. Check explicit negation keywords before matching positive categories
+    // e.g. "Incomplete", "Not Done", "Inactive", "Unblocked"
+    const bool hasNot = tokens.contains(QStringLiteral("not")) || tokens.contains(QStringLiteral("non")) || tokens.contains(QStringLiteral("не"));
+    if (tokens.contains(QStringLiteral("incomplete")) || tokens.contains(QStringLiteral("undone")) ||
+        tokens.contains(QStringLiteral("uncompleted")) || tokens.contains(QStringLiteral("невиконан")) ||
+        (hasNot && (tokens.contains(QStringLiteral("done")) || tokens.contains(QStringLiteral("complete")) ||
+                    tokens.contains(QStringLiteral("completed")) || tokens.contains(QStringLiteral("finished")) ||
+                    tokens.contains(QStringLiteral("resolved")) || tokens.contains(QStringLiteral("fixed")) ||
+                    tokens.contains(QStringLiteral("готово")) || tokens.contains(QStringLiteral("виконано"))))) {
+        return QStringLiteral("todo");
+    }
+    if (tokens.contains(QStringLiteral("inactive")) || (hasNot && tokens.contains(QStringLiteral("active")))) {
+        return QStringLiteral("todo");
+    }
+    if (tokens.contains(QStringLiteral("unblocked")) || (hasNot && (tokens.contains(QStringLiteral("blocked")) || tokens.contains(QStringLiteral("block"))))) {
+        return QStringLiteral("todo");
+    }
+
     // 1. Check Canceled / Rejected keywords first
-    if (s.contains(QStringLiteral("cancel")) || s.contains(QStringLiteral("reject"))
-        || s.contains(QStringLiteral("won't fix")) || s.contains(QStringLiteral("wontfix"))
-        || s.contains(QStringLiteral("duplicate")) || s.contains(QStringLiteral("obsolete"))
-        || s.contains(QStringLiteral("invalid")) || s.contains(QStringLiteral("declined"))
+    if (s.contains(QStringLiteral("won't fix")) || s.contains(QStringLiteral("wontfix"))
+        || tokens.contains(QStringLiteral("cancel")) || tokens.contains(QStringLiteral("canceled")) || tokens.contains(QStringLiteral("cancelled"))
+        || tokens.contains(QStringLiteral("reject")) || tokens.contains(QStringLiteral("rejected"))
+        || tokens.contains(QStringLiteral("duplicate")) || tokens.contains(QStringLiteral("obsolete"))
+        || tokens.contains(QStringLiteral("invalid")) || tokens.contains(QStringLiteral("declined")) || tokens.contains(QStringLiteral("decline"))
         || s.contains(QStringLiteral("скасован")) || s.contains(QStringLiteral("відхилен"))) {
         return QStringLiteral("canceled");
     }
 
     // 2. Check Paused / On Hold / Blocked / Waiting keywords
-    if (s.contains(QStringLiteral("pause")) || s.contains(QStringLiteral("hold"))
-        || s.contains(QStringLiteral("block")) || s.contains(QStringLiteral("wait"))
-        || s.contains(QStringLiteral("pending")) || s.contains(QStringLiteral("postpone"))
-        || s.contains(QStringLiteral("draft")) || s.contains(QStringLiteral("чернетк"))
+    if (tokens.contains(QStringLiteral("pause")) || tokens.contains(QStringLiteral("paused"))
+        || tokens.contains(QStringLiteral("hold"))
+        || tokens.contains(QStringLiteral("block")) || tokens.contains(QStringLiteral("blocked")) || tokens.contains(QStringLiteral("blocking"))
+        || tokens.contains(QStringLiteral("wait")) || tokens.contains(QStringLiteral("waiting"))
+        || tokens.contains(QStringLiteral("pending")) || tokens.contains(QStringLiteral("postpone")) || tokens.contains(QStringLiteral("postponed"))
+        || tokens.contains(QStringLiteral("draft")) || s.contains(QStringLiteral("чернетк"))
         || s.contains(QStringLiteral("пауз")) || s.contains(QStringLiteral("очікув"))) {
         return QStringLiteral("paused");
     }
 
     // 3. Check In Progress / Active / Review / Testing keywords
-    if (s.contains(QStringLiteral("progress")) || s.contains(QStringLiteral("review"))
-        || s.contains(QStringLiteral("active")) || s.contains(QStringLiteral("working"))
-        || s.contains(QStringLiteral("testing")) || s.contains(QStringLiteral("qa"))
-        || s.contains(QStringLiteral("verification")) || s.contains(QStringLiteral("робот"))
-        || cat == QStringLiteral("indeterminate")) {
+    if (cat == QStringLiteral("indeterminate") || cat == QStringLiteral("in_progress")
+        || tokens.contains(QStringLiteral("progress"))
+        || tokens.contains(QStringLiteral("review")) || tokens.contains(QStringLiteral("reviewing"))
+        || tokens.contains(QStringLiteral("active")) || tokens.contains(QStringLiteral("working"))
+        || tokens.contains(QStringLiteral("testing")) || tokens.contains(QStringLiteral("qa"))
+        || tokens.contains(QStringLiteral("verification")) || s.contains(QStringLiteral("робот"))) {
         return QStringLiteral("in_progress");
     }
 
     // 4. Check Done / Resolved / Closed / Verified / Merged
-    if (s.contains(QStringLiteral("done")) || s.contains(QStringLiteral("resolved"))
-        || s.contains(QStringLiteral("closed")) || s.contains(QStringLiteral("fixed"))
-        || s.contains(QStringLiteral("complete")) || s.contains(QStringLiteral("verified"))
-        || s.contains(QStringLiteral("merged")) || s.contains(QStringLiteral("злит"))
-        || s.contains(QStringLiteral("готово")) || s.contains(QStringLiteral("виконан"))
-        || cat == QStringLiteral("done")) {
+    if (cat == QStringLiteral("done") || cat == QStringLiteral("resolved") || cat == QStringLiteral("closed")
+        || tokens.contains(QStringLiteral("done")) || tokens.contains(QStringLiteral("resolved"))
+        || tokens.contains(QStringLiteral("closed")) || tokens.contains(QStringLiteral("close"))
+        || tokens.contains(QStringLiteral("fixed")) || tokens.contains(QStringLiteral("fix"))
+        || tokens.contains(QStringLiteral("complete")) || tokens.contains(QStringLiteral("completed"))
+        || tokens.contains(QStringLiteral("verified")) || tokens.contains(QStringLiteral("merged"))
+        || s.contains(QStringLiteral("злит")) || s.contains(QStringLiteral("готово")) || s.contains(QStringLiteral("виконан"))) {
         return QStringLiteral("done");
     }
 
@@ -535,23 +562,75 @@ QString IssueTrackerService::mapRemoteStatusToLocal(const QString& remoteStatus,
 }
 
 quint8 IssueTrackerService::mapPriorityName(const QString& priorityName) {
-    const QString p = priorityName.trimmed().toLower();
+    QString p = priorityName.trimmed().toLower();
     if (p.isEmpty()) return TxtTask::NoPriority;
-    if (p.contains(QStringLiteral("highest")) || p.contains(QStringLiteral("blocker")) || p.contains(QStringLiteral("show-stopper"))) {
+
+    bool hadPrefix = false;
+    static const QStringList prefixes = {
+        QStringLiteral("priority::"), QStringLiteral("priority:"), QStringLiteral("priority/"),
+        QStringLiteral("prio::"), QStringLiteral("prio:"), QStringLiteral("prio/"),
+        QStringLiteral("severity::"), QStringLiteral("severity:"), QStringLiteral("severity/")
+    };
+    for (const QString& pref : prefixes) {
+        if (p.startsWith(pref)) {
+            p = p.mid(pref.length()).trimmed();
+            hadPrefix = true;
+            break;
+        }
+    }
+
+    // Check P0-P4 / P-0 to P-4
+    if (p == QStringLiteral("p0") || p == QStringLiteral("p-0") || (hadPrefix && p == QStringLiteral("0"))) {
         return 0; // (A)
     }
-    if (p.contains(QStringLiteral("high")) || p.contains(QStringLiteral("critical")) || p.contains(QStringLiteral("major"))) {
+    if (p == QStringLiteral("p1") || p == QStringLiteral("p-1") || (hadPrefix && p == QStringLiteral("1"))) {
         return 1; // (B)
     }
-    if (p.contains(QStringLiteral("medium")) || p.contains(QStringLiteral("normal"))) {
+    if (p == QStringLiteral("p2") || p == QStringLiteral("p-2") || (hadPrefix && p == QStringLiteral("2"))) {
         return 2; // (C)
     }
-    if (p.contains(QStringLiteral("lowest")) || p.contains(QStringLiteral("trivial"))) {
-        return 4; // (E)
-    }
-    if (p.contains(QStringLiteral("low")) || p.contains(QStringLiteral("minor"))) {
+    if (p == QStringLiteral("p3") || p == QStringLiteral("p-3") || (hadPrefix && p == QStringLiteral("3"))) {
         return 3; // (D)
     }
+    if (p == QStringLiteral("p4") || p == QStringLiteral("p-4") || (hadPrefix && p == QStringLiteral("4"))) {
+        return 4; // (E)
+    }
+
+    // Normalize: remove trailing or leading "priority" or "severity" word if separated by space
+    if (p.endsWith(QStringLiteral(" priority"))) p.chop(9);
+    else if (p.startsWith(QStringLiteral("priority "))) p = p.mid(9).trimmed();
+    if (p.endsWith(QStringLiteral(" severity"))) p.chop(9);
+    else if (p.startsWith(QStringLiteral("severity "))) p = p.mid(9).trimmed();
+
+    p = p.trimmed();
+
+    // Check whole-string matches
+    // 0: Highest, Blocker, Show-stopper
+    if (p == QStringLiteral("highest") || p == QStringLiteral("blocker") ||
+        p == QStringLiteral("show-stopper") || p == QStringLiteral("showstopper") ||
+        p == QStringLiteral("very high") || p == QStringLiteral("very-high")) {
+        return 0; // (A)
+    }
+    // 1: High, Critical, Major, Urgent
+    if (p == QStringLiteral("high") || p == QStringLiteral("critical") ||
+        p == QStringLiteral("major") || p == QStringLiteral("urgent")) {
+        return 1; // (B)
+    }
+    // 2: Medium, Normal, Moderate
+    if (p == QStringLiteral("medium") || p == QStringLiteral("normal") ||
+        p == QStringLiteral("moderate") || p == QStringLiteral("default")) {
+        return 2; // (C)
+    }
+    // 4: Lowest, Trivial, Very Low
+    if (p == QStringLiteral("lowest") || p == QStringLiteral("trivial") ||
+        p == QStringLiteral("very low") || p == QStringLiteral("very-low")) {
+        return 4; // (E)
+    }
+    // 3: Low, Minor
+    if (p == QStringLiteral("low") || p == QStringLiteral("minor")) {
+        return 3; // (D)
+    }
+
     return TxtTask::NoPriority;
 }
 
@@ -1851,6 +1930,9 @@ struct IssueTrackerService::RedmineSyncState {
 };
 
 void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpointStage, bool forceBearerAuth) {
+    if (forceBearerAuth) {
+        m_jiraBearerLists.insert(entry.id);
+    }
     const QString baseUrl = normalizeBaseUrl(entry.jiraUrl);
     if (baseUrl.isEmpty()) {
         const QString msg = tr("Jira Server URL is empty.");
@@ -2892,10 +2974,11 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                                       qint64 activityLogId,
                                       const QString& issueKey,
                                       const QDateTime& startTimeUtc,
-                                      quint32 runtimeSeconds)
+                                      quint32 runtimeSeconds,
+                                      bool forceBearerAuth)
 {
     Q_UNUSED(taskId)
-    if (QStandardPaths::isTestModeEnabled()) return;
+    if (!forceBearerAuth && QStandardPaths::isTestModeEnabled()) return;
     if (!listEntry.autoWorklog || issueKey.isEmpty() || runtimeSeconds == 0) {
         return;
     }
@@ -2905,11 +2988,15 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
     }
 
     if (listEntry.provider == QStringLiteral("Jira")) {
+        const bool effectiveBearer = forceBearerAuth || m_jiraBearerLists.contains(listEntry.id);
+        if (effectiveBearer) {
+            m_jiraBearerLists.insert(listEntry.id);
+        }
         const quint32 loggedSeconds = qMax(60U, runtimeSeconds);
         const QString encodedKey = QString::fromUtf8(QUrl::toPercentEncoding(issueKey));
         QUrl url(baseUrl + QStringLiteral("/rest/api/2/issue/") + encodedKey + QStringLiteral("/worklog"));
         QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
+        applyAuthHeader(req, listEntry, effectiveBearer);
 
         QJsonObject payload;
         payload[QStringLiteral("timeSpentSeconds")] = static_cast<qint64>(loggedSeconds);
@@ -2917,24 +3004,33 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         payload[QStringLiteral("comment")] = QStringLiteral("Logged via Go for It Qt Pomodoro timer");
 
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, loggedSeconds]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, loggedSeconds, effectiveBearer]() {
             reply->deleteLater();
-            if (reply->error() == QNetworkReply::NoError) {
-                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
-                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
-                    setStatusMessage(dbErr);
-                    emit syncFailed(listEntry.id, dbErr);
-                } else {
-                    setStatusMessage(tr("Logged %1m to Jira issue %2").arg(loggedSeconds / 60U).arg(issueKey));
-                    emit worklogPosted(issueKey, loggedSeconds);
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
+            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
+
+            if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (!effectiveBearer && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
+                    m_jiraBearerLists.insert(listEntry.id);
+                    postWorklog(listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, true);
+                    return;
                 }
-            } else {
-                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
                 const QString errMsg = tr("Failed to post worklog to Jira (%1): %2")
-                    .arg(statusCode)
+                    .arg(httpStatus)
                     .arg(reply->errorString());
                 setStatusMessage(errMsg);
                 emit syncFailed(listEntry.id, errMsg);
+                return;
+            }
+
+            if (DatabaseManager::instance().isOpen() && !DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                setStatusMessage(dbErr);
+                emit syncFailed(listEntry.id, dbErr);
+            } else {
+                setStatusMessage(tr("Logged %1m to Jira issue %2").arg(loggedSeconds / 60U).arg(issueKey));
+                emit worklogPosted(issueKey, loggedSeconds);
             }
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
@@ -3426,6 +3522,9 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
                                                  bool forceBearerAuth,
                                                  bool useV2Fallback)
 {
+    if (forceBearerAuth) {
+        m_jiraBearerLists.insert(listEntry.id);
+    }
     if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
@@ -3823,6 +3922,9 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                                            bool forceBearerAuth,
                                            bool useV2Fallback)
 {
+    if (forceBearerAuth) {
+        m_jiraBearerLists.insert(listEntry.id);
+    }
     if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty() || markdownComment.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);

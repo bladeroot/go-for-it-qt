@@ -45,7 +45,8 @@ public:
                      qint64 activityLogId,
                      const QString& issueKey,
                      const QDateTime& startTimeUtc,
-                     quint32 runtimeSeconds);
+                     quint32 runtimeSeconds,
+                     bool forceBearerAuth = false);
     void updateIssueDescription(const TodoListEntry& listEntry,
                                 const QString& issueKey,
                                 const QString& markdownDetails,
@@ -157,6 +158,7 @@ private:
     bool m_syncing = false;
     int m_activeSyncRequests = 0;
     QString m_lastStatusMessage;
+    QSet<QString> m_jiraBearerLists;
     std::function<bool(const QString& listId, const QString& jiraKey)> m_activeTaskChecker;
 
     friend class ::TestTodoTxt;
