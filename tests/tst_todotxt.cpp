@@ -6056,6 +6056,284 @@ private slots:
         QVERIFY2(tabRow.contains(tr(" 1:All Open ")), qPrintable(tabRow));
         QVERIFY2(tabRow.contains(tr(" 6:Canceled ")) && !tabRow.contains(QChar(0x2026)), qPrintable(tabRow));
     }
+
+    // KB-77: for a GitHub list with a user query, fetchGitHubIssues only prefixes "repo:" to an
+    // "owner/repo" value (the format the list dialog's placeholder suggests) and never adds an
+    // open-state filter, unlike the default query ("is:open involves:@me"), GitLab
+    // (state=opened) and Redmine (status_id=open). The Search API then returns open *and*
+    // closed issues and PRs, sorted by created ascending, capped at 1000. Every closed item is
+    // imported as a done task, and for a repository with more than 1000 issues/PRs the first
+    // 1000 results are the oldest ones - the current open issues never reach the list at all.
+    void testGitHubRepoQueryRequestsOpenItemsOnly() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QString sentQuery;
+        serveHttpFull(server, [&sentQuery](const QByteArray&, const QByteArray& target, const QByteArray&, const QByteArray&) {
+            const QUrlQuery q(QUrl(QString::fromUtf8(target)).query());
+            sentQuery = q.queryItemValue(QStringLiteral("q"), QUrl::FullyDecoded);
+            return httpResponse("200 OK", "application/json", "{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}");
+        });
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb77_gh");
+        entry.provider = QStringLiteral("GitHub");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        entry.jiraJql = QStringLiteral("owner/repo");
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!sentQuery.isEmpty(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QVERIFY2(sentQuery.contains(QStringLiteral("repo:owner/repo")), qPrintable(sentQuery));
+        QVERIFY2(sentQuery.contains(QStringLiteral("is:open")) || sentQuery.contains(QStringLiteral("state:open")), qPrintable(sentQuery));
+        server.close();
+    }
+
+    // KB-78: the TUI quit commands ("q", ":q", ":wq", ":x") call QCoreApplication::quit()
+    // without stopping a running work session. The GUI stops the timer before quitting (Ctrl+Q,
+    // tray "Close"), but AppController has no destructor/aboutToQuit handler that does it, so in
+    // the TUI the session in progress is never passed to onTimerStopped: no activity record, no
+    // CSV log line, no worklog, and the seconds since the last per-minute flush are lost.
+    // The test drives the real TuiApp through a pipe on stdin and types ":q" while timing.
+    void testTuiQuitLogsRunningSession() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb78_tui.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB78"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+        ctrl.addNewTask(QStringLiteral("KB78 timed task"));
+        ctrl.setActiveTodoRow(0);
+        ctrl.timer()->start();
+        QVERIFY(ctrl.timer()->isRunning());
+        QTest::qWait(1600);
+
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int devNull = ::open("/dev/null", O_WRONLY);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(devNull, STDOUT_FILENO);
+        {
+            TuiApp tui(&ctrl);
+            const QByteArray keys(":q\r");
+            QCOMPARE(::write(fds[1], keys.constData(), static_cast<size_t>(keys.size())), static_cast<ssize_t>(keys.size()));
+            for (int i = 0; i < 4; ++i) {
+                int pending = 0;
+                ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                if (pending <= 0) break;
+                QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+            }
+        }
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(devNull);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        // At this point go-for-it-tui would leave app.exec() and destroy the controller.
+        const bool stillRunning = ctrl.timer()->isRunning();
+        bool logged = false;
+        for (const ActivityRecord& r : DatabaseManager::instance().loadActivityLogs()) {
+            if (r.taskDescription.contains(QStringLiteral("KB78 timed task"))) logged = true;
+        }
+        ctrl.timer()->stop();
+        QVERIFY2(logged && !stillRunning, qPrintable(QStringLiteral("running=%1 logged=%2").arg(stillRunning).arg(logged)));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-79: TuiApp::openListPicker pre-checks the current list in m_selectedListIds, and
+    // handleListPickerKey("Enter") applies m_selectedListIds before it looks at the highlighted
+    // row. Moving the cursor to another list with j/k and pressing Enter (the obvious way to
+    // switch lists; Space is only needed for multi-selection) therefore re-selects the list that
+    // was already open instead of the highlighted one.
+    void testTuiListPickerEnterOpensHighlightedList() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb79_tui.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString listA = ctrl.listManager()->addList(QStringLiteral("KB79 A"));
+        const QString listB = ctrl.listManager()->addList(QStringLiteral("KB79 B"));
+        const int rowA = ctrl.listManager()->indexOfId(listA);
+        const int rowB = ctrl.listManager()->indexOfId(listB);
+        QCOMPARE(rowB, rowA + 1);
+        ctrl.selectListById(listA);
+
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int devNull = ::open("/dev/null", O_WRONLY);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(devNull, STDOUT_FILENO);
+        {
+            TuiApp tui(&ctrl);
+            auto feed = [&](const QByteArray& bytes) {
+                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())), static_cast<ssize_t>(bytes.size()));
+                for (int i = 0; i < 4; ++i) {
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending <= 0) break;
+                    QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                }
+            };
+            feed("L");      // list picker, cursor on the current list A
+            feed("j");      // highlight B
+            feed("\r");     // open it
+        }
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(devNull);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        QCOMPARE(ctrl.currentListId(), listB);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-80: the TUI preview pane (shown under the task list, toggled with "p") writes its
+    // lines without truncating them to the terminal width: the first line prints the full task
+    // title ("  <title>  [status]  [(A)]"), followed by the browser-URL line and the comment
+    // author lines. The task list itself truncates the title, but a long title (a typical Jira
+    // summary) makes the preview header wrap onto extra rows and the frame shifts, as in KB-70.
+    // The test runs the real TuiApp on a 30x120 pseudo-terminal with a 200-character title.
+    void testTuiPreviewPaneKeepsLongTitleInsideTerminalWidth() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb80_tui.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB80"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+        const QString longTitle = QStringLiteral("KB80") + QString(196, QLatin1Char('t'));
+        ctrl.addNewTask(longTitle);
+        QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        QVERIFY(master >= 0);
+        QCOMPARE(::grantpt(master), 0);
+        QCOMPARE(::unlockpt(master), 0);
+        const int slave = ::open(::ptsname(master), O_RDWR | O_NOCTTY);
+        QVERIFY(slave >= 0);
+        struct winsize ws {};
+        ws.ws_row = 30;
+        ws.ws_col = 120;
+        ::ioctl(slave, TIOCSWINSZ, &ws);
+        ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
+        QByteArray captured;
+        auto drain = [&]() {
+            char buf[8192];
+            for (;;) {
+                const ssize_t n = ::read(master, buf, sizeof(buf));
+                if (n <= 0) break;
+                captured.append(buf, static_cast<int>(n));
+            }
+        };
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        std::fflush(stdout);
+        ::dup2(slave, STDIN_FILENO);
+        ::dup2(slave, STDOUT_FILENO);
+        bool started = false;
+        bool previewShown = false;
+        {
+            TuiApp tui(&ctrl);
+            started = tui.start();
+            drain();
+            if (started) {
+                auto frame = [&]() {
+                    captured.clear();
+                    QMetaObject::invokeMethod(&tui, "render", Qt::DirectConnection);
+                    drain();
+                    return QString::fromUtf8(captured);
+                };
+                QString f = frame();
+                previewShown = f.contains(QStringLiteral("Preview")) || f.contains(QStringLiteral("──"));
+                if (!f.contains(QStringLiteral("(p:"))) {
+                    (void)::write(master, "p", 1);           // make sure the preview pane is on
+                    QTest::qWait(20);
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending > 0) QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                    drain();
+                    f = frame();
+                }
+                previewShown = f.contains(QStringLiteral("(p:"));
+            }
+        }
+        drain();
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(slave);
+        ::close(master);
+        QVERIFY(started);
+        QVERIFY2(previewShown, "preview pane is not visible");
+
+        QString screen = QString::fromUtf8(captured);
+        const int lastFrame = screen.lastIndexOf(QStringLiteral("\x1b[H"));
+        if (lastFrame >= 0) screen = screen.mid(lastFrame);
+        static const QRegularExpression ansiRe(QStringLiteral("\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+        screen.remove(ansiRe);
+        QVERIFY2(!screen.contains(longTitle), "the 200-column title was written in one line on a 120-column terminal");
+    }
+
+    // KB-81: DashboardView draws the activity heatmap as columns of 7 consecutive entries from
+    // getActivityHeatmap(91, ...) and labels rows 0, 2 and 4 as "Mon", "Wed" and "Fri". But
+    // getActivityHeatmap starts at today - 90 days, whatever weekday that is, so the rows only
+    // match the labels when that day happens to be a Monday (1 day in 7). On the other days every
+    // square sits next to the wrong weekday label. (The labels are also not translatable.)
+    void testHeatmapColumnsStartOnMonday() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb81.db"));
+        QFile::remove(dbPath);
+        QVERIFY(DatabaseManager::instance().initialize(dbPath));
+        AnalyticsService analytics;
+        const QVariantList heat = analytics.getActivityHeatmap(91, QStringLiteral("__ALL__"));
+        QVERIFY(!heat.isEmpty());
+        const int firstDow = heat.first().toMap().value(QStringLiteral("dayOfWeek")).toInt();
+        if (firstDow == 1) {
+            DatabaseManager::instance().close();
+            QSKIP("Today the 91-day window happens to start on a Monday; misalignment not reproducible today");
+        }
+        bool aligned = true;
+        for (int i = 0; i < heat.size(); ++i) {
+            if (heat.at(i).toMap().value(QStringLiteral("dayOfWeek")).toInt() != (i % 7) + 1) {
+                aligned = false;
+                break;
+            }
+        }
+        QVERIFY2(aligned, qPrintable(QStringLiteral("first day of week = %1").arg(firstDow)));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-82: parseRedmineIssuesJson replaces the status name of every closed Redmine issue
+    // (`status.is_closed == true`) with the literal "Closed" and sets no status category. The
+    // per-list status mapping, which the list dialog fills with the real Redmine status names
+    // from /issue_statuses.json ("Rejected", "Resolved", "Won't fix"...), is therefore never
+    // consulted for closed issues: a user mapping such as "Rejected -> canceled" has no effect and
+    // every closed issue becomes "done". This shows as soon as the list query also returns
+    // closed issues (e.g. status_id=*).
+    void testRedmineClosedStatusKeepsNameForMapping() {
+        const QByteArray json =
+            "{\"issues\":[{\"id\":7,\"subject\":\"KB82 rejected\",\"project\":{\"id\":1,\"name\":\"P\",\"identifier\":\"p\"},"
+            "\"status\":{\"id\":6,\"name\":\"Rejected\",\"is_closed\":true},\"priority\":{\"id\":2,\"name\":\"Normal\"}}],"
+            "\"total_count\":1,\"offset\":0,\"limit\":100}";
+        const QVector<RemoteIssueItem> items = IssueTrackerService::parseRedmineIssuesJson(json);
+        QCOMPARE(items.size(), 1);
+        const QVariantMap mapping{{QStringLiteral("Rejected"), QStringLiteral("canceled")}};
+        const QString local = IssueTrackerService::mapRemoteStatusToLocal(
+            items.first().remoteStatus, items.first().remoteStatusCategory, mapping);
+        QCOMPARE(local, QStringLiteral("canceled"));
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

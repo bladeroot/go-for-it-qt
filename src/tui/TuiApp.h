@@ -44,6 +44,7 @@ private slots:
 private:
     void enableRawMode();
     void disableRawMode();
+    void quitApp();
     void updateTerminalSize();
 
     void handleKeySequence(const QByteArray& seq);

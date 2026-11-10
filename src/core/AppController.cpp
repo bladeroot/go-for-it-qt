@@ -155,6 +155,14 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         }
     });
 
+    if (QCoreApplication::instance()) {
+        connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this]() {
+            if (m_timer.isRunning()) {
+                m_timer.stop();
+            }
+        });
+    }
+
     const QString lastId = m_settings.lastLoadedListId();
     if (!lastId.isEmpty() && m_listManager.indexOfId(lastId) >= 0) {
         selectListById(lastId);
@@ -162,6 +170,12 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         selectListById(m_listManager.entry(0).id);
     } else {
         m_showingOverview = true;
+    }
+}
+
+AppController::~AppController() {
+    if (m_timer.isRunning()) {
+        m_timer.stop();
     }
 }
 

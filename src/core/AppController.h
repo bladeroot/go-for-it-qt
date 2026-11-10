@@ -54,6 +54,7 @@ public:
     explicit AppController(const QString& logFilePath = {},
                            const QString& customDbPath = {},
                            QObject* parent = nullptr);
+    ~AppController() override;
 
     [[nodiscard]] bool isDatabaseReady() const noexcept { return m_databaseReady; }
 

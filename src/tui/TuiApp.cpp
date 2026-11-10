@@ -122,7 +122,17 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
 }
 
 TuiApp::~TuiApp() {
+    if (m_app && m_app->timer() && m_app->timer()->isRunning()) {
+        m_app->timer()->stop();
+    }
     disableRawMode();
+}
+
+void TuiApp::quitApp() {
+    if (m_app && m_app->timer() && m_app->timer()->isRunning()) {
+        m_app->timer()->stop();
+    }
+    QCoreApplication::quit();
 }
 
 bool TuiApp::start() {
@@ -329,7 +339,7 @@ void TuiApp::processPendingStdin() {
 void TuiApp::handleKeySequence(const QByteArray& seq) {
     // Ctrl+C quits cleanly from any mode
     if (seq == QByteArray("\x03")) {
-        QCoreApplication::quit();
+        quitApp();
         return;
     }
 
@@ -703,7 +713,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Quit shortcut: q or ZZ
     if (seq == "q") {
-        QCoreApplication::quit();
+        quitApp();
     }
 }
 
@@ -883,8 +893,6 @@ void TuiApp::openListPicker() {
         for (const QString& id : active) {
             m_selectedListIds.insert(id);
         }
-    } else if (!m_app->currentListId().isEmpty()) {
-        m_selectedListIds.insert(m_app->currentListId());
     }
     m_mode = Mode::ListPicker;
 }
@@ -1557,7 +1565,7 @@ void TuiApp::handleDashboardKey(const QByteArray& seq) {
 void TuiApp::executeExCommand(const QString& cmdLine) {
     if (cmdLine.isEmpty()) return;
     if (cmdLine == QStringLiteral("q") || cmdLine == QStringLiteral("quit") || cmdLine == QStringLiteral("qa")) {
-        QCoreApplication::quit();
+        quitApp();
         return;
     }
     if (cmdLine == QStringLiteral("w") || cmdLine == QStringLiteral("sync") || cmdLine == QStringLiteral("e")) {
@@ -1566,7 +1574,7 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         return;
     }
     if (cmdLine == QStringLiteral("wq") || cmdLine == QStringLiteral("x")) {
-        QCoreApplication::quit();
+        quitApp();
         return;
     }
     if (cmdLine == QStringLiteral("sort")) {
@@ -2497,7 +2505,7 @@ void TuiApp::render() {
             for (int r = 0; r < previewRows; ++r) {
                 const int pIdx = m_detailsScroll + r;
                 if (pIdx < previewLines.size()) {
-                    out += previewLines.at(pIdx) + QStringLiteral("\033[K\r\n");
+                    out += truncateVisible(previewLines.at(pIdx), m_cols) + QStringLiteral("\033[K\r\n");
                 } else {
                     out += QStringLiteral("\033[K\r\n");
                 }

@@ -258,11 +258,11 @@ ScrollView {
                             spacing: 4
                             Layout.alignment: Qt.AlignTop
                             Item { height: 2 }
-                            Label { text: "Mon"; font.pixelSize: 9; opacity: 0.6 }
+                            Label { text: qsTr("Mon"); font.pixelSize: 9; opacity: 0.6 }
                             Item { height: 11 }
-                            Label { text: "Wed"; font.pixelSize: 9; opacity: 0.6 }
+                            Label { text: qsTr("Wed"); font.pixelSize: 9; opacity: 0.6 }
                             Item { height: 11 }
-                            Label { text: "Fri"; font.pixelSize: 9; opacity: 0.6 }
+                            Label { text: qsTr("Fri"); font.pixelSize: 9; opacity: 0.6 }
                         }
 
                         // Grid: 13 columns of 7 days

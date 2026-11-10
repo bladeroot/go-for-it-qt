@@ -1491,7 +1491,10 @@ QVector<RemoteIssueItem> IssueTrackerService::parseRedmineIssuesJson(const QByte
         item.key = key;
         item.description = desc;
         item.details = description;
-        item.remoteStatus = isClosed ? QStringLiteral("Closed") : (statusName.isEmpty() ? QStringLiteral("open") : statusName);
+        item.remoteStatus = statusName.isEmpty() ? (isClosed ? QStringLiteral("Closed") : QStringLiteral("open")) : statusName;
+        if (isClosed) {
+            item.remoteStatusCategory = QStringLiteral("done");
+        }
         item.remotePriority = priorityName;
         item.priority = prio;
         item.durationSeconds = durationSeconds;
@@ -2459,6 +2462,9 @@ void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
                 queryStr = QStringLiteral("repo:") + queryStr;
             }
         }
+        if (!queryStr.contains(QStringLiteral("is:")) && !queryStr.contains(QStringLiteral("state:"))) {
+            queryStr += QStringLiteral(" is:open");
+        }
         if (entry.apiToken.trimmed().isEmpty() && !queryStr.contains(QStringLiteral("repo:")) && !queryStr.contains(QStringLiteral("org:")) && !queryStr.contains(QStringLiteral("user:"))) {
             const QString errMsg = tr("GitHub sync without an API token requires a repository, user, or organization in the query field (e.g. repo:owner/project, user:username, or org:name).");
             setStatusMessage(errMsg);
@@ -2482,8 +2488,8 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
     QUrl url(apiUrl + QStringLiteral("/search/issues"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("q"), queryStr);
-    query.addQueryItem(QStringLiteral("sort"), QStringLiteral("created"));
-    query.addQueryItem(QStringLiteral("order"), QStringLiteral("asc"));
+    query.addQueryItem(QStringLiteral("sort"), QStringLiteral("updated"));
+    query.addQueryItem(QStringLiteral("order"), QStringLiteral("desc"));
     query.addQueryItem(QStringLiteral("per_page"), QStringLiteral("100"));
     if (state->page > 1) {
         query.addQueryItem(QStringLiteral("page"), QString::number(state->page));
