@@ -2,7 +2,7 @@
 
 This document maintains a comprehensive, structured record of defects, edge cases, and architectural regressions identified and resolved in **Go for It Qt** (`go-for-it-qt`, `go-for-it-tui`).
 
-All entries are validated by regression tests in [tests/tst_todotxt.cpp](file:///home/bladeroot/prj/other/Go-For-It/tests/tst_todotxt.cpp).
+All entries are validated by regression tests in [tests/tst_todotxt.cpp](tests/tst_todotxt.cpp).
 
 ---
 
@@ -16,9 +16,9 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
    - [1.5. User Interface (GUI / QML / TUI)](#15-user-interface-gui--qml--tui)
    - [1.6. Packaging & Linux Distribution Compatibility](#16-packaging--linux-distribution-compatibility)
 2. [Part 2: Systematic Review Defects (KB-1 through KB-87)](#part-2-systematic-review-defects-kb-1-through-kb-87)
-   - [KB-1 – KB-14: Tracker Pagination & Reconciliation](#kb-1--kb-14-tracker-pagination--reconciliation)
-   - [KB-15 – KB-29: Scheme Validation, Arithmetic Bounds & List Mutation Safety](#kb-15--kb-29-scheme-validation-arithmetic-bounds--list-mutation-safety)
-   - [KB-30 – KB-43: Permissions, Export Failure Handling & TUI Multibyte Input](#kb-30--kb-43-permissions-export-failure-handling--tui-multibyte-input)
+   - [KB-1 – KB-11: First Review Round (Status Mapping, Pagination, Timer, Translations)](#kb-1--kb-11-first-review-round-status-mapping-pagination-timer-translations)
+   - [KB-12 – KB-26: Reconciliation Safety, Pagination Shifts, Onboarding, URL Schemes & Relocation](#kb-12--kb-26-reconciliation-safety-pagination-shifts-onboarding-url-schemes--relocation)
+   - [KB-27 – KB-43: List Mutation Safety, Overflow, Permissions, Export Failures & TUI Input](#kb-27--kb-43-list-mutation-safety-overflow-permissions-export-failures--tui-input)
    - [KB-44 – KB-56: Bearer Auth, Priority Mappings & Timer Reliability](#kb-44--kb-56-bearer-auth-priority-mappings--timer-reliability)
    - [KB-57 – KB-69: Nextcloud CalDAV, Pomodoro Continuity & Token Masking](#kb-57--kb-69-nextcloud-caldav-pomodoro-continuity--token-masking)
    - [KB-70 – KB-76: TUI Formatting, ANSI Sequences & Dialog Binding](#kb-70--kb-76-tui-formatting-ansi-sequences--dialog-binding)
@@ -34,7 +34,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
   * *Problem*: In batch reordering and moving completed tasks, a failure on a single row previously left database state silently desynchronized from the in-memory model.
   * *Fix*: Enforced strict verification of `rowsAffected > 0` on every batch update step, rolling back (`ROLLBACK`) on zero affected rows.
   * *Commits*: `a962389`, `458f702`, `77044f1`.
-  * *Test*: `testAssertRollbackStateOnFailedBatchReorders`.
+  * *Test*: `testAtomicDoneAndWorklogSyncAndOrderCompaction`.
 
 * **Sort Order Compaction on Task Deletion**:
   * *Problem*: Deleting tasks left gaps in `sort_order`, resulting in integer exhaustion and erratic ordering on subsequent prepend/insert operations.
@@ -43,7 +43,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 
 * **Transactional Savepoints (`SAVEPOINT`) and Model Rollback**:
   * *Problem*: When SQLite writes failed, the in-memory Qt models had already updated their internal vectors, causing UI and disk state to diverge.
-  * *Fix*: Introduced transactional savepoints in [DatabaseService.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/DatabaseService.cpp). Model vectors are updated only via callbacks after database commit confirmation, rolling back on failure.
+  * *Fix*: Introduced transactional savepoints in [DatabaseManager.cpp](src/core/DatabaseManager.cpp). Model vectors are updated only via callbacks after database commit confirmation, rolling back on failure.
   * *Commits*: `70e5134`, `77bd35c`, `f128e72`, `88d5289`, `136604c`, `7ea3b9e`, `4744c3b`, `65f7878`, `86cd472`.
   * *Tests*: `testStatusNormalizationAndAtomicReorderAndSyncTx`, `testSyncCompletionDateTimerRestorationAndMultiListOrder`.
 
@@ -59,7 +59,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 
 * **Timer Tracking by Unique Task ID**:
   * *Problem*: The timer originally tracked tasks by raw model row index. Sorting, filtering, or prepending tasks reassigned the active timer to another task.
-  * *Fix*: Bound timer state strictly to `taskId` ([AppController.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/AppController.cpp)).
+  * *Fix*: Bound timer state strictly to `taskId` ([AppController.cpp](src/core/AppController.cpp)).
   * *Commit*: `f7825fe`.
   * *Test*: `testTaskTimerTrackingAndDatabaseSafety`.
 
@@ -86,7 +86,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 
 * **True Multi-Page Pagination**:
   * *Problem*: Synchronizers for Jira, YouTrack, GitHub, GitLab, and Redmine fetched only the initial 50–100 issues due to missing page offset traversal.
-  * *Fix*: Implemented recursive asynchronous pagination with accumulated results in [IssueTrackerService.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/IssueTrackerService.cpp).
+  * *Fix*: Implemented recursive asynchronous pagination with accumulated results in [IssueTrackerService.cpp](src/core/IssueTrackerService.cpp).
   * *Commit*: `7474d7f`.
   * *Test*: `testPaginationReconciliationForLargeLists`.
 
@@ -135,7 +135,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
   * *Commit*: `a0ff6ae`.
 * **Missing `currentPriorityMapping` Property**:
   * *Problem*: Opening list settings crashed on accessing undefined priority mapping properties.
-  * *Fix*: Declared property explicitly in [TxtListEditDialog.qml](file:///home/bladeroot/prj/other/Go-For-It/qml/dialogs/TxtListEditDialog.qml).
+  * *Fix*: Declared property explicitly in [TxtListEditDialog.qml](qml/dialogs/TxtListEditDialog.qml).
   * *Commit*: `4cf271e`.
 * **Exposing Model Helpers to QML**:
   * *Problem*: `entryAt` and `get` were inaccessible to QML views in `ListManagerModel`.
@@ -159,51 +159,63 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 
 ## Part 2: Systematic Review Defects (KB-1 through KB-87)
 
-### KB-1 – KB-14: Tracker Pagination & Reconciliation
+### KB-1 – KB-11: First Review Round (Status Mapping, Pagination, Timer, Translations)
 
-* **KB-1**: Nextcloud WebDAV — Non-CalDAV XML responses must not be treated as empty task lists that close local tasks. (*Test*: `testNextcloudNonCalDavBodyDoesNotCloseTasks`, commit `96dede1`).
-* **KB-2**: Redmine — Pagination shifts caused by concurrent issue creations do not close skipped issues. (*Test*: `testRedminePaginationShiftDoesNotCloseSkippedIssue`, commit `96dede1`).
-* **KB-3**: Redmine — Automatic closed status discovery ignores rejected issues to prevent incorrect status mapping. (*Test*: `testRedmineLearnedClosedFallbackSkipsRejected`, commit `96dede1`).
-* **KB-4**: GitLab — Guarded against closing tasks when pagination results shift due to incoming issues during sync. (*Test*: `testGitLabPaginationShiftDoesNotCloseSkippedIssue`, commit `96dede1`).
-* **KB-5**: YouTrack — Eliminated premature task completion on pagination shifts. (*Test*: `testYouTrackPaginationShiftDoesNotCloseSkippedIssue`, commit `96dede1`).
-* **KB-6**: Nextcloud — Multistatus XML responses without `calendar-data` blocks do not close local tasks. (*Test*: `testNextcloudMultistatusWithoutCalendarDataDoesNotCloseTasks`, commit `96dede1`).
-* **KB-7**: Nextcloud — Incomplete or malformed VCALENDAR payloads do not close unmentioned tasks. (*Test*: `testNextcloudPartialCalendarDataDoesNotCloseMissingTasks`, commit `96dede1`).
-* **KB-8**: YouTrack — Corrected reconciliation of closed issues across multi-page result sets. (*Test*: `testYouTrackMultiPageListStillReconcilesClosedIssue`, commit `96dede1`).
-* **KB-9**: YouTrack — Guaranteed reliable reconciliation on large stable lists (>100 tasks). (*Test*: `testYouTrackLargeStableListStillReconcilesClosedIssue`, commit `96dede1`).
-* **KB-10**: YouTrack — Handled edge-case reconciliation for tasks positioned on page boundary transitions. (*Test*: `testYouTrackClosedIssueAtPageBoundaryIsReconciled`, commit `96dede1`).
-* **KB-11 – KB-14**: YouTrack — Protected against cross-project pagination shifts, ensured synchronization outcome independence from list ID, and implemented two-pass realistic shift detection. (*Tests*: `testYouTrackCrossProjectShiftOnLaterPageDoesNotCloseSkippedIssue`, `testYouTrackSyncOutcomeDoesNotDependOnListId`, `testYouTrackTwoPassDetectsRealisticShift`, commit `fb7e847`).
+All fixed in commit `96dede1` unless noted.
 
----
-
-### KB-15 – KB-29: Scheme Validation, Arithmetic Bounds & List Mutation Safety
-
-* **KB-15**: Prevented default demo tasks from being re-added after a user explicitly empties their list. (*Test*: `testDefaultTasksNotReaddedAfterUserEmptiesList`, commit `5edf4cc`).
-* **KB-16**: Blocked unsafe URI schemes (e.g. `file://`, shell invocation) from being launched via "Open in Browser". (*Test*: `testOpenUrlExternallyRejectsUnsafeSchemes`, commit `5edf4cc`).
-* **KB-17**: Preserved existing working database file when a database relocation/move operation fails. (*Test*: `testFailedDatabaseRelocationKeepsCurrentDatabase`, commit `c77d5b7`).
-* **KB-18**: Bounded authentication retries in Jira when both Basic and Bearer auth schemes fail. (*Test*: `testJiraAuthRetryIsBoundedWhenBothSchemesFail`, commit `c77d5b7`).
-* **KB-19 – KB-21**: Mock test server header parsing and connection buffering improvements. (*Commits*: `b280825`, `fb43f6c`, `cd0923e`, `7c606aa`).
-* **KB-22 – KB-26**: Integer range bounds enforcement in task rows and priority mappings. (*Commits*: `24c0fd2`, `f7b3d91`).
-* **KB-27**: Rejected list mutation operations when target row is missing or deleted. (*Test*: `testListMutationsRejectMissingRows`, commit `c816a12`).
-* **KB-28**: Automatically dropped externally deleted lists from the UI model upon discovery. (*Test*: `testRemovingListAlreadyDeletedElsewhereDropsItFromModel`, commit `360a0f6`).
-* **KB-29**: Hardened duration token parsing against arithmetic integer overflow. (*Test*: `testDurationTokensRejectArithmeticOverflow`, commit `6e2922d`).
+* **KB-1**: Learning Redmine status ids during a sync emitted `listUpdated`, which re-selected the list, stopped the running timer and left the multi-list view. (*Test*: `testRedmineStatusMappingDoesNotResetTimerOrMultiList`).
+* **KB-2**: Learned Redmine status ids were mostly ineffective and got lost when the list dialog saved the mapping.
+* **KB-3**: Offset pagination combined with reconciliation could close a still-open task.
+* **KB-4**: GitLab treated a non-JSON `200` response as a successful (empty) result.
+* **KB-5**: YouTrack pagination counted parsed items instead of raw items when deciding whether more pages exist.
+* **KB-6**: Reconciliation never ran in some valid cases (explicitly empty results).
+* **KB-7**: The default GitLab query could fetch thousands of foreign items (scope narrowed to the user's own items).
+* **KB-8**: The timer double-counted sub-second remainders after a flush. (*Test*: `testTaskTimerNoDoubleCountingOnFlush`).
+* **KB-9**: Translation gaps and leftover keys in the language files.
+* **KB-10**: Tests used fixed `/tmp` paths instead of the test sandbox.
+* **KB-11**: Not a defect: "local done is reverted on the next sync when status push is off" was recorded as a product question and has no fix.
 
 ---
 
-### KB-30 – KB-43: Permissions, Export Failure Handling & TUI Multibyte Input
+### KB-12 – KB-26: Reconciliation Safety, Pagination Shifts, Onboarding, URL Schemes & Relocation
 
-* **KB-30**: Enforced strict `0600` permissions (owner-only) on exported billing report files. (*Test*: `testBillingExportFilesAreOwnerOnly`, commit `27dc901`).
-* **KB-31**: Reported failure and returned false when PDF/CSV billing exports cannot be written. (*Test*: `testBillingPdfExportReportsFailureWhenTargetCannotBeWritten`, commit `07d9771`).
-* **KB-32**: Automatically removed due date metadata (`due:`) when the user deletes the token from task text. (*Test*: `testEditingTextRemovesDueDate`, commit `79cc64d`).
-* **KB-33**: Set strict `0600` permissions on the timer activity log (`activity.csv`). (*Test*: `testActivityLogCsvIsOwnerOnly`, commit `79cc64d`).
-* **KB-34**: Escaped markup in notification bodies to prevent desktop notification formatting injection. (*Test*: `testNotificationPayloadEscapesMarkup`, `testNotificationTitleIsNotHtmlEscaped`, commit `79cc64d`).
-* **KB-35**: Isolated tasks by list in the billing report breakdown view. (*Test*: `testBillingBreakdownKeepsTasksOfDifferentListsApart`, commit `79d5091`).
-* **KB-36**: Made remote tracker write operations explicit no-ops in test mode. (*Test*: `testTrackerWritesAreNoOpsInTestMode`, commit `79d5091`).
-* **KB-37**: Preserved priority and duration metadata during inline title edits in TUI. (*Test*: `testTuiStyleTitleEditKeepsPriorityAndDuration`, commit `79d5091`).
-* **KB-38 – KB-39**: Added full multibyte Unicode and non-BMP character support to TUI input buffers. (*Test*: `testTuiInputKeepsMultibyteAndNonBmpCharacters`, commit `79d5091`).
-* **KB-40**: Tokenized keyboard ANSI escape sequences from typed text to prevent display glitching in TUI. (*Test*: `testTuiSplitsEscapeSequencesFromTypedText`, commit `eb30c2c`).
-* **KB-41**: Mapped the lowest remote tracker priority level to local priority `(E)`. (*Test*: `testLowestRemotePriorityMapsToE`, commit `eb30c2c`).
-* **KB-42**: Propagated and logged remote worklog submission failures. (*Test*: `testFailedWorklogIsReported`, commit `a897569`).
-* **KB-43**: Isolated focus ambient sound generator files in dedicated directories away from shared `/tmp`. (*Test*: `testAmbientSoundIsNotGeneratedInSharedTmp`, commit `a897569`).
+* **KB-12**: Nextcloud — a 2xx CalDAV answer that is not a multistatus with VTODOs (e.g. an HTML login page after a redirect) is no longer treated as "explicitly empty". (*Test*: `testNextcloudNonCalDavBodyDoesNotCloseTasks`, commit `fb7e847`).
+* **KB-13**: Redmine — offset pagination that skips an item when an earlier item leaves the result set no longer closes the skipped, still-open issue. (*Test*: `testRedminePaginationShiftDoesNotCloseSkippedIssue`, commit `fb7e847`).
+* **KB-14**: Redmine — the learned `is_closed` fallback skips rejected/canceled statuses, like the explicit-mapping path. (*Test*: `testRedmineLearnedClosedFallbackSkipsRejected`, commit `fb7e847`).
+* **KB-15**: GitLab — the KB-13 pagination-shift guard was extended to GitLab (`page` + `X-Next-Page`). (*Test*: `testGitLabPaginationShiftDoesNotCloseSkippedIssue`, commit `5edf4cc`).
+* **KB-16**: Nextcloud — a 207 multistatus in which every object reports `calendar-data` as 404/403 no longer closes local tasks. (*Test*: `testNextcloudMultistatusWithoutCalendarDataDoesNotCloseTasks`, commit `5edf4cc`).
+* **KB-17**: Nextcloud — when only some objects return `calendar-data`, the objects without data are not reconciled as closed. (*Test*: `testNextcloudPartialCalendarDataDoesNotCloseMissingTasks`, commit `c77d5b7`).
+* **KB-18**: YouTrack — the KB-15 fix forced `limitReached` whenever more than one page was needed, so lists with 100 or more open issues never reconciled. (*Test*: `testYouTrackMultiPageListStillReconcilesClosedIssue`, commit `c77d5b7`).
+* **KB-19**: YouTrack — KB-18 was fixed only for exactly 100 issues; lists with two non-empty pages still never reconciled. (*Test*: `testYouTrackLargeStableListStillReconcilesClosedIssue`, commit `b280825`).
+* **KB-20**: YouTrack — the KB-19 boundary heuristic treated a remotely closed issue sitting exactly at a page boundary as a pagination shift, so it was never closed locally. (*Test*: `testYouTrackClosedIssueAtPageBoundaryIsReconciled`, commit `fb43f6c`).
+* **KB-21**: YouTrack — the KB-19 checks missed a shift starting on page 2 when the page 2/3 boundary crosses projects; replaced by a two-pass check. (*Test*: `testYouTrackCrossProjectShiftOnLaterPageDoesNotCloseSkippedIssue`, commit `fb43f6c`).
+* **KB-22**: YouTrack — removed a production special case for the test list id `kb15_yt`; identical server responses now give the same result for any list id. (*Tests*: `testYouTrackSyncOutcomeDoesNotDependOnListId`, `testYouTrackTwoPassDetectsRealisticShift`, commit `24c0fd2`).
+* **KB-23**: The three onboarding tasks were re-inserted every time a local list with zero tasks was selected; they are now added only once per list. (*Test*: `testDefaultTasksNotReaddedAfterUserEmptiesList`, commit `f7b3d91`).
+* **KB-24**: Links from tracker-controlled text (Markdown details/comments) bypassed the `http`/`https`/`mailto` whitelist; `AppController::openUrlExternally` now rejects other schemes. (*Test*: `testOpenUrlExternallyRejectsUnsafeSchemes`, commit `f7b3d91`).
+* **KB-25**: A failed database relocation no longer leaves the app without a database or persists the bad path to `settings.ini`. (*Test*: `testFailedDatabaseRelocationKeepsCurrentDatabase`, commit `f7b3d91`).
+* **KB-26**: Test guard — a relaxed Jira auth test no longer caught a retry loop; when both Basic and Bearer are rejected, exactly one attempt of each is now required. (*Test*: `testJiraAuthRetryIsBoundedWhenBothSchemesFail`, commits `7c606aa`, `1dc86a4`).
+
+---
+
+### KB-27 – KB-43: List Mutation Safety, Overflow, Permissions, Export Failures & TUI Input
+
+* **KB-27**: Mutating a list row that no longer exists is no longer reported as a successful persistence operation. (*Test*: `testListMutationsRejectMissingRows`, commit `c816a12`).
+* **KB-28**: A list already deleted elsewhere is dropped from the UI model instead of staying in memory. (*Test*: `testRemovingListAlreadyDeletedElsewhereDropsItFromModel`, commit `360a0f6`).
+* **KB-29**: Duration/timer components that do not fit in `quint32` seconds stay ordinary text instead of wrapping. (*Test*: `testDurationTokensRejectArithmeticOverflow`, commit `6e2922d`).
+* **KB-30**: Billing exports are created owner-only (`0600`). (*Test*: `testBillingExportFilesAreOwnerOnly`, commit `27dc901`).
+* **KB-31**: `exportBillingPdf` reports failure when the target cannot be written instead of returning success. (*Test*: `testBillingPdfExportReportsFailureWhenTargetCannotBeWritten`, commit `07d9771`).
+* **KB-32**: Removing `due:YYYY-MM-DD` from a task's text now clears its due date. (*Test*: `testEditingTextRemovesDueDate`, commit `79cc64d`).
+* **KB-33**: Notification bodies are escaped before being sent to `org.freedesktop.Notifications`. (*Test*: `testNotificationPayloadEscapesMarkup`, commit `79cc64d`).
+* **KB-34**: The per-list activity log CSV is owner-only (`0600`). (*Test*: `testActivityLogCsvIsOwnerOnly`, commit `79cc64d`).
+* **KB-35**: Notification titles are plain text per the spec and are no longer HTML-escaped. (*Test*: `testNotificationTitleIsNotHtmlEscaped`, commit `79d5091`).
+* **KB-36**: The billing task breakdown keeps tasks of different lists apart. (*Test*: `testBillingBreakdownKeepsTasksOfDifferentListsApart`, commit `79d5091`).
+* **KB-37**: Every remote tracker write path is a no-op in test mode. (*Test*: `testTrackerWritesAreNoOpsInTestMode`, commit `79d5091`).
+* **KB-38**: TUI title edits keep the `(A)` priority and `duration:` tokens. (*Test*: `testTuiStyleTitleEditKeepsPriorityAndDuration`, commit `79d5091`).
+* **KB-39**: TUI input keeps multibyte UTF-8 split across reads and non-BMP characters (emoji). (*Test*: `testTuiInputKeepsMultibyteAndNonBmpCharacters`, commit `79d5091`).
+* **KB-40**: TUI input splits escape sequences from typed text in the same read. (*Test*: `testTuiSplitsEscapeSequencesFromTypedText`, commit `eb30c2c`).
+* **KB-41**: The remote priority "Lowest" maps to `(E)` instead of `(D)`. (*Test*: `testLowestRemotePriorityMapsToE`, commit `eb30c2c`).
+* **KB-42**: Remote worklog failures (401, server errors, unreachable) are reported. (*Test*: `testFailedWorklogIsReported`, commit `a897569`).
+* **KB-43**: Ambient sound files are generated in the private cache directory instead of a predictable name in `/tmp`. (*Test*: `testAmbientSoundIsNotGeneratedInSharedTmp`, commit `a897569`).
 
 ---
 
@@ -214,8 +226,8 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 * **KB-46**: Corrected status negation parsing to avoid misclassifying "Not Done" as completed. (*Test*: `testNegatedRemoteStatusesAreNotMisclassified`, commit `82b5093`).
 * **KB-47**: Ensured forced Bearer worklog requests are no-ops in test mode. (*Test*: `testForcedBearerWorklogIsNoOpInTestMode`, commit `17b6a8b`).
 * **KB-48**: Prevented Bearer mode from becoming sticky after Basic credentials are corrected. (*Test*: `testJiraBearerModeIsNotStickyAfterCredentialFix`, commit `17b6a8b`).
-* **KB-49**: Expanded support for common remote priority label formats (e.g., `prio:high`, `p1`). (*Test*: `testCommonPriorityLabelStylesStillMap`, commit `17b6a8b`).
-* **KB-50**: Handled project-scoped priority code parsing. (*Test*: `testScopedPriorityCodeLabelsMap`, commit `6f0d732`).
+* **KB-49**: Restored mapping of common GitHub/GitLab label styles that the KB-45 change broke (`priority-high`, `priority_high`, `high-priority`, `P1 - High`, `prio-low`). (*Test*: `testCommonPriorityLabelStylesStillMap`, commit `17b6a8b`).
+* **KB-50**: Restored `P0`–`P4` codes after scoped prefixes such as GitLab `priority::P1`, `priority/p2`, `prio:P0`. (*Test*: `testScopedPriorityCodeLabelsMap`, commit `6f0d732`).
 * **KB-51**: Aligned default priority mappings for Todoist and Nextcloud with local values. (*Test*: `testDefaultPriorityMappingMatchesSyncedValues`, commit `6f0d732`).
 * **KB-52**: Retried Jira remote priority queries with Bearer authentication on 401. (*Test*: `testJiraFetchRemotePrioritiesRetriesWithBearer`, commit `6f0d732`).
 * **KB-53**: Avoided re-binding running timers to mismatched tasks on database backup import. (*Test*: `testImportBackupDoesNotRebindRunningTimerToOtherTask`, commit `6f0d732`).
@@ -246,10 +258,10 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 ### KB-70 – KB-76: TUI Formatting, ANSI Sequences & Dialog Binding
 
 * **KB-70**: Clamped long Markdown headings and tables to terminal width in TUI view. (*Test*: `testTuiMarkdownViewKeepsLongHeadingsInsideTerminalWidth`, commit `3fc5b46`).
-* **KB-71**: Bound [TaskDetailsDialog.qml](file:///home/bladeroot/prj/other/Go-For-It/qml/dialogs/TaskDetailsDialog.qml) strictly to task ID instead of dynamic proxy model rows. (*Test*: `testTaskDetailsDialogSavesToTheTaskItWasOpenedFor`, commit `3fc5b46`).
+* **KB-71**: Bound [TaskDetailsDialog.qml](qml/dialogs/TaskDetailsDialog.qml) strictly to task ID instead of dynamic proxy model rows. (*Test*: `testTaskDetailsDialogSavesToTheTaskItWasOpenedFor`, commit `3fc5b46`).
 * **KB-72**: Applied shortcut changes immediately without restart via `shortcutMap` binding. (*Test*: `testChangedShortcutAppliesWithoutRestart`, commit `3fc5b46`).
 * **KB-73**: Clamped long list names and search filter text in TUI header row. (*Test*: `testTuiHeaderKeepsLongListNameInsideTerminalWidth`, commit `3fc5b46`).
-* **KB-74**: Enabled substring search matches for URLs and colon-separated words (`http://`, `bug:`) in [TaskFilterProxyModel.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/TaskFilterProxyModel.cpp). (*Test*: `testSearchFindsTasksByUrlAndColonWords`, commit `3fc5b46`).
+* **KB-74**: Enabled substring search matches for URLs and colon-separated words (`http://`, `bug:`) in [TaskFilterProxyModel.cpp](src/todotxt/TaskFilterProxyModel.cpp). (*Test*: `testSearchFindsTasksByUrlAndColonWords`, commit `3fc5b46`).
 * **KB-75**: Verified presence of `merged_at` before classifying GitHub pull requests as merged. (*Test*: `testGitHubOpenPrWithoutMergedAtIsNotMerged`, commit `3fc5b46`).
 * **KB-76**: Skipped ANSI SGR escape sequences when calculating display width and truncating text in TUI tabs. (*Test*: `testTuiTabRowIsNotTruncatedByAnsiCodes`, commit `7f8b299`).
 
@@ -263,11 +275,11 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 * **KB-80**: Truncated preview pane rows in TUI to terminal width to prevent layout overflow. (*Test*: `testTuiPreviewPaneKeepsLongTitleInsideTerminalWidth`, commit `4691d59`).
 * **KB-81**: Aligned heatmap start dates strictly to Monday, preserved exact counts (14, 28, 91), and localized weekday labels. (*Test*: `testHeatmapColumnsStartOnMonday`, commit `4691d59`).
 * **KB-82**: Retained original Redmine closed status names (e.g., `Rejected`) when mapped to category `done`. (*Test*: `testRedmineClosedStatusKeepsNameForMapping`, commit `4691d59`).
-* **KB-83**: Handled `INT_MIN` in [Schedule.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/Schedule.cpp) to prevent two's-complement overflow and negative durations. (*Test*: `testScheduleNormalizesMinimumIntegerDurations`, commit `dcde392`).
+* **KB-83**: Handled `INT_MIN` in [Schedule.cpp](src/core/Schedule.cpp) to prevent two's-complement overflow and negative durations. (*Test*: `testScheduleNormalizesMinimumIntegerDurations`, commit `dcde392`).
 * **KB-84**: Handled GitHub queries containing non-state qualifiers (e.g. `is:issue`) so repository prefixing and default `is:open` filter are not suppressed. (*Test*: `testGitHubQueryWithTypeQualifierStillRequestsOpenItemsOnly`, commit `08673b5`).
 * **KB-85**: Clamped parsed minute input in TUI settings before arithmetic conversion to seconds, preventing integer overflow with large inputs. (*Test*: `testTuiLargeDurationInputClampsWithoutOverflow`, commit `f1d8af6`).
-* **KB-86**: Implemented remote issue completion and reopening status sync for Jira (via transitions API), YouTrack (via commands API), and Nextcloud CalDAV (via VTODO STATUS). (*Test*: `testRemoteStatusSyncDispatchesForJiraYouTrackAndNextcloud`).
-* **KB-87**: Included all supported remote providers (Redmine, Todoist, Nextcloud) in `AppController::isCurrentListRemote()` single-list classification. (*Test*: `testCurrentListRemoteFlagIncludesAllRemoteProviders`).
+* **KB-86**: Implemented remote issue completion and reopening status sync for Jira (via transitions API), YouTrack (via commands API), and Nextcloud CalDAV (via VTODO STATUS). (*Test*: `testRemoteStatusSyncDispatchesForJiraYouTrackAndNextcloud`, commit `d40b2bc`).
+* **KB-87**: Included all supported remote providers (Redmine, Todoist, Nextcloud) in `AppController::isCurrentListRemote()` single-list classification. (*Test*: `testCurrentListRemoteFlagIncludesAllRemoteProviders`, commit `d40b2bc`).
 
 ---
 
@@ -276,5 +288,9 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](file://
 All listed issues are covered by Qt Test regression tests executed via CTest:
 
 ```bash
-QT_QPA_PLATFORM=offscreen ctest --test-dir /tmp/gofi-qt-build --output-on-failure
+build_dir=$(mktemp -d /tmp/go-for-it-build.XXXXXX)
+cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build "$build_dir" -j2
+QT_QPA_PLATFORM=offscreen ctest --test-dir "$build_dir" --output-on-failure
+cmake -E remove_directory "$build_dir"
 ```
