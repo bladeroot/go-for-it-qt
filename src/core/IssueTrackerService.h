@@ -158,7 +158,7 @@ private:
     bool m_syncing = false;
     int m_activeSyncRequests = 0;
     QString m_lastStatusMessage;
-    QSet<QString> m_jiraBearerLists;
+    QHash<QString, QString> m_jiraBearerTokens;
     std::function<bool(const QString& listId, const QString& jiraKey)> m_activeTaskChecker;
 
     friend class ::TestTodoTxt;

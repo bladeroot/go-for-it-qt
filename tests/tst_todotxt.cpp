@@ -4646,11 +4646,16 @@ private slots:
         IssueTrackerService svc;
         QSignalSpy postedSpy(&svc, &IssueTrackerService::worklogPosted);
         QStandardPaths::setTestModeEnabled(false);
+        // Keep test mode off for the whole exchange: the Bearer retry is issued from the
+        // reply handler, after the first request returns. (Re-enabling test mode right after
+        // the first call made the retry hit the test-mode guard; see KB-47.)
         svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), QDateTime::currentDateTimeUtc().addSecs(-1500), 1500);
+        QTRY_VERIFY_WITH_TIMEOUT(postedSpy.count() >= 1 || bearer >= 1, 5000);
+        QTest::qWait(300);
         QStandardPaths::setTestModeEnabled(true);
 
-        QTRY_VERIFY_WITH_TIMEOUT(basic + bearer >= 1, 5000);
-        QTest::qWait(300);
+        QCOMPARE(basic, 1);
+        QCOMPARE(bearer, 1);
         QCOMPARE(postedSpy.count(), 1);
         server.close();
     }
@@ -4696,6 +4701,107 @@ private slots:
         if (IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Inactive"), QString(), noMapping) == QStringLiteral("in_progress")) wrong << QStringLiteral("Inactive->in_progress");
         if (IssueTrackerService::mapRemoteStatusToLocal(QStringLiteral("Unblocked"), QString(), noMapping) == QStringLiteral("paused")) wrong << QStringLiteral("Unblocked->paused");
         QCOMPARE(wrong, QStringList());
+    }
+
+    // KB-47: 82b5093 changed postWorklog's test-mode guard to
+    // `if (!forceBearerAuth && QStandardPaths::isTestModeEnabled()) return;`, so any call
+    // with forceBearerAuth = true (the internal Bearer retry, or a direct caller) sends a
+    // real worklog in test mode again, undoing KB-37. The guard was relaxed only because
+    // the KB-44 test re-enabled test mode before the retry ran; that test is now fixed to
+    // keep test mode off for the whole exchange, so the guard can be unconditional again.
+    void testForcedBearerWorklogIsNoOpInTestMode() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        int requests = 0;
+        serveHttpFull(server, [&requests](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            ++requests;
+            return httpResponse("201 Created", "application/json", "{}");
+        });
+        QVERIFY(QStandardPaths::isTestModeEnabled());
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb47_jira");
+        entry.name = QStringLiteral("KB47 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("token");
+        entry.autoWorklog = true;
+
+        IssueTrackerService svc;
+        svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), QDateTime::currentDateTimeUtc().addSecs(-1500), 1500, true);
+        QTest::qWait(400);
+        QCOMPARE(requests, 0);
+        server.close();
+    }
+
+    // KB-48: 82b5093 remembers Jira lists that needed Bearer auth in m_jiraBearerLists and
+    // never forgets them for the life of the process. fetchJiraIssues inserts the list as
+    // soon as a Bearer retry *starts* (before knowing whether Bearer works), so a single
+    // rejected sync (wrong or expired token) pins the list to Bearer. On Jira Cloud, where
+    // API tokens only work with Basic email:token, correcting the token in the list dialog
+    // does not help: every later sync, worklog, comment and description push is sent with
+    // Bearer and fails until the app is restarted.
+    void testJiraBearerModeIsNotStickyAfterCredentialFix() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        // Phase 1: wrong token, everything rejected. Phase 2: "Cloud" accepts Basic only.
+        auto phase = std::make_shared<int>(1);
+        serveHttpFull(server, [phase](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
+            const QByteArray lower = head.toLower();
+            if (*phase == 2 && lower.contains("authorization: basic")) {
+                return httpResponse("200 OK", "application/json", "{\"issues\":[],\"total\":0}");
+            }
+            return httpResponse("401 Unauthorized", "application/json", "{}",
+                                "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb48_jira");
+        entry.name = QStringLiteral("KB48 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("wrong-token");
+
+        IssueTrackerService svc;
+        QSignalSpy syncedSpy(&svc, &IssueTrackerService::listIssuesSynced);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(syncedSpy.count(), 0);
+
+        // User fixes the token; the server now behaves like Jira Cloud.
+        *phase = 2;
+        entry.apiToken = QStringLiteral("correct-token");
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(syncedSpy.count(), 1);
+        server.close();
+    }
+
+    // KB-49: the KB-45 fix (82b5093) made mapPriorityName match whole names only and strip
+    // only "priority::", "priority:", "priority/" (and prio/severity) prefixes or a
+    // " priority" suffix separated by a space. Very common GitHub/GitLab label styles that
+    // mapped correctly before now give no priority at all: "priority-high",
+    // "priority_high", "high-priority", "P1 - High", "prio-low".
+    void testCommonPriorityLabelStylesStillMap() {
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("priority::high")), quint8(1));
+        QStringList unmapped;
+        const QList<QPair<QString, quint8>> cases = {
+            {QStringLiteral("priority-high"), 1},
+            {QStringLiteral("priority_high"), 1},
+            {QStringLiteral("high-priority"), 1},
+            {QStringLiteral("P1 - High"), 1},
+            {QStringLiteral("prio-low"), 3}
+        };
+        for (const auto& c : cases) {
+            if (IssueTrackerService::mapPriorityName(c.first) != c.second) unmapped << c.first;
+        }
+        QCOMPARE(unmapped, QStringList());
     }
 };
 

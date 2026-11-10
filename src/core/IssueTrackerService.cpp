@@ -434,7 +434,7 @@ void IssueTrackerService::applyAuthHeader(QNetworkRequest& req, const TodoListEn
         } else if (!token.isEmpty()) {
             req.setRawHeader("Authorization", QByteArray("Bearer ") + token.toUtf8());
         }
-    } else if (!forceBearerAuth && !m_jiraBearerLists.contains(entry.id) && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
+    } else if (!forceBearerAuth && !(m_jiraBearerTokens.contains(entry.id) && m_jiraBearerTokens.value(entry.id) == entry.apiToken) && entry.provider == QStringLiteral("Jira") && !user.isEmpty()) {
         const QByteArray credentials = (user + QLatin1Char(':') + token).toUtf8().toBase64();
         req.setRawHeader("Authorization", QByteArray("Basic ") + credentials);
     } else if (!token.isEmpty()) {
@@ -565,11 +565,21 @@ quint8 IssueTrackerService::mapPriorityName(const QString& priorityName) {
     QString p = priorityName.trimmed().toLower();
     if (p.isEmpty()) return TxtTask::NoPriority;
 
+    // Check P0-P4 with optional " - Name" or ": Name", e.g. "P1 - High", "P0: Blocker", "P2 - Normal"
+    static const QRegularExpression pCodeNameRe(QStringLiteral("^p([0-4])(?:\\s*[-:]\\s*.*)?$"));
+    const auto pMatch = pCodeNameRe.match(p);
+    if (pMatch.hasMatch()) {
+        return pMatch.captured(1).toUShort();
+    }
+
     bool hadPrefix = false;
     static const QStringList prefixes = {
         QStringLiteral("priority::"), QStringLiteral("priority:"), QStringLiteral("priority/"),
+        QStringLiteral("priority-"), QStringLiteral("priority_"),
         QStringLiteral("prio::"), QStringLiteral("prio:"), QStringLiteral("prio/"),
-        QStringLiteral("severity::"), QStringLiteral("severity:"), QStringLiteral("severity/")
+        QStringLiteral("prio-"), QStringLiteral("prio_"),
+        QStringLiteral("severity::"), QStringLiteral("severity:"), QStringLiteral("severity/"),
+        QStringLiteral("severity-"), QStringLiteral("severity_")
     };
     for (const QString& pref : prefixes) {
         if (p.startsWith(pref)) {
@@ -579,28 +589,40 @@ quint8 IssueTrackerService::mapPriorityName(const QString& priorityName) {
         }
     }
 
-    // Check P0-P4 / P-0 to P-4
-    if (p == QStringLiteral("p0") || p == QStringLiteral("p-0") || (hadPrefix && p == QStringLiteral("0"))) {
+    // Check P-0 to P-4 or hadPrefix with 0..4
+    if (p == QStringLiteral("p-0") || (hadPrefix && p == QStringLiteral("0"))) {
         return 0; // (A)
     }
-    if (p == QStringLiteral("p1") || p == QStringLiteral("p-1") || (hadPrefix && p == QStringLiteral("1"))) {
+    if (p == QStringLiteral("p-1") || (hadPrefix && p == QStringLiteral("1"))) {
         return 1; // (B)
     }
-    if (p == QStringLiteral("p2") || p == QStringLiteral("p-2") || (hadPrefix && p == QStringLiteral("2"))) {
+    if (p == QStringLiteral("p-2") || (hadPrefix && p == QStringLiteral("2"))) {
         return 2; // (C)
     }
-    if (p == QStringLiteral("p3") || p == QStringLiteral("p-3") || (hadPrefix && p == QStringLiteral("3"))) {
+    if (p == QStringLiteral("p-3") || (hadPrefix && p == QStringLiteral("3"))) {
         return 3; // (D)
     }
-    if (p == QStringLiteral("p4") || p == QStringLiteral("p-4") || (hadPrefix && p == QStringLiteral("4"))) {
+    if (p == QStringLiteral("p-4") || (hadPrefix && p == QStringLiteral("4"))) {
         return 4; // (E)
     }
 
-    // Normalize: remove trailing or leading "priority" or "severity" word if separated by space
-    if (p.endsWith(QStringLiteral(" priority"))) p.chop(9);
-    else if (p.startsWith(QStringLiteral("priority "))) p = p.mid(9).trimmed();
-    if (p.endsWith(QStringLiteral(" severity"))) p.chop(9);
-    else if (p.startsWith(QStringLiteral("severity "))) p = p.mid(9).trimmed();
+    // Strip priority/severity/prio suffixes separated by space, '-', or '_'
+    static const QStringList suffixes = {
+        QStringLiteral(" priority"), QStringLiteral("-priority"), QStringLiteral("_priority"),
+        QStringLiteral(" severity"), QStringLiteral("-severity"), QStringLiteral("_severity"),
+        QStringLiteral(" prio"), QStringLiteral("-prio"), QStringLiteral("_prio")
+    };
+    for (const QString& suff : suffixes) {
+        if (p.endsWith(suff)) {
+            p.chop(suff.length());
+            p = p.trimmed();
+            break;
+        }
+    }
+
+    // Strip leading "priority " or "severity "
+    if (p.startsWith(QStringLiteral("priority "))) p = p.mid(9).trimmed();
+    if (p.startsWith(QStringLiteral("severity "))) p = p.mid(9).trimmed();
 
     p = p.trimmed();
 
@@ -1930,9 +1952,6 @@ struct IssueTrackerService::RedmineSyncState {
 };
 
 void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpointStage, bool forceBearerAuth) {
-    if (forceBearerAuth) {
-        m_jiraBearerLists.insert(entry.id);
-    }
     const QString baseUrl = normalizeBaseUrl(entry.jiraUrl);
     if (baseUrl.isEmpty()) {
         const QString msg = tr("Jira Server URL is empty.");
@@ -1996,6 +2015,9 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
         const bool seraphAuthFailed = seraphReason.contains("AUTHENTICATED_FAILED") || seraphReason.contains("AUTHENTICATION_DENIED");
 
         if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
+            if (forceBearerAuth) {
+                m_jiraBearerTokens.remove(entry.id);
+            }
             if (state->pagesFetched == 0) {
                 if (!forceBearerAuth && !entry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
                     endSyncOperation();
@@ -2041,6 +2063,10 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
         processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
                 return;
             }
+        }
+
+        if (forceBearerAuth) {
+            m_jiraBearerTokens[entry.id] = entry.apiToken;
         }
 
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
@@ -2978,7 +3004,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                                       bool forceBearerAuth)
 {
     Q_UNUSED(taskId)
-    if (!forceBearerAuth && QStandardPaths::isTestModeEnabled()) return;
+    if (QStandardPaths::isTestModeEnabled()) return;
     if (!listEntry.autoWorklog || issueKey.isEmpty() || runtimeSeconds == 0) {
         return;
     }
@@ -2988,10 +3014,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
     }
 
     if (listEntry.provider == QStringLiteral("Jira")) {
-        const bool effectiveBearer = forceBearerAuth || m_jiraBearerLists.contains(listEntry.id);
-        if (effectiveBearer) {
-            m_jiraBearerLists.insert(listEntry.id);
-        }
+        const bool effectiveBearer = forceBearerAuth || (m_jiraBearerTokens.contains(listEntry.id) && m_jiraBearerTokens.value(listEntry.id) == listEntry.apiToken);
         const quint32 loggedSeconds = qMax(60U, runtimeSeconds);
         const QString encodedKey = QString::fromUtf8(QUrl::toPercentEncoding(issueKey));
         QUrl url(baseUrl + QStringLiteral("/rest/api/2/issue/") + encodedKey + QStringLiteral("/worklog"));
@@ -3011,8 +3034,10 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
 
             if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (effectiveBearer) {
+                    m_jiraBearerTokens.remove(listEntry.id);
+                }
                 if (!effectiveBearer && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
-                    m_jiraBearerLists.insert(listEntry.id);
                     postWorklog(listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, true);
                     return;
                 }
@@ -3022,6 +3047,10 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
                 setStatusMessage(errMsg);
                 emit syncFailed(listEntry.id, errMsg);
                 return;
+            }
+
+            if (effectiveBearer) {
+                m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
             }
 
             if (DatabaseManager::instance().isOpen() && !DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
@@ -3522,9 +3551,6 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
                                                  bool forceBearerAuth,
                                                  bool useV2Fallback)
 {
-    if (forceBearerAuth) {
-        m_jiraBearerLists.insert(listEntry.id);
-    }
     if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
@@ -3553,6 +3579,9 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
             const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
             if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (forceBearerAuth) {
+                    m_jiraBearerTokens.remove(listEntry.id);
+                }
                 if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
                     updateIssueDescription(listEntry, issueKey, markdownDetails, true, useV2Fallback);
                     return;
@@ -3563,6 +3592,9 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
                 }
                 setStatusMessage(tr("Failed to update description on Jira (%1): %2").arg(issueKey, reply->errorString()));
                 return;
+            }
+            if (forceBearerAuth) {
+                m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
             }
             setStatusMessage(tr("Updated description on Jira issue %1.").arg(issueKey));
         });
@@ -3922,9 +3954,6 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                                            bool forceBearerAuth,
                                            bool useV2Fallback)
 {
-    if (forceBearerAuth) {
-        m_jiraBearerLists.insert(listEntry.id);
-    }
     if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty() || markdownComment.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
@@ -3952,6 +3981,9 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
             const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
             if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (forceBearerAuth) {
+                    m_jiraBearerTokens.remove(listEntry.id);
+                }
                 if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
                     postIssueComment(listEntry, issueKey, markdownComment, true, useV2Fallback);
                     return;
@@ -3962,6 +3994,9 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
                 }
                 setStatusMessage(tr("Failed to post comment to Jira (%1): %2").arg(issueKey, reply->errorString()));
                 return;
+            }
+            if (forceBearerAuth) {
+                m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
             }
             setStatusMessage(tr("Posted comment to Jira issue %1.").arg(issueKey));
         });
