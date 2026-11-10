@@ -5459,6 +5459,131 @@ private slots:
         QFile::remove(dbPath);
     }
 
+    // KB-67: AppController::selectListById always calls TaskTimer::setListTimerOverrides, which
+    // sets m_iteration = 0, also when the list being "selected" is already the current one -
+    // clicking it again in the overview, saving its properties (listUpdated), or any other
+    // re-selection. In Pomodoro mode m_iteration is the position in the work/break cycle, so
+    // every such re-selection restarts the cycle: the long break after N pomodoros is
+    // postponed (or never reached for a user who often re-opens the list).
+    void testReselectingCurrentListKeepsPomodoroCycle() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb67.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        SettingsManager* settings = controller.settings();
+        const int oldMode = settings->timerMode();
+        const int oldPeriod = settings->pomodoroPeriod();
+        const int oldTask = settings->taskDuration();
+        const int oldBreak = settings->breakDuration();
+        const int oldLong = settings->longBreakDuration();
+        const bool oldResume = settings->resumeTasksAfterBreak();
+        settings->setTaskDuration(1500);
+        settings->setBreakDuration(300);
+        settings->setLongBreakDuration(900);
+        settings->setPomodoroPeriod(2);   // work, short break, work, LONG break
+        settings->setTimerMode(1);        // Pomodoro
+        settings->setResumeTasksAfterBreak(false);
+
+        const QString listId = controller.listManager()->addList(QStringLiteral("KB67 list"));
+        controller.selectListById(listId);
+        controller.addNewTask(QStringLiteral("KB67 task"));
+        controller.setActiveTodoRow(0);
+        QVERIFY(controller.timer()->hasActiveTask());
+
+        TaskTimer* timer = controller.timer();
+        timer->skipIteration();                 // pomodoro 1 -> short break (starts)
+        QVERIFY(timer->isBreakActive());
+        QVERIFY(qAbs(int(timer->remainingSeconds()) - 300) <= 2);
+        timer->skipIteration();                 // short break -> pomodoro 2
+        QVERIFY(!timer->isBreakActive());
+        timer->stop();
+
+        controller.selectListById(listId);      // user clicks the current list again
+        timer->skipIteration();                 // pomodoro 2 -> should be the LONG break
+        QVERIFY(timer->isBreakActive());
+        const int breakSec = int(timer->remainingSeconds());
+        timer->stop();
+
+        settings->setTimerMode(oldMode);
+        settings->setPomodoroPeriod(oldPeriod);
+        settings->setTaskDuration(oldTask);
+        settings->setBreakDuration(oldBreak);
+        settings->setLongBreakDuration(oldLong);
+        settings->setResumeTasksAfterBreak(oldResume);
+
+        QVERIFY2(qAbs(breakSec - 900) <= 2, qPrintable(QString::number(breakSec)));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-68: the TUI list editor masks the API token in its field list
+    // (`left(4) + "••••••••"`), and the GUI uses a password field, but pressing Enter on the
+    // token row copies the full token into m_inputBuffer and render() prints it in clear on
+    // the "Enter value:" line (and keeps it on screen while the user edits). Anyone looking at
+    // the terminal, a screen share, or a tmux/asciinema recording gets the whole secret.
+    // The test drives the real TuiApp and captures its terminal output.
+    void testTuiListEditDoesNotPrintApiToken() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb68_tui.db")));
+        const QString secret = QStringLiteral("KB68secretTOKEN0123456789");
+        QVariantMap cfg{
+            {QStringLiteral("name"), QStringLiteral("KB68 Jira")},
+            {QStringLiteral("provider"), QStringLiteral("Jira")},
+            {QStringLiteral("jiraUrl"), QStringLiteral("http://127.0.0.1:9")},
+            {QStringLiteral("jiraUser"), QStringLiteral("user@example.com")},
+            {QStringLiteral("apiToken"), secret}
+        };
+        const QString listId = ctrl.listManager()->saveListConfig(cfg, QStringLiteral("keep"));
+        QVERIFY(!listId.isEmpty());
+        ctrl.selectListById(listId);
+
+        const QString outPath = m_testSandbox.filePath(QStringLiteral("kb68_tui_out.txt"));
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int outFd = ::open(outPath.toLocal8Bit().constData(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        QVERIFY(savedStdin >= 0 && savedStdout >= 0 && outFd >= 0);
+        std::fflush(stdout);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(outFd, STDOUT_FILENO);
+        {
+            TuiApp tui(&ctrl);
+            auto feed = [&](const QByteArray& bytes) {
+                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())),
+                         static_cast<ssize_t>(bytes.size()));
+                for (int i = 0; i < 8; ++i) {
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending <= 0) break;
+                    QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                }
+            };
+            feed("L");                       // list picker (current list selected)
+            feed("e");                       // edit list
+            for (int i = 0; i < 4; ++i) feed("j");   // row 4: API token
+            feed("\r");                      // start editing the token
+            std::fflush(stdout);
+            feed("\033");                    // cancel the edit
+            QTest::qWait(80);                // let the ESC timer fire
+            feed("q");
+            feed("q");
+        }
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(outFd);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        QFile f(outPath);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QString screen = QString::fromUtf8(f.readAll());
+        QVERIFY2(screen.contains(QStringLiteral("KB68")), "TUI produced no list-edit output");
+        QEXPECT_FAIL("", "KB-68: TUI prints the full API token while editing it", Continue);
+        QVERIFY(!screen.contains(secret));
+        QTRY_VERIFY_WITH_TIMEOUT(!ctrl.issueTracker()->isSyncing(), 5000);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

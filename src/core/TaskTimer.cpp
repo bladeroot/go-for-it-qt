@@ -43,7 +43,10 @@ QString TaskTimer::formattedRemainingTime() const {
         .arg(s, 2, 10, QLatin1Char('0'));
 }
 
-void TaskTimer::setListTimerOverrides(const Schedule& overrideSchedule, int overrideReminderSec) {
+void TaskTimer::setListTimerOverrides(const Schedule& overrideSchedule, int overrideReminderSec, bool forceReset) {
+    if (!forceReset && m_overrideSchedule == overrideSchedule && m_overrideReminderTime == overrideReminderSec) {
+        return;
+    }
     m_overrideSchedule = overrideSchedule;
     m_overrideReminderTime = overrideReminderSec;
     m_iteration = 0;

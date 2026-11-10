@@ -38,7 +38,10 @@ public:
     [[nodiscard]] uint activeTaskTimerValue() const noexcept { return m_activeTaskTimerSec; }
     [[nodiscard]] uint activeTaskDuration() const noexcept { return m_activeTaskDurationSec; }
 
-    void setListTimerOverrides(const Schedule& overrideSchedule, int overrideReminderSec);
+    [[nodiscard]] const Schedule& overrideSchedule() const noexcept { return m_overrideSchedule; }
+    [[nodiscard]] int overrideReminderTime() const noexcept { return m_overrideReminderTime; }
+
+    void setListTimerOverrides(const Schedule& overrideSchedule, int overrideReminderSec, bool forceReset = true);
     void setActiveTask(qint64 taskId, const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds);
     void setActiveTask(const QString& description, uint accumulatedSeconds, uint estimatedDurationSeconds);
     void clearActiveTask();

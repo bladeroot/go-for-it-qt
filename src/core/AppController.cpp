@@ -237,7 +237,7 @@ void AppController::selectListById(const QString& listId) {
     m_currentFilterTitle = entry.name;
     m_settings.setLastLoadedListId(entry.id);
 
-    m_timer.setListTimerOverrides(entry.customSchedule, entry.reminderTime);
+    m_timer.setListTimerOverrides(entry.customSchedule, entry.reminderTime, !sameList);
     const bool isLocalList = (entry.provider == QStringLiteral("SQLite") || entry.provider == QStringLiteral("Todo.txt"));
     m_taskManager.setActiveList(
         entry.id,
