@@ -169,6 +169,13 @@ int TaskFilterProxyModel::mapToSourceRow(int proxyRow) const {
     return mapToSource(proxyIdx).row();
 }
 
+int TaskFilterProxyModel::mapFromSourceRow(int sourceRow) const {
+    if (!sourceModel()) return -1;
+    const QModelIndex srcIdx = sourceModel()->index(sourceRow, 0);
+    if (!srcIdx.isValid()) return -1;
+    return mapFromSource(srcIdx).row();
+}
+
 bool TaskFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const {
     Q_UNUSED(sourceParent)
     const auto* store = qobject_cast<const TaskStoreModel*>(sourceModel());
@@ -216,6 +223,12 @@ bool TaskFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& so
                         matched = true;
                         break;
                     }
+                }
+            }
+            if (!matched && needle.type == TxtPartType::Tag) {
+                const QString fullTag = needle.tagName + QLatin1Char(':') + needle.content;
+                if (descLower.contains(fullTag)) {
+                    matched = true;
                 }
             }
             if (!matched) {

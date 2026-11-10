@@ -102,6 +102,11 @@ public:
     Q_INVOKABLE bool updateTaskText(bool fromDoneList, int proxyRow, const QString& simpleText);
     // Returns true if local SQLite persistence succeeded. Remote issue tracker sync is dispatched asynchronously.
     Q_INVOKABLE bool updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details);
+    Q_INVOKABLE qint64 getTaskIdAt(bool fromDoneList, int proxyRow) const;
+    Q_INVOKABLE int findProxyRowByTaskId(bool fromDoneList, qint64 taskId) const;
+    Q_INVOKABLE bool updateTaskDetailsById(qint64 taskId, const QString& details);
+    Q_INVOKABLE bool addTaskCommentById(qint64 taskId, const QString& commentText);
+    Q_INVOKABLE bool changeTaskPriorityById(qint64 taskId, const QString& priorityLetter);
     // Returns true if local SQLite persistence succeeded. Remote issue tracker sync is dispatched asynchronously.
     Q_INVOKABLE bool addTaskComment(bool fromDoneList, int proxyRow, const QString& commentText);
     Q_INVOKABLE bool markTaskViewed(bool fromDoneList, int proxyRow);

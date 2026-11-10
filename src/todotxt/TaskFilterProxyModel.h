@@ -44,6 +44,7 @@ public:
     void setReferenceDate(const QDate& date);
 
     Q_INVOKABLE int mapToSourceRow(int proxyRow) const;
+    Q_INVOKABLE int mapFromSourceRow(int sourceRow) const;
 
 signals:
     void filterQueryChanged();

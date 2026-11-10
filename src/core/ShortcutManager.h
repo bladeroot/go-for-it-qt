@@ -15,6 +15,7 @@ struct ShortcutEntry {
 
 class ShortcutManager : public QAbstractListModel {
     Q_OBJECT
+    Q_PROPERTY(QVariantMap shortcutMap READ shortcutMap NOTIFY shortcutsChanged)
 
 public:
     enum Roles {
@@ -30,6 +31,7 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
+    [[nodiscard]] QVariantMap shortcutMap() const;
     Q_INVOKABLE QString shortcutFor(const QString& shortcutId) const;
     Q_INVOKABLE void setShortcut(const QString& shortcutId, const QString& sequence);
     Q_INVOKABLE void resetDefaults();

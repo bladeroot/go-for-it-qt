@@ -540,6 +540,109 @@ bool AppController::updateTaskText(bool fromDoneList, int proxyRow, const QStrin
     return true;
 }
 
+qint64 AppController::getTaskIdAt(bool fromDoneList, int proxyRow) const {
+    const TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    const TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0 || sourceRow >= store->tasks().size()) return -1;
+    return store->taskAt(sourceRow).id();
+}
+
+int AppController::findProxyRowByTaskId(bool fromDoneList, qint64 taskId) const {
+    if (taskId <= 0) return -1;
+    const TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    const TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const auto& tasks = store->tasks();
+    for (int i = 0; i < tasks.size(); ++i) {
+        if (tasks.at(i).id() == taskId) {
+            return proxy.mapFromSourceRow(i);
+        }
+    }
+    return -1;
+}
+
+bool AppController::updateTaskDetailsById(qint64 taskId, const QString& details) {
+    if (taskId <= 0) return false;
+    for (bool fromDone : {false, true}) {
+        TaskStoreModel* store = fromDone ? m_taskManager.doneModel() : m_taskManager.todoModel();
+        const auto& tasks = store->tasks();
+        for (int i = 0; i < tasks.size(); ++i) {
+            if (tasks.at(i).id() == taskId) {
+                const TxtTask task = tasks.at(i);
+                if (!store->updateTaskDetails(i, details)) {
+                    return false;
+                }
+                const QString targetListId = task.listId().isEmpty() ? m_currentListId : task.listId();
+                const int listIdx = m_listManager.indexOfId(targetListId);
+                if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
+                    const TodoListEntry listEntry = m_listManager.entry(listIdx);
+                    if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")) {
+                        m_issueTracker.updateIssueDescription(listEntry, task.jiraKey(), details);
+                    }
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool AppController::addTaskCommentById(qint64 taskId, const QString& commentText) {
+    if (commentText.trimmed().isEmpty() || taskId <= 0) return false;
+    for (bool fromDone : {false, true}) {
+        TaskStoreModel* store = fromDone ? m_taskManager.doneModel() : m_taskManager.todoModel();
+        const auto& tasks = store->tasks();
+        for (int i = 0; i < tasks.size(); ++i) {
+            if (tasks.at(i).id() == taskId) {
+                const TxtTask task = tasks.at(i);
+                const QString targetListId = task.listId().isEmpty() ? m_currentListId : task.listId();
+                const int listIdx = m_listManager.indexOfId(targetListId);
+                QString author = QStringLiteral("Me");
+                if (listIdx >= 0) {
+                    const TodoListEntry listEntry = m_listManager.entry(listIdx);
+                    if (!listEntry.jiraUser.trimmed().isEmpty()) {
+                        author = listEntry.jiraUser.trimmed();
+                    }
+                }
+                if (!store->appendTaskComment(i, author, commentText)) {
+                    return false;
+                }
+                if (listIdx >= 0 && !task.jiraKey().isEmpty()) {
+                    const TodoListEntry listEntry = m_listManager.entry(listIdx);
+                    if (listEntry.provider != QStringLiteral("SQLite") && listEntry.provider != QStringLiteral("Todo.txt")) {
+                        m_issueTracker.postIssueComment(listEntry, task.jiraKey(), commentText);
+                    }
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool AppController::changeTaskPriorityById(qint64 taskId, const QString& priorityLetter) {
+    if (taskId <= 0) return false;
+    for (bool fromDone : {false, true}) {
+        TaskStoreModel* store = fromDone ? m_taskManager.doneModel() : m_taskManager.todoModel();
+        const auto& tasks = store->tasks();
+        for (int i = 0; i < tasks.size(); ++i) {
+            if (tasks.at(i).id() == taskId) {
+                quint8 prio = TxtTask::NoPriority;
+                const QString p = priorityLetter.trimmed().toUpper();
+                if (!p.isEmpty() && p != QStringLiteral("NONE") && p != QStringLiteral("CLEAR")) {
+                    const QChar ch = p.at(0);
+                    if (ch >= QLatin1Char('A') && ch <= QLatin1Char('Z')) {
+                        prio = static_cast<quint8>(ch.unicode() - 'A');
+                    }
+                }
+                const QModelIndex idx = store->index(i, 0);
+                return store->setData(idx, prio, TaskStoreModel::PriorityRole);
+            }
+        }
+    }
+    return false;
+}
+
 bool AppController::updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details) {
     TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
     TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();

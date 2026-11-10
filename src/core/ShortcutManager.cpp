@@ -46,6 +46,14 @@ QHash<int, QByteArray> ShortcutManager::roleNames() const {
     };
 }
 
+QVariantMap ShortcutManager::shortcutMap() const {
+    QVariantMap map;
+    for (const ShortcutEntry& e : m_shortcuts) {
+        map.insert(e.id, e.sequence);
+    }
+    return map;
+}
+
 QString ShortcutManager::shortcutFor(const QString& shortcutId) const {
     for (const ShortcutEntry& e : m_shortcuts) {
         if (e.id == shortcutId) {

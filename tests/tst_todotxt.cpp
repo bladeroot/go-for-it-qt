@@ -20,6 +20,7 @@
 #include <QTcpSocket>
 #include <QDesktopServices>
 #include <QtTest>
+#include "ShortcutManager.h"
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlContext>
@@ -5654,6 +5655,336 @@ private slots:
         QVERIFY2(remainingSet.match(out).hasMatch(), qPrintable(out));
         DatabaseManager::instance().close();
         QFile::remove(testDb);
+    }
+
+    // KB-70: TuiApp::renderMarkdownToAnsi truncates code-block lines and word-wraps paragraphs,
+    // but emits headings (`#`, `##`, ...) and table rows (`| ... |`) at full length, and the
+    // MarkdownView branch of render() writes every line as is. A heading or table row wider than
+    // the terminal is wrapped by the terminal onto extra rows, so the frame grows past the
+    // screen height: the view scrolls, the header bar disappears and the status line is drawn
+    // over the content. The test runs the real TuiApp on a 30x120 pseudo-terminal and opens a
+    // task description with a 250-character heading.
+    void testTuiMarkdownViewKeepsLongHeadingsInsideTerminalWidth() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb70_tui.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB70"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+        ctrl.addNewTask(QStringLiteral("KB70 task"));
+        QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+        const QString longRun = QStringLiteral("KB70") + QString(246, QLatin1Char('h'));
+        QVERIFY(ctrl.updateTaskDetails(false, 0, QStringLiteral("# ") + longRun + QStringLiteral("\n\nbody text")));
+
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        QVERIFY(master >= 0);
+        QCOMPARE(::grantpt(master), 0);
+        QCOMPARE(::unlockpt(master), 0);
+        const int slave = ::open(::ptsname(master), O_RDWR | O_NOCTTY);
+        QVERIFY(slave >= 0);
+        struct winsize ws {};
+        ws.ws_row = 30;
+        ws.ws_col = 120;
+        ::ioctl(slave, TIOCSWINSZ, &ws);
+        ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
+        QByteArray captured;
+        auto drain = [&]() {
+            char buf[8192];
+            for (;;) {
+                const ssize_t n = ::read(master, buf, sizeof(buf));
+                if (n <= 0) break;
+                captured.append(buf, static_cast<int>(n));
+            }
+        };
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        std::fflush(stdout);
+        ::dup2(slave, STDIN_FILENO);
+        ::dup2(slave, STDOUT_FILENO);
+        bool started = false;
+        {
+            TuiApp tui(&ctrl);
+            started = tui.start();
+            drain();
+            if (started) {
+                (void)::write(master, "v", 1);
+                QTest::qWait(20);
+                int pending = 0;
+                ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                if (pending > 0) QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                drain();
+                captured.clear();                       // keep only the markdown frame
+                QMetaObject::invokeMethod(&tui, "render", Qt::DirectConnection);
+                drain();
+                (void)::write(master, "q", 1);
+                QTest::qWait(20);
+                ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                if (pending > 0) QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                drain();
+            }
+        }
+        drain();
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(slave);
+        ::close(master);
+        QVERIFY(started);
+
+        // Keep the last full frame (render() starts each frame with clear+home), strip ANSI
+        // sequences, and check that the 250-character heading was not printed in one piece.
+        QString screen = QString::fromUtf8(captured);
+        const int lastFrame = screen.lastIndexOf(QStringLiteral("\x1b[H"));
+        if (lastFrame >= 0) screen = screen.mid(lastFrame);
+        static const QRegularExpression ansiRe(QStringLiteral("\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+        screen.remove(ansiRe);
+        QVERIFY2(screen.contains(QStringLiteral("KB70")), "markdown view was not rendered");
+        QVERIFY2(!screen.contains(longRun), "the 250-column heading was written in one line on a 120-column terminal");
+    }
+
+    // KB-71: TaskDetailsDialog remembers the task by its *proxy row* (`taskRow`) when it opens
+    // and, on OK / "Post Comment" / priority change, calls app.updateTaskDetails /
+    // addTaskComment / changeTaskPriority with that row. If the list changes while the dialog
+    // is open - an auto-sync refresh brings in a new issue, a task is added on top, removed,
+    // completed, or the filter changes - the row now points to another task. The edited
+    // description is then saved to the wrong task and, for tracker lists, pushed to the wrong
+    // issue (updateIssueDescription / postIssueComment use the jira key of whatever task is now
+    // at that row). The test loads the real built TaskDetailsDialog.qml with a real AppController.
+    void testTaskDetailsDialogSavesToTheTaskItWasOpenedFor() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb71.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const bool oldOnTop = controller.settings()->newTasksOnTop();
+        controller.settings()->setNewTasksOnTop(false);
+        const QString listId = controller.listManager()->addList(QStringLiteral("KB71 list"));
+        controller.selectListById(listId);
+        while (controller.todoProxyModel()->rowCount() > 0) QVERIFY(controller.removeTask(false, 0));
+        controller.addNewTask(QStringLiteral("KB71 first"));
+        controller.addNewTask(QStringLiteral("KB71 second"));
+        QCOMPARE(controller.todoProxyModel()->rowCount(), 2);
+        int rowSecond = -1;
+        for (int r = 0; r < 2; ++r) {
+            if (controller.todoProxyModel()->data(controller.todoProxyModel()->index(r, 0), TaskStoreModel::DescriptionRole)
+                    .toString().contains(QStringLiteral("KB71 second"))) rowSecond = r;
+        }
+        QVERIFY(rowSecond >= 0);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        const QString qmlFile = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml/dialogs/TaskDetailsDialog.qml");
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlFile));
+        std::unique_ptr<QObject> dialog(comp.create());
+        QVERIFY2(dialog, qPrintable(comp.errorString()));
+
+        // User opens the details of "KB71 second" and types a description.
+        QVERIFY(QMetaObject::invokeMethod(dialog.get(), "openForTask",
+            Q_ARG(QVariant, false), Q_ARG(QVariant, rowSecond), Q_ARG(QVariant, QStringLiteral("KB71 second")),
+            Q_ARG(QVariant, QStringLiteral("todo")), Q_ARG(QVariant, QStringLiteral("KB71 description for second")),
+            Q_ARG(QVariant, QVariantList()), Q_ARG(QVariant, QString()), Q_ARG(QVariant, QString()),
+            Q_ARG(QVariant, QString())));
+
+        // Meanwhile the list changes: a new task lands on top (as with "new tasks on top", or
+        // a new issue arriving with an auto-sync), shifting every row down by one.
+        controller.settings()->setNewTasksOnTop(true);
+        controller.addNewTask(QStringLiteral("KB71 inserted"));
+        QCOMPARE(controller.todoProxyModel()->rowCount(), 3);
+
+        QVERIFY(QMetaObject::invokeMethod(dialog.get(), "accept"));
+        QCoreApplication::processEvents();
+
+        QString secondDetails;
+        QString firstDetails;
+        const auto collect = [&](TaskFilterProxyModel* proxy) {
+            for (int r = 0; r < proxy->rowCount(); ++r) {
+                const QModelIndex i = proxy->index(r, 0);
+                const QString d = proxy->data(i, TaskStoreModel::DescriptionRole).toString();
+                const QString det = proxy->data(i, TaskStoreModel::DetailsRole).toString();
+                if (d.contains(QStringLiteral("KB71 second"))) secondDetails = det;
+                if (d.contains(QStringLiteral("KB71 first")) || d.contains(QStringLiteral("KB71 inserted"))) firstDetails += det;
+            }
+        };
+        collect(controller.todoProxyModel());
+        collect(controller.doneProxyModel());
+        controller.settings()->setNewTasksOnTop(oldOnTop);
+        dialog.reset();
+        QVERIFY2(secondDetails == QStringLiteral("KB71 description for second") && firstDetails.isEmpty(),
+                 qPrintable(QStringLiteral("second='%1' first='%2'").arg(secondDetails, firstDetails)));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-72: Main.qml binds every global Shortcut as
+    //   `sequence: app.shortcuts.shortcutFor("<id>")`
+    // A QML binding to an invokable call is evaluated once and only re-evaluated when a
+    // notifying property it reads changes; `app.shortcuts` is CONSTANT and nothing in qml/
+    // listens to ShortcutManager::shortcutsChanged. Changing (or resetting) a shortcut in
+    // Settings > Shortcuts therefore updates the settings list and shortcuts.ini, but the
+    // window keeps reacting to the old key combination until the app is restarted - and a key
+    // freed by conflict resolution keeps triggering its old action. The test loads the real
+    // built Main.qml with a real AppController and inspects its Shortcut objects.
+    void testChangedShortcutAppliesWithoutRestart() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb72.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        ShortcutManager* sm = controller.shortcuts();
+        const QString oldFilter = sm->shortcutFor(QStringLiteral("filter"));
+        QVERIFY(!oldFilter.isEmpty());
+        const QString newSeq = QStringLiteral("Ctrl+Alt+F9");
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        // The build-tree module dirs carry qmldir files that `prefer` the compiled qrc copy, which
+        // only exists inside go-for-it-qt. Copy the built QML sources without them and load Main.qml.
+        const QString srcRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml");
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb72_qml"));
+        QDir(qmlRoot).removeRecursively();
+        QDirIterator it(srcRoot, {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString f = it.next();
+            const QString dst = qmlRoot + f.mid(srcRoot.size());
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            QVERIFY(QFile::copy(f, dst));
+        }
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> window(comp.create());
+        QVERIFY2(window, qPrintable(comp.errorString()));
+
+        const auto sequences = [&window]() {
+            QStringList seqs;
+            for (QObject* o : window->findChildren<QObject*>()) {
+                if (QByteArray(o->metaObject()->className()).contains("Shortcut")) {
+                    const QVariant v = o->property("sequence");
+                    seqs << QKeySequence(v.toString()).toString(QKeySequence::PortableText);
+                }
+            }
+            return seqs;
+        };
+        const QStringList before = sequences();
+        QVERIFY2(before.contains(QKeySequence(oldFilter).toString(QKeySequence::PortableText)), qPrintable(before.join(QStringLiteral(", "))));
+
+        sm->setShortcut(QStringLiteral("filter"), newSeq);
+        QCoreApplication::processEvents();
+        const QStringList after = sequences();
+
+        sm->setShortcut(QStringLiteral("filter"), oldFilter);   // restore the sandbox shortcuts.ini
+        window.reset();
+        QVERIFY2(after.contains(newSeq), qPrintable(after.join(QStringLiteral(", "))));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-73: the TUI header bar prints the current list name (`currentFilterTitle`) in full,
+    // and the tab row appends the search query (" 🔍 /<query>") in full. Neither is truncated
+    // to the terminal width (headerGap is clamped to 1 but the badge itself is not cut), so a
+    // long list name or search query makes the terminal wrap that row and the whole frame
+    // shifts down, just like KB-70. The test runs the real TuiApp on a 30x120 pseudo-terminal
+    // with a 150-character list name.
+    void testTuiHeaderKeepsLongListNameInsideTerminalWidth() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb73_tui.db")));
+        const QString longName = QStringLiteral("KB73") + QString(146, QLatin1Char('n'));
+        const QString listId = ctrl.listManager()->addList(longName);
+        ctrl.selectListById(listId);
+        QCOMPARE(ctrl.currentFilterTitle(), longName);
+
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        QVERIFY(master >= 0);
+        QCOMPARE(::grantpt(master), 0);
+        QCOMPARE(::unlockpt(master), 0);
+        const int slave = ::open(::ptsname(master), O_RDWR | O_NOCTTY);
+        QVERIFY(slave >= 0);
+        struct winsize ws {};
+        ws.ws_row = 30;
+        ws.ws_col = 120;
+        ::ioctl(slave, TIOCSWINSZ, &ws);
+        ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
+        QByteArray captured;
+        auto drain = [&]() {
+            char buf[8192];
+            for (;;) {
+                const ssize_t n = ::read(master, buf, sizeof(buf));
+                if (n <= 0) break;
+                captured.append(buf, static_cast<int>(n));
+            }
+        };
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        std::fflush(stdout);
+        ::dup2(slave, STDIN_FILENO);
+        ::dup2(slave, STDOUT_FILENO);
+        bool started = false;
+        {
+            TuiApp tui(&ctrl);
+            started = tui.start();
+            drain();
+            if (started) {
+                captured.clear();
+                QMetaObject::invokeMethod(&tui, "render", Qt::DirectConnection);
+                drain();
+            }
+        }
+        drain();
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(slave);
+        ::close(master);
+        QVERIFY(started);
+
+        QString screen = QString::fromUtf8(captured);
+        const int lastFrame = screen.lastIndexOf(QStringLiteral("\x1b[H"));
+        if (lastFrame >= 0) screen = screen.mid(lastFrame);
+        static const QRegularExpression ansiRe(QStringLiteral("\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+        screen.remove(ansiRe);
+        QVERIFY2(screen.contains(QStringLiteral("KB73")), "TUI frame was not rendered");
+        QVERIFY2(!screen.contains(longName), "the 150-column list name was written in one line on a 120-column terminal");
+    }
+
+    // KB-74: TaskFilterProxyModel::setFilterQuery turns every search token that contains a
+    // colon into a Tag needle (name before the first ':', value after it), and
+    // filterAcceptsRow then only compares it with TxtPart's of type Tag. TxtTask stores
+    // http(s)/mailto links as TxtPartType::Uri and tokens with more than one colon (times like
+    // 10:30:00, "a:b:c") as Word, so searching for a pasted link or such a token finds nothing,
+    // although the text is right there in the task description.
+    void testSearchFindsTasksByUrlAndColonWords() {
+        TaskStoreModel store(false);
+        store.setTasks({
+            TxtTask::fromSimpleTxt(QStringLiteral("Review https://example.com/pr/1 today"), false, false),
+            TxtTask::fromSimpleTxt(QStringLiteral("Standup at 10:30:00 sharp"), false, false),
+            TxtTask::fromSimpleTxt(QStringLiteral("Unrelated task"), false, false)
+        });
+        TaskFilterProxyModel proxy;
+        proxy.setSourceModel(&store);
+        QCOMPARE(proxy.rowCount(), 3);
+
+        proxy.setFilterQuery(QStringLiteral("review"));        // plain word works
+        QCOMPARE(proxy.rowCount(), 1);
+
+        QStringList notFound;
+        proxy.setFilterQuery(QStringLiteral("https://example.com/pr/1"));
+        if (proxy.rowCount() != 1) notFound << QStringLiteral("https://example.com/pr/1");
+        proxy.setFilterQuery(QStringLiteral("10:30:00"));
+        if (proxy.rowCount() != 1) notFound << QStringLiteral("10:30:00");
+        QCOMPARE(notFound, QStringList());
+    }
+
+    // KB-75: parseGitHubIssuesJson marks a pull request as "merged" when
+    // `!pull_request.merged_at.isNull()`. A missing key yields QJsonValue::Undefined, which is
+    // not Null, so every open PR whose `pull_request` object has no `merged_at` field (GitHub
+    // Enterprise Server versions before the field was added to issue/search results, proxies or
+    // mirrors that trim the object) is reported as merged: the task gets "@merged" and, with the
+    // usual "merged -> done" status mapping, open PRs are closed locally on every sync.
+    void testGitHubOpenPrWithoutMergedAtIsNotMerged() {
+        const QByteArray json =
+            "{\"total_count\":1,\"incomplete_results\":false,\"items\":["
+            "{\"number\":42,\"title\":\"KB75 open PR\",\"state\":\"open\",\"draft\":false,"
+            "\"repository_url\":\"https://api.github.com/repos/owner/repo\","
+            "\"html_url\":\"https://github.com/owner/repo/pull/42\","
+            "\"pull_request\":{\"url\":\"https://api.github.com/repos/owner/repo/pulls/42\"},"
+            "\"labels\":[]}]}";
+        const QVector<RemoteIssueItem> items = IssueTrackerService::parseGitHubIssuesJson(json);
+        QCOMPARE(items.size(), 1);
+        QCOMPARE(items.first().remoteStatus, QStringLiteral("open"));
     }
 };
 

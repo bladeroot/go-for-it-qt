@@ -1398,7 +1398,7 @@ QStringList TuiApp::renderMarkdownToAnsi(const QString& markdown, int maxWidth) 
             while (level < trimmed.size() && trimmed.at(level) == QLatin1Char('#')) {
                 ++level;
             }
-            const QString hText = trimmed.mid(level).trimmed();
+            const QString hText = truncateVisible(trimmed.mid(level).trimmed(), wrapCols - 4);
             if (level == 1) {
                 out.append(ESC_BOLD + FG_CYAN + QStringLiteral("  █ ") + hText + ESC_RESET);
                 out.append(FG_CYAN + QStringLiteral("  ") + QString(qMin(wrapCols, static_cast<int>(hText.size()) + 4), QChar(0x2550)) + ESC_RESET);
@@ -1438,7 +1438,7 @@ QStringList TuiApp::renderMarkdownToAnsi(const QString& markdown, int maxWidth) 
         if (trimmed.startsWith(QLatin1Char('|')) && trimmed.endsWith(QLatin1Char('|'))) {
             QString tableLine = trimmed;
             tableLine.replace(QLatin1Char('|'), FG_CYAN + QStringLiteral(" │ ") + FG_WHITE);
-            out.append(QStringLiteral("  ") + tableLine + ESC_RESET);
+            out.append(truncateVisible(QStringLiteral("  ") + tableLine + ESC_RESET, wrapCols));
             continue;
         }
 
@@ -1894,12 +1894,16 @@ void TuiApp::render() {
     // -------------------------------------------------------------------------
     // Row 1: Top Header Bar (App + Active List + Sync state)
     // -------------------------------------------------------------------------
-    const QString listBadge = QStringLiteral(" 🍅 Go for It Qt [VIM TUI] │ 📋 %1 (%2) ")
-        .arg(m_app->currentFilterTitle(), m_app->currentListProvider());
     const QString syncInfo = m_app->issueTracker()->isSyncing()
         ? tr("⟳ Syncing...")
         : tr("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
-    const int headerGap = qMax(1, m_cols - displayWidth(listBadge) - displayWidth(syncInfo) - 1);
+    const int syncInfoWidth = displayWidth(syncInfo);
+    const int maxBadgeWidth = qMax(10, m_cols - syncInfoWidth - 2);
+    const QString rawTitle = sanitizeTerminalText(m_app->currentFilterTitle());
+    const QString rawListBadge = QStringLiteral(" 🍅 Go for It Qt [VIM TUI] │ 📋 %1 (%2) ")
+        .arg(rawTitle, m_app->currentListProvider());
+    const QString listBadge = truncateVisible(rawListBadge, maxBadgeWidth);
+    const int headerGap = qMax(1, m_cols - displayWidth(listBadge) - syncInfoWidth - 1);
     out += BG_HEADER + FG_CYAN + ESC_BOLD + listBadge + ESC_RESET + BG_HEADER
         + QString(headerGap, QLatin1Char(' ')) + FG_GRAY + syncInfo + QLatin1Char(' ') + ESC_RESET + QStringLiteral("\033[K\r\n");
 
@@ -1957,19 +1961,19 @@ void TuiApp::render() {
         tr(" 5:Done "),
         tr(" 6:Canceled ")
     };
-    out += QStringLiteral(" ");
+    QString tabRow = QStringLiteral(" ");
     for (int i = 0; i < tabNames.size(); ++i) {
         if (i == m_viewTab) {
-            out += BG_ACTIVE_TAB + tabNames.at(i) + ESC_RESET + QStringLiteral(" ");
+            tabRow += BG_ACTIVE_TAB + tabNames.at(i) + ESC_RESET + QStringLiteral(" ");
         } else {
-            out += FG_GRAY + tabNames.at(i) + ESC_RESET + QStringLiteral(" ");
+            tabRow += FG_GRAY + tabNames.at(i) + ESC_RESET + QStringLiteral(" ");
         }
     }
     const QString filterStr = currentProxy()->filterQuery();
     if (!filterStr.isEmpty()) {
-        out += FG_YELLOW + QStringLiteral(" 🔍 /%1").arg(filterStr) + ESC_RESET;
+        tabRow += FG_YELLOW + QStringLiteral(" 🔍 /%1").arg(filterStr) + ESC_RESET;
     }
-    out += QStringLiteral("\033[K\r\n");
+    out += truncateVisible(tabRow, m_cols) + QStringLiteral("\033[K\r\n");
 
     // -------------------------------------------------------------------------
     // Row 4: Horizontal Divider
@@ -2036,7 +2040,7 @@ void TuiApp::render() {
         for (int r = 0; r < availRows; ++r) {
             const int idx = m_markdownScroll + r;
             if (idx < mdLines.size()) {
-                out += mdLines.at(idx) + QStringLiteral("\033[K\r\n");
+                out += truncateVisible(mdLines.at(idx), m_cols) + QStringLiteral("\033[K\r\n");
             } else {
                 out += FG_GRAY + QStringLiteral(" ~") + ESC_RESET + QStringLiteral("\033[K\r\n");
             }
@@ -2476,7 +2480,7 @@ void TuiApp::render() {
         .arg(totalTasks > 0 ? (m_selectedRow + 1) : 0)
         .arg(totalTasks);
     out += modeTag + BG_HEADER + FG_WHITE
-        + padRight(QStringLiteral(" %1 │ %2").arg(m_app->currentFilterTitle(), posTag), m_cols - 9)
+        + padRight(QStringLiteral(" %1 │ %2").arg(sanitizeTerminalText(m_app->currentFilterTitle()), posTag), m_cols - 9)
         + ESC_RESET + QStringLiteral("\033[K\r\n");
 
     // -------------------------------------------------------------------------

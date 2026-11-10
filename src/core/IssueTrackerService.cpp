@@ -1223,7 +1223,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
         QString remoteStatus = state;
         if (isDraft) {
             remoteStatus = QStringLiteral("draft");
-        } else if (isPr && !obj.value(QStringLiteral("pull_request")).toObject().value(QStringLiteral("merged_at")).isNull()) {
+        } else if (isPr && !obj.value(QStringLiteral("pull_request")).toObject().value(QStringLiteral("merged_at")).toString().trimmed().isEmpty()) {
             remoteStatus = QStringLiteral("merged");
         }
 

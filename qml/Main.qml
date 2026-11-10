@@ -93,15 +93,18 @@ ApplicationWindow {
         onActivated: rootWindow.toggleMiniPlayer()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("filter")
+        id: filterShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["filter"] !== undefined) ? app.shortcuts.shortcutMap["filter"] : app.shortcuts.shortcutFor("filter")
         onActivated: rootWindow.showFilterBar = !rootWindow.showFilterBar
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("sort")
+        id: sortShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["sort"] !== undefined) ? app.shortcuts.shortcutMap["sort"] : app.shortcuts.shortcutFor("sort")
         onActivated: app.sortAllTasks()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("add-new")
+        id: addNewShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["add-new"] !== undefined) ? app.shortcuts.shortcutMap["add-new"] : app.shortcuts.shortcutFor("add-new")
         onActivated: {
             if (app.showingOverview) {
                 selectionPage.openNewListDialog()
@@ -112,27 +115,33 @@ ApplicationWindow {
         }
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("toggle-timer")
+        id: toggleTimerShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["toggle-timer"] !== undefined) ? app.shortcuts.shortcutMap["toggle-timer"] : app.shortcuts.shortcutFor("toggle-timer")
         onActivated: app.timer.toggleRunning()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("skip")
+        id: skipShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["skip"] !== undefined) ? app.shortcuts.shortcutMap["skip"] : app.shortcuts.shortcutFor("skip")
         onActivated: app.timer.skipIteration()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("mark-task-done")
+        id: markTaskDoneShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["mark-task-done"] !== undefined) ? app.shortcuts.shortcutMap["mark-task-done"] : app.shortcuts.shortcutFor("mark-task-done")
         onActivated: app.markActiveTaskDone()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("next-task")
+        id: nextTaskShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["next-task"] !== undefined) ? app.shortcuts.shortcutMap["next-task"] : app.shortcuts.shortcutFor("next-task")
         onActivated: app.switchToNextTask()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("prev-task")
+        id: prevTaskShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["prev-task"] !== undefined) ? app.shortcuts.shortcutMap["prev-task"] : app.shortcuts.shortcutFor("prev-task")
         onActivated: app.switchToPreviousTask()
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("move-row-up")
+        id: moveRowUpShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["move-row-up"] !== undefined) ? app.shortcuts.shortcutMap["move-row-up"] : app.shortcuts.shortcutFor("move-row-up")
         onActivated: {
             if (!app.showingOverview && rootWindow.currentActivityTab === 0) {
                 app.moveActiveTaskByOffset(-1)
@@ -140,7 +149,8 @@ ApplicationWindow {
         }
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("move-row-down")
+        id: moveRowDownShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["move-row-down"] !== undefined) ? app.shortcuts.shortcutMap["move-row-down"] : app.shortcuts.shortcutFor("move-row-down")
         onActivated: {
             if (!app.showingOverview && rootWindow.currentActivityTab === 0) {
                 app.moveActiveTaskByOffset(1)
@@ -148,7 +158,8 @@ ApplicationWindow {
         }
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("cycle-page")
+        id: cyclePageShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["cycle-page"] !== undefined) ? app.shortcuts.shortcutMap["cycle-page"] : app.shortcuts.shortcutFor("cycle-page")
         onActivated: {
             if (app.showingOverview) {
                 app.showingOverview = false
@@ -158,7 +169,8 @@ ApplicationWindow {
         }
     }
     Shortcut {
-        sequence: app.shortcuts.shortcutFor("cycle-page-reverse")
+        id: cyclePageReverseShortcut
+        sequence: (app.shortcuts.shortcutMap && app.shortcuts.shortcutMap["cycle-page-reverse"] !== undefined) ? app.shortcuts.shortcutMap["cycle-page-reverse"] : app.shortcuts.shortcutFor("cycle-page-reverse")
         onActivated: {
             if (!app.showingOverview) {
                 if (rootWindow.currentActivityTab > 0) {
@@ -181,6 +193,24 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+M"
         onActivated: rootWindow.toggleMiniPlayer()
+    }
+
+    Connections {
+        target: app.shortcuts
+        function onShortcutsChanged() {
+            filterShortcut.sequence = app.shortcuts.shortcutFor("filter")
+            sortShortcut.sequence = app.shortcuts.shortcutFor("sort")
+            addNewShortcut.sequence = app.shortcuts.shortcutFor("add-new")
+            toggleTimerShortcut.sequence = app.shortcuts.shortcutFor("toggle-timer")
+            skipShortcut.sequence = app.shortcuts.shortcutFor("skip")
+            markTaskDoneShortcut.sequence = app.shortcuts.shortcutFor("mark-task-done")
+            nextTaskShortcut.sequence = app.shortcuts.shortcutFor("next-task")
+            prevTaskShortcut.sequence = app.shortcuts.shortcutFor("prev-task")
+            moveRowUpShortcut.sequence = app.shortcuts.shortcutFor("move-row-up")
+            moveRowDownShortcut.sequence = app.shortcuts.shortcutFor("move-row-down")
+            cyclePageShortcut.sequence = app.shortcuts.shortcutFor("cycle-page")
+            cyclePageReverseShortcut.sequence = app.shortcuts.shortcutFor("cycle-page-reverse")
+        }
     }
 
     header: ToolBar {

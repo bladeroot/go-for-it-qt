@@ -14,6 +14,7 @@ Dialog {
 
     property bool fromDoneList: false
     property int taskRow: -1
+    property var taskId: -1
     property string taskTitle: ""
     property string taskStatus: "todo"
     property string taskPriority: ""
@@ -27,6 +28,7 @@ Dialog {
     function openForTask(isDoneList, rowIdx, titleStr, statusStr, detailsStr, commentsList, webUrl, prioStr, dueStr) {
         fromDoneList = isDoneList
         taskRow = rowIdx
+        taskId = (typeof app !== "undefined" && app && app.getTaskIdAt) ? app.getTaskIdAt(isDoneList, rowIdx) : -1
         taskTitle = titleStr
         taskStatus = statusStr || "todo"
         taskPriority = prioStr || ""
@@ -98,7 +100,11 @@ Dialog {
                     currentIndex = model.length - 1
                 }
                 onActivated: function(idx) {
-                    app.changeTaskPriority(detailsDialog.fromDoneList, detailsDialog.taskRow, model[idx].id)
+                    if (detailsDialog.taskId > 0 && typeof app !== "undefined" && app && app.changeTaskPriorityById) {
+                        app.changeTaskPriorityById(detailsDialog.taskId, model[idx].id)
+                    } else {
+                        app.changeTaskPriority(detailsDialog.fromDoneList, detailsDialog.taskRow, model[idx].id)
+                    }
                 }
             }
             Item { Layout.fillWidth: true }
@@ -266,8 +272,12 @@ Dialog {
                         enabled: newCommentArea.text.trim() !== ""
                         onClicked: {
                             const body = newCommentArea.text.trim()
-                            if (body === "" || detailsDialog.taskRow < 0) return
-                            app.addTaskComment(detailsDialog.fromDoneList, detailsDialog.taskRow, body)
+                            if (body === "" || (detailsDialog.taskId <= 0 && detailsDialog.taskRow < 0)) return
+                            if (detailsDialog.taskId > 0 && typeof app !== "undefined" && app && app.addTaskCommentById) {
+                                app.addTaskCommentById(detailsDialog.taskId, body)
+                            } else {
+                                app.addTaskComment(detailsDialog.fromDoneList, detailsDialog.taskRow, body)
+                            }
                             let updated = detailsDialog.taskComments ? detailsDialog.taskComments.slice() : []
                             updated.push({
                                 author: qsTr("You"),
@@ -284,7 +294,9 @@ Dialog {
     }
 
     onAccepted: {
-        if (taskRow >= 0) {
+        if (taskId > 0 && typeof app !== "undefined" && app && app.updateTaskDetailsById) {
+            app.updateTaskDetailsById(taskId, detailsArea.text)
+        } else if (taskRow >= 0) {
             app.updateTaskDetails(fromDoneList, taskRow, detailsArea.text)
         }
     }
