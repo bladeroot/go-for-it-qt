@@ -4127,16 +4127,26 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 
         QString statusCmd = done ? QStringLiteral("State Fixed") : QStringLiteral("State Open");
-        if (!listEntry.statusMapping.isEmpty()) {
-            for (auto it = listEntry.statusMapping.begin(); it != listEntry.statusMapping.end(); ++it) {
-                const QString mapped = it.value().toString().toLower();
-                if (done && mapped == QStringLiteral("done")) {
-                    statusCmd = QStringLiteral("State %1").arg(it.key());
-                    break;
-                } else if (!done && mapped != QStringLiteral("done")) {
-                    statusCmd = QStringLiteral("State %1").arg(it.key());
-                    break;
+        {
+            // Pick the remote state mapped to the wanted local status; reopening prefers "todo",
+            // then "in_progress", and never a canceled/paused state. Keys starting with '_' are
+            // metadata entries, not remote state names.
+            const QStringList wanted = done
+                ? QStringList{QStringLiteral("done")}
+                : QStringList{QStringLiteral("todo"), QStringLiteral("in_progress")};
+            QString chosenState;
+            for (const QString& category : wanted) {
+                for (auto it = listEntry.statusMapping.constBegin(); it != listEntry.statusMapping.constEnd(); ++it) {
+                    if (it.key().startsWith(QLatin1Char('_'))) continue;
+                    if (it.value().toString().compare(category, Qt::CaseInsensitive) == 0) {
+                        chosenState = it.key();
+                        break;
+                    }
                 }
+                if (!chosenState.isEmpty()) break;
+            }
+            if (!chosenState.isEmpty()) {
+                statusCmd = QStringLiteral("State {%1}").arg(chosenState);
             }
         }
 

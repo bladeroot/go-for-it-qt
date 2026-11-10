@@ -15,14 +15,14 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](tests/t
    - [1.4. Test Environment Isolation & System Safety](#14-test-environment-isolation--system-safety)
    - [1.5. User Interface (GUI / QML / TUI)](#15-user-interface-gui--qml--tui)
    - [1.6. Packaging & Linux Distribution Compatibility](#16-packaging--linux-distribution-compatibility)
-2. [Part 2: Systematic Review Defects (KB-1 through KB-87)](#part-2-systematic-review-defects-kb-1-through-kb-87)
+2. [Part 2: Systematic Review Defects (KB-1 through KB-89)](#part-2-systematic-review-defects-kb-1-through-kb-89)
    - [KB-1 – KB-11: First Review Round (Status Mapping, Pagination, Timer, Translations)](#kb-1--kb-11-first-review-round-status-mapping-pagination-timer-translations)
    - [KB-12 – KB-26: Reconciliation Safety, Pagination Shifts, Onboarding, URL Schemes & Relocation](#kb-12--kb-26-reconciliation-safety-pagination-shifts-onboarding-url-schemes--relocation)
    - [KB-27 – KB-43: List Mutation Safety, Overflow, Permissions, Export Failures & TUI Input](#kb-27--kb-43-list-mutation-safety-overflow-permissions-export-failures--tui-input)
    - [KB-44 – KB-56: Bearer Auth, Priority Mappings & Timer Reliability](#kb-44--kb-56-bearer-auth-priority-mappings--timer-reliability)
    - [KB-57 – KB-69: Nextcloud CalDAV, Pomodoro Continuity & Token Masking](#kb-57--kb-69-nextcloud-caldav-pomodoro-continuity--token-masking)
    - [KB-70 – KB-76: TUI Formatting, ANSI Sequences & Dialog Binding](#kb-70--kb-76-tui-formatting-ansi-sequences--dialog-binding)
-   - [KB-77 – KB-87: GitHub Queries, TUI Teardown, Heatmap, Remote Status Sync & Provider Recognition](#kb-77--kb-87-github-queries-tui-teardown-heatmap-remote-status-sync--provider-recognition)
+   - [KB-77 – KB-89: GitHub Queries, TUI Teardown, Heatmap, Remote Status Sync & Input Validation](#kb-77--kb-89-github-queries-tui-teardown-heatmap-remote-status-sync--input-validation)
 
 ---
 
@@ -157,7 +157,7 @@ All entries are validated by regression tests in [tests/tst_todotxt.cpp](tests/t
 
 ---
 
-## Part 2: Systematic Review Defects (KB-1 through KB-87)
+## Part 2: Systematic Review Defects (KB-1 through KB-89)
 
 ### KB-1 – KB-11: First Review Round (Status Mapping, Pagination, Timer, Translations)
 
@@ -267,7 +267,7 @@ All fixed in commit `96dede1` unless noted.
 
 ---
 
-### KB-77 – KB-87: GitHub Queries, TUI Teardown, Heatmap, Remote Status Sync & Provider Recognition
+### KB-77 – KB-89: GitHub Queries, TUI Teardown, Heatmap, Remote Status Sync & Input Validation
 
 * **KB-77**: Appended `is:open` and `sort:updated-desc` to GitHub repository queries lacking explicit state filters. (*Test*: `testGitHubRepoQueryRequestsOpenItemsOnly`, commit `4691d59`).
 * **KB-78**: Recorded and flushed active timer session upon TUI exit (`q`) and application shutdown. (*Test*: `testTuiQuitLogsRunningSession`, commit `4691d59`).
@@ -280,6 +280,8 @@ All fixed in commit `96dede1` unless noted.
 * **KB-85**: Clamped parsed minute input in TUI settings before arithmetic conversion to seconds, preventing integer overflow with large inputs. (*Test*: `testTuiLargeDurationInputClampsWithoutOverflow`, commit `f1d8af6`).
 * **KB-86**: Implemented remote issue completion and reopening status sync for Jira (via transitions API), YouTrack (via commands API), and Nextcloud CalDAV (via VTODO STATUS). (*Test*: `testRemoteStatusSyncDispatchesForJiraYouTrackAndNextcloud`, commit `d40b2bc`).
 * **KB-87**: Included all supported remote providers (Redmine, Todoist, Nextcloud) in `AppController::isCurrentListRemote()` single-list classification. (*Test*: `testCurrentListRemoteFlagIncludesAllRemoteProviders`, commit `d40b2bc`).
+* **KB-88**: Rejected empty or non-numeric TUI duration, reminder and auto-sync input (e.g. `25m`) instead of falling back to the maximum value; the current value is kept and an error is shown in the status line. Digits-only input that overflows is still clamped. (*Test*: `testTuiEmptyDurationInputDoesNotSetMaximum`).
+* **KB-89**: YouTrack status push now picks the state mapped to `done` on completion and the state mapped to `todo` (then `in_progress`) on reopen, skips `_` metadata keys, and wraps state names in braces (`State {In Review}`). (*Test*: `testYouTrackReopenUsesTodoStateAndBracesMultiWordNames`).
 
 ---
 

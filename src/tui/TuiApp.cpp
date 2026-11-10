@@ -765,29 +765,36 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             executeExCommand(text);
         } else if (prevMode == Mode::EditSettingValue) {
             m_mode = Mode::Settings;
+            // Parses an integer setting; digits-only input that overflows qint64 is clamped,
+            // anything else (empty, "25m", "2 5") is rejected and the current value is kept.
+            auto parseSettingNumber = [&](qint64 minValue, qint64 maxValue, qint64& out) {
+                static const QRegularExpression numberRe(QStringLiteral("^[+-]?\\d+$"));
+                if (!numberRe.match(text).hasMatch()) {
+                    m_statusMessage = tr("Invalid number: \"%1\" (value unchanged)").arg(text);
+                    return false;
+                }
+                bool ok = false;
+                const qint64 value = text.toLongLong(&ok);
+                if (!ok) {
+                    out = text.startsWith(QLatin1Char('-')) ? minValue : maxValue;
+                } else {
+                    out = qBound(minValue, value, maxValue);
+                }
+                return true;
+            };
+            qint64 parsedValue = 0;
             if (m_settingsRow == 0) {
-                bool ok = false;
-                qint64 mins = text.toLongLong(&ok);
-                if (!ok) {
-                    mins = text.startsWith(QLatin1Char('-')) ? 1 : 1440;
+                if (parseSettingNumber(1, 1440, parsedValue)) {
+                    m_app->settings()->setTaskDuration(static_cast<int>(parsedValue * 60));
                 }
-                const qint64 clamped = qBound(1LL, mins, 1440LL);
-                m_app->settings()->setTaskDuration(static_cast<int>(clamped * 60));
             } else if (m_settingsRow == 1) {
-                bool ok = false;
-                qint64 mins = text.toLongLong(&ok);
-                if (!ok) {
-                    mins = text.startsWith(QLatin1Char('-')) ? 1 : 1440;
+                if (parseSettingNumber(1, 1440, parsedValue)) {
+                    m_app->settings()->setBreakDuration(static_cast<int>(parsedValue * 60));
                 }
-                const qint64 clamped = qBound(1LL, mins, 1440LL);
-                m_app->settings()->setBreakDuration(static_cast<int>(clamped * 60));
             } else if (m_settingsRow == 2) {
-                bool ok = false;
-                qint64 secs = text.toLongLong(&ok);
-                if (!ok) {
-                    secs = text.startsWith(QLatin1Char('-')) ? 0 : 3600;
+                if (parseSettingNumber(0, 3600, parsedValue)) {
+                    m_app->settings()->setReminderTime(static_cast<int>(parsedValue));
                 }
-                m_app->settings()->setReminderTime(static_cast<int>(qBound(0LL, secs, 3600LL)));
             } else if (m_settingsRow == 7 && !text.isEmpty()) {
                 if (m_app->changeDatabasePath(text, true)) {
                     m_statusMessage = tr("Database moved to: %1").arg(m_app->databasePath());
@@ -801,12 +808,9 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
                     m_statusMessage = tr("Failed to export backup to: %1").arg(text);
                 }
             } else if (m_settingsRow == 10) {
-                bool ok = false;
-                qint64 mins = text.toLongLong(&ok);
-                if (!ok) {
-                    mins = text.startsWith(QLatin1Char('-')) ? 0 : 1440;
+                if (parseSettingNumber(0, 1440, parsedValue)) {
+                    m_app->settings()->setAutoSyncIntervalMinutes(static_cast<int>(parsedValue));
                 }
-                m_app->settings()->setAutoSyncIntervalMinutes(static_cast<int>(qBound(0LL, mins, 1440LL)));
             }
         } else if (prevMode == Mode::EditListField) {
             m_mode = Mode::ListEdit;

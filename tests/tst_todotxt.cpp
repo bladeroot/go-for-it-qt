@@ -6541,10 +6541,7 @@ private slots:
         const QVariantList heat = analytics.getActivityHeatmap(91, QStringLiteral("__ALL__"));
         QVERIFY(!heat.isEmpty());
         const int firstDow = heat.first().toMap().value(QStringLiteral("dayOfWeek")).toInt();
-        if (firstDow == 1) {
-            DatabaseManager::instance().close();
-            QSKIP("Today the 91-day window happens to start on a Monday; misalignment not reproducible today");
-        }
+        QCOMPARE(firstDow, 1);
         bool aligned = true;
         for (int i = 0; i < heat.size(); ++i) {
             if (heat.at(i).toMap().value(QStringLiteral("dayOfWeek")).toInt() != (i % 7) + 1) {
@@ -6575,6 +6572,98 @@ private slots:
         const QString local = IssueTrackerService::mapRemoteStatusToLocal(
             items.first().remoteStatus, items.first().remoteStatusCategory, mapping);
         QCOMPARE(local, QStringLiteral("canceled"));
+    }
+
+    // KB-88: the KB-85 fix (f1d8af6) parses the TUI duration fields with toLongLong(&ok) and,
+    // when parsing fails, falls back to the *maximum* (1440 min for work/break, 3600 s for the
+    // reminder, 1440 min for auto-sync) unless the text starts with '-'. An empty field (the user
+    // clears the pre-filled value with Ctrl+U and presses Enter) or a typo such as "25m" or "2 5"
+    // therefore silently sets a 24-hour Pomodoro instead of being rejected.
+    void testTuiEmptyDurationInputDoesNotSetMaximum() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb88_tui.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        SettingsManager* settings = ctrl.settings();
+        const int oldTask = settings->taskDuration();
+        settings->setTaskDuration(1500);
+
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int devNull = ::open("/dev/null", O_WRONLY);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(devNull, STDOUT_FILENO);
+        {
+            TuiApp tui(&ctrl);
+            auto feed = [&](const QByteArray& bytes) {
+                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())), static_cast<ssize_t>(bytes.size()));
+                for (int i = 0; i < 4; ++i) {
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending <= 0) break;
+                    QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                }
+            };
+            feed("O");       // settings, row 0 = work duration
+            feed("\r");      // edit (pre-filled with "25")
+            feed("\x15");    // Ctrl+U clears the field
+            feed("\r");      // confirm the empty value
+        }
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(devNull);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        const int after = settings->taskDuration();
+        settings->setTaskDuration(oldTask);
+        QCOMPARE(after, 1500);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-89: the YouTrack branch of updateIssueStatusRemote added in d40b2bc builds the command
+    // from the list's status mapping. For a reopen it takes the *first* key (QVariantMap order,
+    // i.e. alphabetical) whose mapped value is not "done" - which may be a state mapped to
+    // "canceled" or "paused", so reopening a task can cancel the issue in YouTrack. It also
+    // writes "State <name>" without braces, but YouTrack commands need `State {In Progress}`
+    // for values containing spaces, so such commands fail.
+    void testYouTrackReopenUsesTodoStateAndBracesMultiWordNames() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QStringList queries;
+        serveHttpFull(server, [&queries](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray& body) {
+            queries << QJsonDocument::fromJson(body).object().value(QStringLiteral("query")).toString();
+            return httpResponse("200 OK", "application/json", "{}");
+        });
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb89_yt");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("perm:token");
+        entry.syncStatusToRemote = true;
+        entry.statusMapping = QVariantMap{
+            {QStringLiteral("Canceled"), QStringLiteral("canceled")},
+            {QStringLiteral("In Review"), QStringLiteral("done")},
+            {QStringLiteral("Open"), QStringLiteral("todo")}
+        };
+
+        IssueTrackerService svc;
+        QStandardPaths::setTestModeEnabled(false); // remote writes are no-ops in test mode
+        svc.updateIssueStatusRemote(entry, QStringLiteral("KB-89"), false, QStringLiteral("todo"));
+        svc.updateIssueStatusRemote(entry, QStringLiteral("KB-89"), true, QStringLiteral("done"));
+        QTRY_VERIFY_WITH_TIMEOUT(queries.size() >= 2, 5000);
+        QStandardPaths::setTestModeEnabled(true);
+
+        QVERIFY2(queries.contains(QStringLiteral("State Open")) || queries.contains(QStringLiteral("State {Open}")), qPrintable(queries.join(QStringLiteral(" | "))));
+        QVERIFY2(queries.contains(QStringLiteral("State {In Review}")), qPrintable(queries.join(QStringLiteral(" | "))));
+        server.close();
     }
 };
 
