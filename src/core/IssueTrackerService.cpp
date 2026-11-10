@@ -3866,17 +3866,25 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             getReply->deleteLater();
             if (getReply->error() != QNetworkReply::NoError) return;
             QString ics = QString::fromUtf8(getReply->readAll());
+            const int vtodoStart = ics.indexOf(QStringLiteral("BEGIN:VTODO"));
+            if (vtodoStart < 0) return;
+            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"), vtodoStart);
+            if (vtodoEnd < 0) return;
+
+            int propBlockEnd = vtodoEnd;
+            const int subBegin = ics.indexOf(QStringLiteral("BEGIN:"), vtodoStart + 11);
+            if (subBegin > vtodoStart && subBegin < propBlockEnd) {
+                propBlockEnd = subBegin;
+            }
+
             static const QRegularExpression descRe(QStringLiteral("(^|\r?\n)DESCRIPTION(?:;[^:]*)?:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*"));
             const QString escaped = QStringLiteral("DESCRIPTION:") + escapeIcsText(markdownDetails);
-            const auto match = descRe.match(ics);
-            if (match.hasMatch()) {
+            const auto match = descRe.match(ics, vtodoStart);
+            if (match.hasMatch() && match.capturedStart() < propBlockEnd) {
                 ics.replace(match.capturedStart(), match.capturedLength(), match.captured(1) + escaped);
             } else {
-                const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
-                if (vtodoEnd > 0) {
-                    const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
-                    ics.insert(vtodoEnd, escaped + nl);
-                }
+                const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
+                ics.insert(propBlockEnd, escaped + nl);
             }
             QNetworkRequest putReq = req;
             putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
@@ -4275,10 +4283,19 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             if (getReply->error() != QNetworkReply::NoError) return;
             QString ics = QString::fromUtf8(getReply->readAll());
             const QString escapedComment = escapeIcsText(markdownComment);
-            const QString commentLine = QStringLiteral("COMMENT:%1\r\n").arg(escapedComment);
-            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
+            const int vtodoStart = ics.indexOf(QStringLiteral("BEGIN:VTODO"));
+            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"), vtodoStart >= 0 ? vtodoStart : 0);
             if (vtodoEnd > 0) {
-                ics.insert(vtodoEnd, commentLine);
+                int insertPos = vtodoEnd;
+                if (vtodoStart >= 0) {
+                    const int subBegin = ics.indexOf(QStringLiteral("BEGIN:"), vtodoStart + 11);
+                    if (subBegin > vtodoStart && subBegin < insertPos) {
+                        insertPos = subBegin;
+                    }
+                }
+                const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
+                const QString commentLine = QStringLiteral("COMMENT:%1%2").arg(escapedComment, nl);
+                ics.insert(insertPos, commentLine);
                 QNetworkRequest putReq = req;
                 putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
                 QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());

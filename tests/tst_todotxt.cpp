@@ -5322,6 +5322,56 @@ private slots:
                  && put.contains(QStringLiteral("END:VTODO")), qPrintable(put));
         server.close();
     }
+
+    // KB-64: the KB-63 fix (0c3585a) replaces the *first* DESCRIPTION line anywhere in the
+    // calendar object. A VTODO that has no description of its own but has a display alarm
+    // (VALARM with ACTION:DISPLAY requires a DESCRIPTION - Thunderbird, DAVx5 and the Nextcloud
+    // Tasks app all write one) gets its alarm text overwritten with the new task description,
+    // and the task itself still has no description.
+    void testNextcloudDescriptionUpdateDoesNotTouchAlarm() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        const QByteArray ics =
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//KB64//EN\r\nBEGIN:VTODO\r\nUID:kb64uid\r\n"
+            "SUMMARY:KB64 title\r\nSTATUS:NEEDS-ACTION\r\n"
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:KB64 alarm text\r\nEND:VALARM\r\n"
+            "END:VTODO\r\nEND:VCALENDAR\r\n";
+        QByteArray putBody;
+        bool putSeen = false;
+        serveHttpFull(server, [&](const QByteArray& method, const QByteArray&, const QByteArray&, const QByteArray& body) {
+            if (method == "PUT") {
+                putBody = body;
+                putSeen = true;
+                return httpResponse("204 No Content", "text/plain", "");
+            }
+            return httpResponse("200 OK", "text/calendar", ics);
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb64_nc");
+        entry.provider = QStringLiteral("Nextcloud");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1/remote.php/dav/calendars/user/tasks/").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user");
+        entry.apiToken = QStringLiteral("app-password");
+
+        IssueTrackerService svc;
+        QStandardPaths::setTestModeEnabled(false); // updateIssueDescription is a no-op in test mode
+        svc.updateIssueDescription(entry, QStringLiteral("NC#kb64uid"), QStringLiteral("new KB64 description"));
+        QTRY_VERIFY_WITH_TIMEOUT(putSeen, 5000);
+        QStandardPaths::setTestModeEnabled(true);
+
+        const QString put = QString::fromUtf8(putBody);
+        const int alarmStart = put.indexOf(QStringLiteral("BEGIN:VALARM"));
+        const int alarmEnd = put.indexOf(QStringLiteral("END:VALARM"));
+        QVERIFY2(alarmStart >= 0 && alarmEnd > alarmStart, qPrintable(put));
+        const QString alarm = put.mid(alarmStart, alarmEnd - alarmStart);
+        const QString todoProps = put.left(alarmStart);
+        QVERIFY2(alarm.contains(QStringLiteral("DESCRIPTION:KB64 alarm text"))
+                 && todoProps.contains(QStringLiteral("DESCRIPTION:new KB64 description")), qPrintable(put));
+        server.close();
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
