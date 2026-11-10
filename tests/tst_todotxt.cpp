@@ -5986,6 +5986,76 @@ private slots:
         QCOMPARE(items.size(), 1);
         QCOMPARE(items.first().remoteStatus, QStringLiteral("open"));
     }
+
+    // KB-76: the KB-70/KB-73 fix (3fc5b46) passes already-coloured strings through
+    // TuiApp::truncateVisible: the status tab row, every Markdown-view line and table rows.
+    // truncateVisible measures with codepointDisplayWidth, which gives ESC width 0 but counts
+    // every other byte of an SGR sequence ("[38;5;244m" = 10 columns) as visible text. A line is
+    // therefore cut long before the terminal edge, gets a stray "…", and the cut can land inside
+    // an escape sequence, leaving a broken SGR and no reset. On a normal 100-column terminal the
+    // tab row (~78 visible columns, ~90 bytes of SGR codes) loses its last tabs. The test runs the
+    // real TuiApp on a 30x100 pseudo-terminal and looks at the tab row.
+    void testTuiTabRowIsNotTruncatedByAnsiCodes() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb76_tui.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB76"));
+        ctrl.selectListById(listId);
+
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        QVERIFY(master >= 0);
+        QCOMPARE(::grantpt(master), 0);
+        QCOMPARE(::unlockpt(master), 0);
+        const int slave = ::open(::ptsname(master), O_RDWR | O_NOCTTY);
+        QVERIFY(slave >= 0);
+        struct winsize ws {};
+        ws.ws_row = 30;
+        ws.ws_col = 100;
+        ::ioctl(slave, TIOCSWINSZ, &ws);
+        ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
+        QByteArray captured;
+        auto drain = [&]() {
+            char buf[8192];
+            for (;;) {
+                const ssize_t n = ::read(master, buf, sizeof(buf));
+                if (n <= 0) break;
+                captured.append(buf, static_cast<int>(n));
+            }
+        };
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        std::fflush(stdout);
+        ::dup2(slave, STDIN_FILENO);
+        ::dup2(slave, STDOUT_FILENO);
+        bool started = false;
+        {
+            TuiApp tui(&ctrl);
+            started = tui.start();
+            drain();
+            if (started) {
+                captured.clear();
+                QMetaObject::invokeMethod(&tui, "render", Qt::DirectConnection);
+                drain();
+            }
+        }
+        drain();
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(slave);
+        ::close(master);
+        QVERIFY(started);
+
+        QString screen = QString::fromUtf8(captured);
+        const int lastFrame = screen.lastIndexOf(QStringLiteral("\x1b[H"));
+        if (lastFrame >= 0) screen = screen.mid(lastFrame);
+        const QStringList rows = screen.split(QStringLiteral("\r\n"));
+        QVERIFY(rows.size() > 3);
+        static const QRegularExpression ansiRe(QStringLiteral("\x1b\\[[0-9;?]*[ -/]*[@-~]"));
+        QString tabRow = rows.at(2);
+        tabRow.remove(ansiRe);
+        QVERIFY2(tabRow.contains(tr(" 1:All Open ")), qPrintable(tabRow));
+        QVERIFY2(tabRow.contains(tr(" 6:Canceled ")) && !tabRow.contains(QChar(0x2026)), qPrintable(tabRow));
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

@@ -1789,10 +1789,52 @@ int codepointDisplayWidth(uint32_t cp) {
     return 1;
 }
 
+static bool isAnsiEscapeAt(const QString& str, int index, int& escLen) {
+    const int len = str.size();
+    if (index >= len || str.at(index) != QLatin1Char('\033')) return false;
+    if (index + 1 < len && str.at(index + 1) == QLatin1Char('[')) {
+        int j = index + 2;
+        while (j < len && str.at(j) >= QLatin1Char(' ') && str.at(j) <= QLatin1Char('?')) {
+            ++j;
+        }
+        if (j < len && str.at(j) >= QLatin1Char('@') && str.at(j) <= QLatin1Char('~')) {
+            escLen = j - index + 1;
+            return true;
+        }
+    } else if (index + 1 < len && str.at(index + 1) == QLatin1Char(']')) {
+        int j = index + 2;
+        while (j < len) {
+            if (str.at(j) == QLatin1Char('\a')) {
+                escLen = j - index + 1;
+                return true;
+            }
+            if (str.at(j) == QLatin1Char('\033') && j + 1 < len && str.at(j + 1) == QLatin1Char('\\')) {
+                escLen = j - index + 2;
+                return true;
+            }
+            ++j;
+        }
+    } else if (index + 1 < len && str.at(index + 1) >= QLatin1Char('@') && str.at(index + 1) <= QLatin1Char('_')) {
+        escLen = 2;
+        return true;
+    }
+    return false;
+}
+
 int displayWidth(const QString& str) {
     int w = 0;
-    const QList<uint> ucs4 = str.toUcs4();
-    for (uint cp : ucs4) {
+    const int len = str.size();
+    for (int i = 0; i < len; ++i) {
+        int escLen = 0;
+        if (isAnsiEscapeAt(str, i, escLen)) {
+            i += escLen - 1;
+            continue;
+        }
+        uint cp = str.at(i).unicode();
+        if (str.at(i).isHighSurrogate() && i + 1 < len && str.at(i + 1).isLowSurrogate()) {
+            cp = QChar::surrogateToUcs4(str.at(i), str.at(i + 1));
+            ++i;
+        }
         w += codepointDisplayWidth(cp);
     }
     return w;
@@ -1802,13 +1844,22 @@ int displayWidth(const QString& str) {
 QString TuiApp::truncateVisible(const QString& str, int maxCols) {
     if (maxCols <= 0) return {};
     if (displayWidth(str) <= maxCols) return str;
-    if (maxCols <= 1) return QStringLiteral("…");
+    if (maxCols <= 1) return QStringLiteral("…\033[0m");
     QString res;
     int curCols = 0;
-    for (int i = 0; i < str.size(); ++i) {
+    bool hasEscape = false;
+    const int len = str.size();
+    for (int i = 0; i < len; ++i) {
+        int escLen = 0;
+        if (isAnsiEscapeAt(str, i, escLen)) {
+            res += str.mid(i, escLen);
+            hasEscape = true;
+            i += escLen - 1;
+            continue;
+        }
         uint cp = str.at(i).unicode();
         int step = 1;
-        if (str.at(i).isHighSurrogate() && i + 1 < str.size() && str.at(i + 1).isLowSurrogate()) {
+        if (str.at(i).isHighSurrogate() && i + 1 < len && str.at(i + 1).isLowSurrogate()) {
             cp = QChar::surrogateToUcs4(str.at(i), str.at(i + 1));
             step = 2;
         }
@@ -1820,7 +1871,7 @@ QString TuiApp::truncateVisible(const QString& str, int maxCols) {
         curCols += cw;
         if (step == 2) ++i;
     }
-    return res + QStringLiteral("…");
+    return res + (hasEscape ? QStringLiteral("…\033[0m") : QStringLiteral("…"));
 }
 
 QString TuiApp::padRight(const QString& str, int width) {
