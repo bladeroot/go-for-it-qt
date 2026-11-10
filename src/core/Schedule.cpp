@@ -1,15 +1,27 @@
 #include "Schedule.h"
 #include <QtMath>
+#include <limits>
 
 namespace gofi {
+
+namespace {
+
+int normalizeDuration(int sec) noexcept {
+    if (sec == std::numeric_limits<int>::min()) {
+        return std::numeric_limits<int>::max();
+    }
+    return qAbs(sec);
+}
+
+} // namespace
 
 Schedule::Schedule(const QVector<int>& rawDurations) {
     importRaw(rawDurations);
 }
 
 void Schedule::append(int taskDurationSec, int breakDurationSec) {
-    m_durations.append(qAbs(taskDurationSec));
-    m_durations.append(qAbs(breakDurationSec));
+    m_durations.append(normalizeDuration(taskDurationSec));
+    m_durations.append(normalizeDuration(breakDurationSec));
 }
 
 void Schedule::importRaw(const QVector<int>& durations) {
@@ -19,7 +31,7 @@ void Schedule::importRaw(const QVector<int>& durations) {
     }
     m_durations.resize(count);
     for (int i = 0; i < count; ++i) {
-        m_durations[i] = qAbs(durations[i]);
+        m_durations[i] = normalizeDuration(durations[i]);
     }
 }
 
@@ -28,7 +40,7 @@ int Schedule::taskDuration(int iteration) const {
         return 1500;
     }
     int idx = (qMax(0, iteration) % length()) * 2;
-    return qAbs(m_durations[idx]);
+    return normalizeDuration(m_durations[idx]);
 }
 
 int Schedule::breakDuration(int iteration) const {
@@ -36,7 +48,7 @@ int Schedule::breakDuration(int iteration) const {
         return 300;
     }
     int idx = (qMax(0, iteration) % length()) * 2 + 1;
-    return qAbs(m_durations[idx]);
+    return normalizeDuration(m_durations[idx]);
 }
 
 QVariantList Schedule::toVariantList() const {

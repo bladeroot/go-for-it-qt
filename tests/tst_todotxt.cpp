@@ -15,6 +15,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -30,6 +31,7 @@
 #include <unistd.h>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 
 using namespace gofi;
@@ -205,6 +207,38 @@ private slots:
         QCOMPARE(sched.taskDuration(1), 1500);
         QCOMPARE(sched.breakDuration(1), 900);
         QCOMPARE(sched.breakDuration(2), 300);
+    }
+
+    // KB-83: qAbs(INT_MIN) cannot be represented by int and leaves a negative
+    // duration in the schedule. Schedule inputs can come from persisted settings
+    // and QVariant lists, so normalization must handle the full int domain.
+    void testScheduleNormalizesMinimumIntegerDurations() {
+        const int minimum = std::numeric_limits<int>::min();
+        if (qEnvironmentVariableIsSet("GOFI_KB83_CHILD")) {
+            Schedule imported({minimum, minimum});
+            Schedule appended;
+            appended.append(minimum, minimum);
+            QVERIFY(imported.taskDuration(0) >= 0);
+            QVERIFY(imported.breakDuration(0) >= 0);
+            QVERIFY(appended.taskDuration(0) >= 0);
+            QVERIFY(appended.breakDuration(0) >= 0);
+            return;
+        }
+
+        QProcess child;
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("GOFI_KB83_CHILD"), QStringLiteral("1"));
+        environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+        child.setProcessEnvironment(environment);
+        child.start(QCoreApplication::applicationFilePath(),
+                    {QStringLiteral("testScheduleNormalizesMinimumIntegerDurations"), QStringLiteral("-silent")});
+        QVERIFY(child.waitForStarted());
+        QVERIFY(child.waitForFinished(30000));
+
+        const bool normalizedWithoutCrash = child.exitStatus() == QProcess::NormalExit
+            && child.exitCode() == 0;
+
+        QVERIFY(normalizedWithoutCrash);
     }
 
     void testShortcutsAndSoundResolution() {
