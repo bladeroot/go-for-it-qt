@@ -3866,14 +3866,16 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             getReply->deleteLater();
             if (getReply->error() != QNetworkReply::NoError) return;
             QString ics = QString::fromUtf8(getReply->readAll());
-            static const QRegularExpression descRe(QStringLiteral("DESCRIPTION:.*(?=\\r?\\n[A-Z-]+:)"), QRegularExpression::DotMatchesEverythingOption);
+            static const QRegularExpression descRe(QStringLiteral("(^|\r?\n)DESCRIPTION(?:;[^:]*)?:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*"));
             const QString escaped = QStringLiteral("DESCRIPTION:") + escapeIcsText(markdownDetails);
-            if (ics.contains(descRe)) {
-                ics.replace(descRe, escaped);
+            const auto match = descRe.match(ics);
+            if (match.hasMatch()) {
+                ics.replace(match.capturedStart(), match.capturedLength(), match.captured(1) + escaped);
             } else {
                 const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
                 if (vtodoEnd > 0) {
-                    ics.insert(vtodoEnd, escaped + QStringLiteral("\r\n"));
+                    const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
+                    ics.insert(vtodoEnd, escaped + nl);
                 }
             }
             QNetworkRequest putReq = req;

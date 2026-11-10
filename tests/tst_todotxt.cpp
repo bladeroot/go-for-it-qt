@@ -5276,6 +5276,52 @@ private slots:
         walk(doc, QStringLiteral("doc"));
         QVERIFY2(emptyNodes.isEmpty(), qPrintable(QStringLiteral("empty text in: ") + emptyNodes.join(QStringLiteral(", "))));
     }
+
+    // KB-63: updateIssueDescription for Nextcloud replaces the DESCRIPTION property with the
+    // regex `DESCRIPTION:.*(?=\r?\n[A-Z-]+:)` and DotMatchesEverythingOption. `.*` is greedy,
+    // so the match runs to the *last* "\r\nNAME:" line of the file (END:VCALENDAR) and every
+    // property after DESCRIPTION - SUMMARY, STATUS, DUE, PRIORITY, END:VTODO - is deleted. The
+    // corrupted calendar object is then PUT back to the server, destroying the task's title
+    // and state (or the server rejects it and the edit is silently lost).
+    void testNextcloudDescriptionUpdateKeepsOtherProperties() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        const QByteArray ics =
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//KB63//EN\r\nBEGIN:VTODO\r\nUID:kb63uid\r\n"
+            "DESCRIPTION:old description\r\nSUMMARY:KB63 title\r\nSTATUS:NEEDS-ACTION\r\n"
+            "PRIORITY:1\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        QByteArray putBody;
+        bool putSeen = false;
+        serveHttpFull(server, [&](const QByteArray& method, const QByteArray&, const QByteArray&, const QByteArray& body) {
+            if (method == "PUT") {
+                putBody = body;
+                putSeen = true;
+                return httpResponse("204 No Content", "text/plain", "");
+            }
+            return httpResponse("200 OK", "text/calendar", ics);
+        });
+
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb63_nc");
+        entry.provider = QStringLiteral("Nextcloud");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1/remote.php/dav/calendars/user/tasks/").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user");
+        entry.apiToken = QStringLiteral("app-password");
+
+        IssueTrackerService svc;
+        QStandardPaths::setTestModeEnabled(false); // updateIssueDescription is a no-op in test mode
+        svc.updateIssueDescription(entry, QStringLiteral("NC#kb63uid"), QStringLiteral("new KB63 description"));
+        QTRY_VERIFY_WITH_TIMEOUT(putSeen, 5000);
+        QStandardPaths::setTestModeEnabled(true);
+
+        const QString put = QString::fromUtf8(putBody);
+        QVERIFY2(put.contains(QStringLiteral("DESCRIPTION:new KB63 description")), qPrintable(put));
+        QVERIFY2(put.contains(QStringLiteral("SUMMARY:KB63 title")) && put.contains(QStringLiteral("STATUS:NEEDS-ACTION"))
+                 && put.contains(QStringLiteral("END:VTODO")), qPrintable(put));
+        server.close();
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)
