@@ -20,6 +20,9 @@
 #include <QTcpSocket>
 #include <QDesktopServices>
 #include <QtTest>
+#include <QQmlComponent>
+#include <QQmlEngine>
+#include <QQmlContext>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
@@ -5042,6 +5045,98 @@ private slots:
         QVERIFY(logged);
         QVERIFY(!loggedAsCompleted);
         QCOMPARE(finishedSpy.count(), 0);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-57: the FileDialog handlers in DashboardView.qml (CSV and PDF export) and
+    // TaskDetailsDialog.qml (open Markdown file) turn the selected file URL into a path with
+    // `selectedFile.toString()` and strip "file://". QML's url-to-string keeps reserved
+    // characters percent-encoded ('#' -> %23, '%' -> %25, '?' -> %3F; spaces and Cyrillic are
+    // decoded), so for a file like "Report #3.csv" or "100% done.md" the CSV/PDF export
+    // silently writes "Report %233.csv" next to it and the Markdown file cannot be opened.
+    // The test runs the real conversion code taken from the built QML files.
+    void testFileDialogPathConversionKeepsReservedCharacters() {
+        const QString qmlRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml/");
+        struct Site { QString file; QString endMarker; };
+        const QList<Site> sites = {
+            {QStringLiteral("dialogs/TaskDetailsDialog.qml"), QStringLiteral("const content")},
+            {QStringLiteral("components/DashboardView.qml"), QStringLiteral("if (app.analytics")}
+        };
+        const QString target = m_testSandbox.filePath(QStringLiteral("kb57 Report #3 100%.md"));
+        {
+            QFile f(target);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write("# KB57\n");
+        }
+
+        QQmlEngine engine;
+        QStringList wrong;
+        for (const Site& site : sites) {
+            QFile qf(qmlRoot + site.file);
+            QVERIFY2(qf.open(QIODevice::ReadOnly), qPrintable(qf.fileName()));
+            const QString src = QString::fromUtf8(qf.readAll());
+            const int start = src.indexOf(QStringLiteral("let path = selectedFile.toString()"));
+            QVERIFY2(start >= 0, qPrintable(site.file));
+            const int end = src.indexOf(site.endMarker, start);
+            QVERIFY2(end > start, qPrintable(site.file));
+            const QString snippet = src.mid(start, end - start);
+
+            QQmlComponent comp(&engine);
+            comp.setData(QStringLiteral("import QtQml\nQtObject { property url selectedFile\n"
+                                        "function convert() { %1\n return path } }").arg(snippet).toUtf8(),
+                         QUrl(QStringLiteral("file:///kb57.qml")));
+            std::unique_ptr<QObject> obj(comp.create());
+            QVERIFY2(obj, qPrintable(comp.errorString()));
+            obj->setProperty("selectedFile", QUrl::fromLocalFile(target));
+            QVariant result;
+            QVERIFY(QMetaObject::invokeMethod(obj.get(), "convert", Q_RETURN_ARG(QVariant, result)));
+            if (result.toString() != target) wrong << site.file + QStringLiteral(" -> ") + result.toString();
+        }
+        QVERIFY2(wrong.isEmpty(), qPrintable(wrong.join(QStringLiteral(" | "))));
+    }
+
+    // KB-58: DashboardView declares `stats`/`heatmap` as bindings on app.currentListId, but
+    // Component.onCompleted calls reloadData(), which *assigns* both properties and so removes
+    // the bindings. The view lives permanently in TaskListPage's StackLayout, and it reloads
+    // only on period-tab changes and timerStopped, so after switching to another list the
+    // header says "in <new list>" (bound to app.currentFilterTitle) while all numbers, the
+    // breakdowns and the heatmap still belong to the previous list - until the next timer
+    // stop or tab click. The test loads the real built DashboardView.qml with a real
+    // AppController as `app`.
+    void testDashboardFollowsCurrentListChange() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb58.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listA = controller.listManager()->addList(QStringLiteral("KB58 List A"));
+        const QString listB = controller.listManager()->addList(QStringLiteral("KB58 List B"));
+        QVERIFY(!listA.isEmpty() && !listB.isEmpty());
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        QVERIFY(DatabaseManager::instance().insertActivityLog(listA, QStringLiteral("KB58 List A"), -1, QString(),
+                QStringLiteral("KB58 a"), now.addSecs(-700), 600, now.addSecs(-100), false, false) > 0);
+        QVERIFY(DatabaseManager::instance().insertActivityLog(listB, QStringLiteral("KB58 List B"), -1, QString(),
+                QStringLiteral("KB58 b"), now.addSecs(-3700), 3000, now.addSecs(-700), false, false) > 0);
+        controller.selectListById(listA);
+        QCOMPARE(controller.currentListId(), listA);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        const QString qmlFile = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml/components/DashboardView.qml");
+        QVERIFY(QFile::exists(qmlFile));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlFile));
+        std::unique_ptr<QObject> view(comp.create());
+        QVERIFY2(view, qPrintable(comp.errorString()));
+
+        const auto totalOf = [&view]() {
+            return view->property("stats").toMap().value(QStringLiteral("totalSeconds")).toDouble();
+        };
+        QCOMPARE(totalOf(), 600.0);
+
+        controller.selectListById(listB);
+        QCOMPARE(controller.currentListId(), listB);
+        QCoreApplication::processEvents();
+        QCOMPARE(totalOf(), 3000.0);
+        view.reset();
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }

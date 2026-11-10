@@ -20,6 +20,15 @@ ScrollView {
 
     Component.onCompleted: reloadData()
 
+    onVisibleChanged: {
+        if (visible) reloadData()
+    }
+
+    Connections {
+        target: app
+        function onCurrentListChanged() { dashboardRoot.reloadData() }
+    }
+
     Connections {
         target: app.timer
         function onTimerStopped() { dashboardRoot.reloadData() }
@@ -34,6 +43,7 @@ ScrollView {
         onAccepted: {
             let path = selectedFile.toString()
             if (path.startsWith("file://")) path = path.substring(7)
+            path = decodeURIComponent(path)
             if (app.analytics.exportBillingCsv(path, dashboardRoot.selectedPeriod, app.currentListId)) {
                 app.notifications.notifyTaskEvent(qsTr("Report Exported"), qsTr("CSV report saved successfully."))
             }
@@ -49,6 +59,7 @@ ScrollView {
         onAccepted: {
             let path = selectedFile.toString()
             if (path.startsWith("file://")) path = path.substring(7)
+            path = decodeURIComponent(path)
             if (app.analytics.exportBillingPdf(path, dashboardRoot.selectedPeriod, app.currentListId)) {
                 app.notifications.notifyTaskEvent(qsTr("Report Exported"), qsTr("PDF report saved successfully."))
             }

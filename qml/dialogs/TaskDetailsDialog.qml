@@ -51,6 +51,7 @@ Dialog {
             if (path.startsWith("file://")) {
                 path = path.substring(7)
             }
+            path = decodeURIComponent(path)
             const content = app.readMarkdownFile(path)
             if (content !== "") {
                 detailsDialog.loadedFilePath = path
