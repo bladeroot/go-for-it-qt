@@ -252,6 +252,9 @@ void AppController::selectListById(const QString& listId) {
         }
         setShowingOverview(false);
         emit currentListChanged();
+        if (entry.provider != QStringLiteral("SQLite") && entry.provider != QStringLiteral("Todo.txt")) {
+            m_issueTracker.syncListIssues(entry);
+        }
         return;
     }
 

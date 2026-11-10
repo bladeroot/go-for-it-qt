@@ -5183,6 +5183,99 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }
+
+    // KB-60: the KB-59 fix (598b460) gives selectListById an early return for the list that
+    // is already current, placed before the `m_issueTracker.syncListIssues(entry)` call, and
+    // TxtListEditDialog no longer calls selectListById for it. Saving the current remote list
+    // (fixed API token, new JQL/query, new server URL) therefore no longer fetches anything:
+    // the list keeps showing the old/empty result until the next auto-sync or a manual sync,
+    // and clicking the current list again in the overview no longer refreshes it either.
+    void testEditingCurrentRemoteListStillSyncs() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QStringList targets;
+        serveHttpFull(server, [&targets](const QByteArray&, const QByteArray& target, const QByteArray&, const QByteArray& body) {
+            targets << QString::fromUtf8(target + ' ' + body); // JQL may travel in the URL or a POST body
+            return httpResponse("200 OK", "application/json", "{\"issues\":[],\"total\":0,\"isLast\":true}");
+        });
+
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb60.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        QVariantMap cfg{
+            {QStringLiteral("name"), QStringLiteral("KB60 Jira")},
+            {QStringLiteral("provider"), QStringLiteral("Jira")},
+            {QStringLiteral("jiraUrl"), QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())},
+            {QStringLiteral("jiraUser"), QStringLiteral("user@example.com")},
+            {QStringLiteral("apiToken"), QStringLiteral("token")},
+            {QStringLiteral("jiraJql"), QStringLiteral("project = OLD")}
+        };
+        const QString listId = controller.listManager()->saveListConfig(cfg, QStringLiteral("keep"));
+        QVERIFY(!listId.isEmpty());
+        controller.selectListById(listId);
+        QTRY_VERIFY_WITH_TIMEOUT(!targets.isEmpty(), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.issueTracker()->isSyncing(), 5000);
+        targets.clear();
+
+        // The user edits the JQL of the current list and presses OK (TxtListEditDialog::onAccepted).
+        cfg = controller.listManager()->getListConfig(listId);
+        cfg.insert(QStringLiteral("jiraJql"), QStringLiteral("project = NEW"));
+        QVERIFY(controller.listManager()->validateAndCheckConflicts(cfg).value(QStringLiteral("valid")).toBool());
+        const QString savedId = controller.listManager()->saveListConfig(cfg, QStringLiteral("keep"));
+        if (savedId != controller.currentListId()) {
+            controller.selectListById(savedId);
+        }
+        QTest::qWait(800);
+        bool fetchedNewQuery = false;
+        for (const QString& t : targets) {
+            if (QUrl::fromPercentEncoding(t.toUtf8()).replace(QLatin1Char('+'), QLatin1Char(' ')).contains(QStringLiteral("NEW"))) fetchedNewQuery = true;
+        }
+        QVERIFY2(fetchedNewQuery, qPrintable(targets.join(QStringLiteral(" | "))));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.issueTracker()->isSyncing(), 5000);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+        server.close();
+    }
+
+    // KB-61: markdownToJiraAdf drops everything after an unclosed ``` fence. Lines after the
+    // opening fence are collected in codeLines, but the codeBlock node is only emitted when a
+    // closing fence is seen; at the end of the input the pending lines are discarded. A task
+    // description (or comment) with a forgotten closing fence is pushed to Jira Cloud with the
+    // rest of its text silently missing, overwriting the full remote description.
+    void testMarkdownToAdfKeepsUnclosedCodeFence() {
+        const QJsonObject doc = IssueTrackerService::markdownToJiraAdf(
+            QStringLiteral("Intro line\n```bash\nKB61 command one\nKB61 tail text"));
+        const QString json = QString::fromUtf8(QJsonDocument(doc).toJson(QJsonDocument::Compact));
+        QVERIFY(json.contains(QStringLiteral("Intro line")));
+        QVERIFY2(json.contains(QStringLiteral("KB61 command one")) && json.contains(QStringLiteral("KB61 tail text")),
+                 qPrintable(json));
+    }
+
+    // KB-62: markdownToJiraAdf emits text nodes with an empty "text" for an empty fenced code
+    // block ("```" followed directly by "```"). The ADF schema requires text nodes to be
+    // non-empty, so Jira Cloud rejects the whole description/comment update with 400
+    // INVALID_INPUT and the push fails.
+    void testMarkdownToAdfHasNoEmptyTextNodes() {
+        const QJsonObject doc = IssueTrackerService::markdownToJiraAdf(
+            QStringLiteral("Steps:\n```\n```\nDone"));
+        QStringList emptyNodes;
+        std::function<void(const QJsonValue&, const QString&)> walk = [&](const QJsonValue& v, const QString& parent) {
+            if (v.isObject()) {
+                const QJsonObject o = v.toObject();
+                const QString type = o.value(QStringLiteral("type")).toString();
+                if (type == QStringLiteral("text") && o.value(QStringLiteral("text")).toString().isEmpty()) {
+                    emptyNodes << parent;
+                }
+                walk(o.value(QStringLiteral("content")), type);
+            } else if (v.isArray()) {
+                for (const QJsonValue& c : v.toArray()) walk(c, parent);
+            }
+        };
+        walk(doc, QStringLiteral("doc"));
+        QVERIFY2(emptyNodes.isEmpty(), qPrintable(QStringLiteral("empty text in: ") + emptyNodes.join(QStringLiteral(", "))));
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

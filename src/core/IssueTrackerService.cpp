@@ -3528,6 +3528,23 @@ QJsonObject IssueTrackerService::markdownToJiraAdf(const QString& markdown) {
         }
     };
 
+    auto emitCodeBlock = [&]() {
+        const QString codeText = codeLines.join(QStringLiteral("\n"));
+        QJsonObject cb{
+            {QStringLiteral("type"), QStringLiteral("codeBlock")}
+        };
+        if (!codeText.isEmpty()) {
+            cb[QStringLiteral("content")] = QJsonArray{QJsonObject{
+                {QStringLiteral("type"), QStringLiteral("text")},
+                {QStringLiteral("text"), codeText}
+            }};
+        }
+        if (!codeLang.isEmpty()) {
+            cb[QStringLiteral("attrs")] = QJsonObject{{QStringLiteral("language"), codeLang}};
+        }
+        docContent.append(cb);
+    };
+
     for (const QString& rawLine : lines) {
         const QString trimmed = rawLine.trimmed();
         if (trimmed.startsWith(QStringLiteral("```"))) {
@@ -3538,17 +3555,7 @@ QJsonObject IssueTrackerService::markdownToJiraAdf(const QString& markdown) {
                 codeLines.clear();
             } else {
                 inCodeBlock = false;
-                QJsonObject cb{
-                    {QStringLiteral("type"), QStringLiteral("codeBlock")},
-                    {QStringLiteral("content"), QJsonArray{QJsonObject{
-                        {QStringLiteral("type"), QStringLiteral("text")},
-                        {QStringLiteral("text"), codeLines.join(QStringLiteral("\n"))}
-                    }}}
-                };
-                if (!codeLang.isEmpty()) {
-                    cb[QStringLiteral("attrs")] = QJsonObject{{QStringLiteral("language"), codeLang}};
-                }
-                docContent.append(cb);
+                emitCodeBlock();
             }
             continue;
         }
@@ -3605,6 +3612,10 @@ QJsonObject IssueTrackerService::markdownToJiraAdf(const QString& markdown) {
         });
     }
     flushList();
+    if (inCodeBlock) {
+        emitCodeBlock();
+        inCodeBlock = false;
+    }
 
     if (docContent.isEmpty()) {
         docContent.append(QJsonObject{
