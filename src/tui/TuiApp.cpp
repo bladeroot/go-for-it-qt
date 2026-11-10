@@ -766,11 +766,28 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
         } else if (prevMode == Mode::EditSettingValue) {
             m_mode = Mode::Settings;
             if (m_settingsRow == 0) {
-                m_app->settings()->setTaskDuration(qBound(60, text.toInt() * 60, 86400));
+                bool ok = false;
+                qint64 mins = text.toLongLong(&ok);
+                if (!ok) {
+                    mins = text.startsWith(QLatin1Char('-')) ? 1 : 1440;
+                }
+                const qint64 clamped = qBound(1LL, mins, 1440LL);
+                m_app->settings()->setTaskDuration(static_cast<int>(clamped * 60));
             } else if (m_settingsRow == 1) {
-                m_app->settings()->setBreakDuration(qBound(60, text.toInt() * 60, 86400));
+                bool ok = false;
+                qint64 mins = text.toLongLong(&ok);
+                if (!ok) {
+                    mins = text.startsWith(QLatin1Char('-')) ? 1 : 1440;
+                }
+                const qint64 clamped = qBound(1LL, mins, 1440LL);
+                m_app->settings()->setBreakDuration(static_cast<int>(clamped * 60));
             } else if (m_settingsRow == 2) {
-                m_app->settings()->setReminderTime(qBound(0, text.toInt(), 3600));
+                bool ok = false;
+                qint64 secs = text.toLongLong(&ok);
+                if (!ok) {
+                    secs = text.startsWith(QLatin1Char('-')) ? 0 : 3600;
+                }
+                m_app->settings()->setReminderTime(static_cast<int>(qBound(0LL, secs, 3600LL)));
             } else if (m_settingsRow == 7 && !text.isEmpty()) {
                 if (m_app->changeDatabasePath(text, true)) {
                     m_statusMessage = tr("Database moved to: %1").arg(m_app->databasePath());
@@ -784,7 +801,12 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
                     m_statusMessage = tr("Failed to export backup to: %1").arg(text);
                 }
             } else if (m_settingsRow == 10) {
-                m_app->settings()->setAutoSyncIntervalMinutes(qBound(0, text.toInt(), 1440));
+                bool ok = false;
+                qint64 mins = text.toLongLong(&ok);
+                if (!ok) {
+                    mins = text.startsWith(QLatin1Char('-')) ? 0 : 1440;
+                }
+                m_app->settings()->setAutoSyncIntervalMinutes(static_cast<int>(qBound(0LL, mins, 1440LL)));
             }
         } else if (prevMode == Mode::EditListField) {
             m_mode = Mode::ListEdit;

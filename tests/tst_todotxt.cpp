@@ -6161,6 +6161,52 @@ private slots:
         server.close();
     }
 
+    // KB-85: TUI duration input multiplies parsed minutes in int before qBound.
+    // A large valid integer can wrap negative and select the one-minute minimum
+    // instead of the documented 24-hour maximum.
+    void testTuiLargeDurationInputClampsWithoutOverflow() {
+        AppController controller(QString(), m_testSandbox.filePath(QStringLiteral("kb85_tui.db")));
+
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int devNull = ::open("/dev/null", O_WRONLY);
+        QVERIFY(savedStdin >= 0 && savedStdout >= 0 && devNull >= 0);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(devNull, STDOUT_FILENO);
+
+        {
+            TuiApp tui(&controller);
+            auto feed = [&](const QByteArray& bytes) {
+                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())),
+                         static_cast<ssize_t>(bytes.size()));
+                for (int i = 0; i < 8; ++i) {
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending <= 0) break;
+                    QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                }
+            };
+            feed("O");       // settings, row 0: task duration
+            feed("\r");      // edit the value
+            feed("\x15");    // clear the pre-filled minutes
+            feed("50000000");
+            feed("\r");
+        }
+
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(devNull);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        QCOMPARE(controller.settings()->taskDuration(), 86400);
+    }
+
     // KB-78: the TUI quit commands ("q", ":q", ":wq", ":x") call QCoreApplication::quit()
     // without stopping a running work session. The GUI stops the timer before quitting (Ctrl+Q,
     // tray "Close"), but AppController has no destructor/aboutToQuit handler that does it, so in
