@@ -939,7 +939,13 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
                             }
                             return;
                         }
-                        emit remotePrioritiesLoaded(parseJiraPrioritiesJson(retryReply->readAll(), existingMapping));
+                        const QVariantList list = parseJiraPrioritiesJson(retryReply->readAll(), existingMapping);
+                        if (!list.isEmpty()) {
+                            emit remotePrioritiesLoaded(list);
+                            return;
+                        }
+                        const int retryHttpStatus = retryReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                        emit remotePrioritiesError(tr("Failed to load Jira priorities (%1): %2").arg(retryHttpStatus).arg(retryReply->errorString()));
                     });
                     return;
                 }
@@ -950,7 +956,12 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
                 }
                 return;
             }
-            emit remotePrioritiesLoaded(parseJiraPrioritiesJson(reply->readAll(), existingMapping));
+            const QVariantList list = parseJiraPrioritiesJson(reply->readAll(), existingMapping);
+            if (!list.isEmpty()) {
+                emit remotePrioritiesLoaded(list);
+                return;
+            }
+            emit remotePrioritiesError(tr("Failed to load Jira priorities (%1): %2").arg(httpStatus).arg(reply->errorString()));
         });
     } else if (provider == QStringLiteral("Redmine")) {
         QUrl url(baseUrl + QStringLiteral("/enumerations/issue_priorities.json"));

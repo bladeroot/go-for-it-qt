@@ -618,5 +618,17 @@
   "Failed to update task timer in database.": "Не вдалося оновити таймер задачі в базі даних.",
   "Failed to update tasks order in database.": "Не вдалося оновити порядок задач у базі даних.",
   "GitLab issues returned invalid response: %1": "Отримано некоректну відповідь для задач GitLab: %1",
-  "GitLab merge requests returned invalid response: %1": "Отримано некоректну відповідь для запитів на злиття GitLab: %1"
+  "GitLab merge requests returned invalid response: %1": "Отримано некоректну відповідь для запитів на злиття GitLab: %1",
+  "Failed to load Jira priorities: %1": "Не вдалося завантажити пріоритети Jira: %1",
+  "Failed to load Jira priorities (%1): %2": "Не вдалося завантажити пріоритети Jira (%1): %2",
+  "Failed to load Redmine priorities (%1): %2": "Не вдалося завантажити пріоритети Redmine (%1): %2",
+  "Nextcloud returned non-CalDAV response (%1).": "Nextcloud повернув відповідь, яка не є CalDAV (%1).",
+  "Failed to post worklog to Jira (%1): %2": "Не вдалося надіслати робочий журнал до Jira (%1): %2",
+  "Failed to post worklog to YouTrack (%1): %2": "Не вдалося надіслати робочий журнал до YouTrack (%1): %2",
+  "Failed to post worklog to GitHub (%1): %2": "Не вдалося надіслати робочий журнал до GitHub (%1): %2",
+  "Failed to post worklog to GitLab (%1): %2": "Не вдалося надіслати робочий журнал до GitLab (%1): %2",
+  "Failed to post worklog to Redmine (%1): %2": "Не вдалося надіслати робочий журнал до Redmine (%1): %2",
+  "Failed to post worklog to Todoist (%1): %2": "Не вдалося надіслати робочий журнал до Todoist (%1): %2",
+  "Failed to post worklog to Nextcloud (%1): %2": "Не вдалося надіслати робочий журнал до Nextcloud (%1): %2",
+  "Refused to open unsafe URL scheme: %1": "Відхилено відкриття небезпечної схеми URL: %1"
 }

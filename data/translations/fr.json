@@ -618,5 +618,17 @@
   "Failed to update task timer in database.": "Échec de la mise à jour du minuteur de tâche dans la base de données.",
   "Failed to update tasks order in database.": "Échec de la mise à jour de l'ordre des tâches dans la base de données.",
   "GitLab issues returned invalid response: %1": "Les tickets GitLab ont renvoyé une réponse invalide : %1",
-  "GitLab merge requests returned invalid response: %1": "Les demandes de fusion GitLab ont renvoyé une réponse invalide : %1"
+  "GitLab merge requests returned invalid response: %1": "Les demandes de fusion GitLab ont renvoyé une réponse invalide : %1",
+  "Failed to load Jira priorities: %1": "Échec du chargement des priorités Jira : %1",
+  "Failed to load Jira priorities (%1): %2": "Échec du chargement des priorités Jira (%1) : %2",
+  "Failed to load Redmine priorities (%1): %2": "Échec du chargement des priorités Redmine (%1) : %2",
+  "Nextcloud returned non-CalDAV response (%1).": "Nextcloud a renvoyé une réponse non-CalDAV (%1).",
+  "Failed to post worklog to Jira (%1): %2": "Échec de la publication du journal de travail sur Jira (%1) : %2",
+  "Failed to post worklog to YouTrack (%1): %2": "Échec de la publication du journal de travail sur YouTrack (%1) : %2",
+  "Failed to post worklog to GitHub (%1): %2": "Échec de la publication du journal de travail sur GitHub (%1) : %2",
+  "Failed to post worklog to GitLab (%1): %2": "Échec de la publication du journal de travail sur GitLab (%1) : %2",
+  "Failed to post worklog to Redmine (%1): %2": "Échec de la publication du journal de travail sur Redmine (%1) : %2",
+  "Failed to post worklog to Todoist (%1): %2": "Échec de la publication du journal de travail sur Todoist (%1) : %2",
+  "Failed to post worklog to Nextcloud (%1): %2": "Échec de la publication du journal de travail sur Nextcloud (%1) : %2",
+  "Refused to open unsafe URL scheme: %1": "Refus d'ouvrir un schéma d'URL non sécurisé : %1"
 }

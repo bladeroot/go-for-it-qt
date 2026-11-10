@@ -618,5 +618,17 @@
   "Failed to update task timer in database.": "Impossibile aggiornare il timer attività nel database.",
   "Failed to update tasks order in database.": "Impossibile aggiornare l'ordine delle attività nel database.",
   "GitLab issues returned invalid response: %1": "I problemi di GitLab hanno restituito una risposta non valida: %1",
-  "GitLab merge requests returned invalid response: %1": "Le richieste di merge di GitLab hanno restituito una risposta non valida: %1"
+  "GitLab merge requests returned invalid response: %1": "Le richieste di merge di GitLab hanno restituito una risposta non valida: %1",
+  "Failed to load Jira priorities: %1": "Impossibile caricare le priorità di Jira: %1",
+  "Failed to load Jira priorities (%1): %2": "Impossibile caricare le priorità di Jira (%1): %2",
+  "Failed to load Redmine priorities (%1): %2": "Impossibile caricare le priorità di Redmine (%1): %2",
+  "Nextcloud returned non-CalDAV response (%1).": "Nextcloud ha restituito una risposta non-CalDAV (%1).",
+  "Failed to post worklog to Jira (%1): %2": "Impossibile inviare il registro di lavoro a Jira (%1): %2",
+  "Failed to post worklog to YouTrack (%1): %2": "Impossibile inviare il registro di lavoro a YouTrack (%1): %2",
+  "Failed to post worklog to GitHub (%1): %2": "Impossibile inviare il registro di lavoro a GitHub (%1): %2",
+  "Failed to post worklog to GitLab (%1): %2": "Impossibile inviare il registro di lavoro a GitLab (%1): %2",
+  "Failed to post worklog to Redmine (%1): %2": "Impossibile inviare il registro di lavoro a Redmine (%1): %2",
+  "Failed to post worklog to Todoist (%1): %2": "Impossibile inviare il registro di lavoro a Todoist (%1): %2",
+  "Failed to post worklog to Nextcloud (%1): %2": "Impossibile inviare il registro di lavoro a Nextcloud (%1): %2",
+  "Refused to open unsafe URL scheme: %1": "Rifiutata l'apertura di uno schema URL non sicuro: %1"
 }

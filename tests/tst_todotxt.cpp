@@ -4939,6 +4939,112 @@ private slots:
         QFile::remove(backupDb);
         QFile::remove(liveDb);
     }
+
+    // KB-54: since 6f0d732 fetchRemotePriorities("Jira") emits remotePrioritiesLoaded with
+    // whatever parseJiraPrioritiesJson returns, even an empty list. A 200 reply that is not a
+    // JSON array (SSO/proxy login page, wrong base URL serving HTML) therefore reaches
+    // TxtListEditDialog::onRemotePrioritiesLoaded, which clears priorityMappingModel and shows
+    // "Loaded 0 priorities."; saving the dialog then wipes the list's whole priority mapping.
+    // Before the change an empty parse fell back to the defaults; the Redmine branch still
+    // treats an empty list as an error. Expected: an error signal (or a non-empty list).
+    void testJiraPriorityFetchNonJsonDoesNotWipeMapping() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttpFull(server, [](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            return httpResponse("200 OK", "text/html", "<html><body>Please log in</body></html>");
+        });
+
+        IssueTrackerService svc;
+        QSignalSpy loadedSpy(&svc, &IssueTrackerService::remotePrioritiesLoaded);
+        QSignalSpy errorSpy(&svc, &IssueTrackerService::remotePrioritiesError);
+        const QVariantMap existing{{QStringLiteral("KB54 Custom"), QStringLiteral("A")}};
+        svc.fetchRemotePriorities(QStringLiteral("Jira"),
+                                  QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()),
+                                  QStringLiteral("user@example.com"), QStringLiteral("token"), existing);
+        QTRY_VERIFY_WITH_TIMEOUT(loadedSpy.count() + errorSpy.count() > 0, 5000);
+        const bool emptyLoad = loadedSpy.count() > 0 && loadedSpy.at(0).at(0).toList().isEmpty();
+        QVERIFY(!emptyLoad);
+        server.close();
+    }
+
+    // KB-55: user-visible strings added by recent fixes are missing from every translation
+    // dictionary (data/translations/{uk,de,fr,es,it}.json), so they appear in English in all
+    // five languages. UkTranslator looks up exact source strings, so each new tr() text must
+    // be added to all five files.
+    void testRecentTrStringsAreTranslated() {
+        const QStringList keys = {
+            QStringLiteral("Failed to load Jira priorities: %1"),
+            QStringLiteral("Failed to load Jira priorities (%1): %2"),
+            QStringLiteral("Failed to load Redmine priorities (%1): %2"),
+            QStringLiteral("Nextcloud returned non-CalDAV response (%1)."),
+            QStringLiteral("Failed to post worklog to Jira (%1): %2"),
+            QStringLiteral("Failed to post worklog to YouTrack (%1): %2"),
+            QStringLiteral("Failed to post worklog to GitHub (%1): %2"),
+            QStringLiteral("Failed to post worklog to GitLab (%1): %2"),
+            QStringLiteral("Failed to post worklog to Redmine (%1): %2"),
+            QStringLiteral("Failed to post worklog to Todoist (%1): %2"),
+            QStringLiteral("Failed to post worklog to Nextcloud (%1): %2"),
+            QStringLiteral("Refused to open unsafe URL scheme: %1")
+        };
+        QStringList missing;
+        // Build-tree copy of data/translations (refreshed on cmake configure).
+        const QString dir = QCoreApplication::applicationDirPath() + QStringLiteral("/data/translations/");
+        for (const QString& lang : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
+                                    QStringLiteral("es"), QStringLiteral("it")}) {
+            QFile f(dir + lang + QStringLiteral(".json"));
+            QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
+            const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+            QVERIFY(!obj.isEmpty());
+            for (const QString& k : keys) {
+                if (!obj.contains(k)) missing << lang + QStringLiteral(": ") + k;
+            }
+        }
+        QVERIFY2(missing.isEmpty(), qPrintable(QString::number(missing.size()) + QStringLiteral(" missing")));
+    }
+
+    // KB-56: TaskTimer::skipIteration() is used both for the natural end of an iteration
+    // (updateState when the time is up) and for the "Skip" button ("Skip to the break").
+    // It always emits timerFinished(m_breakActive) first, so skipping a work session after a
+    // minute is treated exactly like finishing it: AppController sets
+    // m_lastSessionCompletedPomodoro and logs the session with is_pomodoro_completed = 1
+    // (inflating "completed pomodoros" in the dashboard and reports), and SystemHookService
+    // runs the pomodoro_completed hook.
+    void testSkippedWorkSessionIsNotACompletedPomodoro() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb56.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        controller.addNewTask(QStringLiteral("KB56 skipped task"));
+        bool selected = false;
+        for (int r = 0; r < 200 && !selected; ++r) {
+            controller.setActiveTodoRow(r);
+            selected = controller.timer()->activeTaskDescription().contains(QStringLiteral("KB56"));
+        }
+        QVERIFY(selected);
+        QVERIFY(!controller.timer()->isBreakActive());
+        QSignalSpy finishedSpy(controller.timer(), &TaskTimer::timerFinished);
+
+        controller.timer()->start();
+        QTest::qWait(1600);
+        QVERIFY(controller.timer()->remainingSeconds() > 60); // far from the natural end
+        controller.timer()->skipIteration();                   // user presses "Skip"
+        controller.timer()->stop();
+
+        bool loggedAsCompleted = false;
+        bool logged = false;
+        for (const ActivityRecord& r : DatabaseManager::instance().loadActivityLogs()) {
+            if (r.taskDescription.contains(QStringLiteral("KB56"))) {
+                logged = true;
+                loggedAsCompleted = loggedAsCompleted || r.isPomodoroCompleted;
+            }
+        }
+        QVERIFY(logged);
+        QVERIFY(!loggedAsCompleted);
+        QCOMPARE(finishedSpy.count(), 0);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

@@ -180,7 +180,6 @@ void TaskTimer::reset() {
 }
 
 void TaskTimer::skipIteration() {
-    emit timerFinished(m_breakActive);
     stop();
     toggleBreakState();
 }
@@ -221,7 +220,9 @@ void TaskTimer::updateState() {
         totalRuntimeMs += elapsedMs;
 
         if (m_iterationDurationMs - totalRuntimeMs <= 0) {
-            skipIteration();
+            emit timerFinished(m_breakActive);
+            stop();
+            toggleBreakState();
             return;
         }
 
