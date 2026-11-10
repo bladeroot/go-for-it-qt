@@ -109,6 +109,16 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
             render();
         }
     });
+
+    m_escTimer.setSingleShot(true);
+    connect(&m_escTimer, &QTimer::timeout, this, [this]() {
+        if (!m_stdinPending.isEmpty() && m_stdinPending.at(0) == '\033') {
+            handleKeySequence(QByteArray("\033"));
+            m_stdinPending.remove(0, 1);
+            processPendingStdin();
+            render();
+        }
+    });
 }
 
 TuiApp::~TuiApp() {
@@ -206,60 +216,114 @@ void TuiApp::onStdinActivated() {
     const ssize_t n = ::read(STDIN_FILENO, buf, sizeof(buf));
     if (n <= 0) return;
 
+    m_escTimer.stop();
     m_stdinPending.append(buf, static_cast<int>(n));
+    processPendingStdin();
+    render();
+}
 
-    // Dispatch escape sequences or individual UTF-8 characters
-    if (m_stdinPending.startsWith('\033')) {
-        handleKeySequence(m_stdinPending);
-        m_stdinPending.clear();
-        render();
-        return;
-    }
+void TuiApp::processPendingStdin() {
+    int pos = 0;
+    while (pos < m_stdinPending.size()) {
+        const unsigned char b = static_cast<unsigned char>(m_stdinPending.at(pos));
 
-    int validBytes = m_stdinPending.size();
-    if (validBytes > 0) {
-        const int lookBack = qMin(4, validBytes);
-        for (int i = 1; i <= lookBack; ++i) {
-            const unsigned char byte = static_cast<unsigned char>(m_stdinPending.at(validBytes - i));
-            if ((byte & 0x80) == 0x00) {
-                // ASCII byte - complete
-                break;
-            }
-            if ((byte & 0xC0) == 0xC0) {
-                // Leading byte of a multi-byte sequence
-                const int leadPos = validBytes - i;
-                int expectedLen = 0;
-                if ((byte & 0xE0) == 0xC0) expectedLen = 2;
-                else if ((byte & 0xF0) == 0xE0) expectedLen = 3;
-                else if ((byte & 0xF8) == 0xF0) expectedLen = 4;
-
-                const int availableLen = validBytes - leadPos;
-                if (availableLen < expectedLen) {
-                    validBytes = leadPos;
+        if (b == '\033') {
+            if (pos + 1 >= m_stdinPending.size()) {
+                // Lone trailing '\033' at the end of buffer
+                if (!m_escTimer.isActive()) {
+                    m_escTimer.start(50);
                 }
                 break;
             }
+
+            const char next = m_stdinPending.at(pos + 1);
+            if (next == '[') {
+                // CSI sequence: '\033[' [0x20-0x3F]* [0x40-0x7E]
+                int idx = pos + 2;
+                bool foundFinal = false;
+                while (idx < m_stdinPending.size()) {
+                    const unsigned char c = static_cast<unsigned char>(m_stdinPending.at(idx));
+                    if (c >= 0x40 && c <= 0x7E) {
+                        foundFinal = true;
+                        ++idx;
+                        break;
+                    } else if (c >= 0x20 && c <= 0x3F) {
+                        ++idx;
+                        if (idx - pos > 32) {
+                            foundFinal = true;
+                            break;
+                        }
+                    } else {
+                        foundFinal = true;
+                        break;
+                    }
+                }
+
+                if (!foundFinal) {
+                    // Incomplete trailing CSI sequence
+                    break;
+                }
+
+                const QByteArray seq = m_stdinPending.mid(pos, idx - pos);
+                pos = idx;
+                m_escTimer.stop();
+                handleKeySequence(seq);
+                continue;
+            } else if (next == 'O') {
+                // SS3 sequence: '\033O' [0x20-0x7E]
+                if (pos + 2 >= m_stdinPending.size()) {
+                    break;
+                }
+                const QByteArray seq = m_stdinPending.mid(pos, 3);
+                pos += 3;
+                m_escTimer.stop();
+                handleKeySequence(seq);
+                continue;
+            } else {
+                // Lone '\033' followed by non-sequence character
+                m_escTimer.stop();
+                handleKeySequence(QByteArray("\033"));
+                pos += 1;
+                continue;
+            }
         }
-    }
 
-    if (validBytes <= 0) {
-        return;
-    }
-
-    const QByteArray ready = m_stdinPending.left(validBytes);
-    m_stdinPending = m_stdinPending.mid(validBytes);
-
-    const QString utf8Str = QString::fromUtf8(ready);
-    for (int i = 0; i < utf8Str.size(); ) {
-        int len = 1;
-        if (utf8Str.at(i).isHighSurrogate() && (i + 1 < utf8Str.size()) && utf8Str.at(i + 1).isLowSurrogate()) {
-            len = 2;
+        // UTF-8 code point
+        int expectedLen = 1;
+        if ((b & 0x80) == 0) {
+            expectedLen = 1;
+        } else if ((b & 0xE0) == 0xC0) {
+            expectedLen = 2;
+        } else if ((b & 0xF0) == 0xE0) {
+            expectedLen = 3;
+        } else if ((b & 0xF8) == 0xF0) {
+            expectedLen = 4;
         }
-        const QString ch = utf8Str.mid(i, len);
-        handleKeySequence(ch.toUtf8());
-        i += len;
+
+        bool validContinuation = true;
+        for (int k = 1; k < expectedLen && (pos + k < m_stdinPending.size()); ++k) {
+            const unsigned char cb = static_cast<unsigned char>(m_stdinPending.at(pos + k));
+            if ((cb & 0xC0) != 0x80) {
+                validContinuation = false;
+                break;
+            }
+        }
+
+        if (!validContinuation) {
+            expectedLen = 1;
+        } else if (pos + expectedLen > m_stdinPending.size()) {
+            break;
+        }
+
+        const QByteArray token = m_stdinPending.mid(pos, expectedLen);
+        pos += expectedLen;
+
+        handleKeySequence(token);
     }
-    render();
+
+    if (pos > 0) {
+        m_stdinPending.remove(0, pos);
+    }
 }
 
 void TuiApp::handleKeySequence(const QByteArray& seq) {

@@ -68,6 +68,7 @@ private:
     void executeExCommand(const QString& cmdLine);
     void switchViewTab(int tabIndex);
     void clampSelection();
+    void processPendingStdin();
     TaskFilterProxyModel* currentProxy() const;
     bool isClosedTab() const;
 
@@ -78,6 +79,7 @@ private:
     AppController* m_app = nullptr;
     QSocketNotifier* m_stdinNotifier = nullptr;
     QTimer m_resizeTimer;
+    QTimer m_escTimer;
     struct termios m_origTermios {};
     bool m_rawModeActive = false;
     QByteArray m_stdinPending;

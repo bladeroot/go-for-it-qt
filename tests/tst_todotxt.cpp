@@ -4474,6 +4474,85 @@ private slots:
         QCOMPARE(added.size(), 1);
         QCOMPARE(added.first(), title);
     }
+
+    // KB-40: TuiApp::onStdinActivated treats a read that starts with ESC as one single key
+    // sequence and otherwise decodes it character by character, so an escape sequence that
+    // shares a read with ordinary characters (fast typing, key repeat, SSH/tmux coalescing)
+    // is mangled:
+    //  - "\033[DX" (Left, then 'X') is passed as one unknown sequence: the cursor does not
+    //    move and 'X' is lost;
+    //  - "Y\033[D" sends 'Y', then a lone "\033" (cancels the input line), then '[' and 'D'.
+    void testTuiSplitsEscapeSequencesFromTypedText() {
+        AppController ctrl(QString(), m_testSandbox.filePath(QStringLiteral("kb40_tui_esc.db")));
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB40"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+
+        int fds[2];
+        QCOMPARE(::pipe(fds), 0);
+        const int savedStdin = ::dup(STDIN_FILENO);
+        const int savedStdout = ::dup(STDOUT_FILENO);
+        const int devNull = ::open("/dev/null", O_WRONLY);
+        QVERIFY(savedStdin >= 0 && savedStdout >= 0 && devNull >= 0);
+        ::dup2(fds[0], STDIN_FILENO);
+        ::dup2(devNull, STDOUT_FILENO);
+
+        // With the bug, the stray keys reach normal mode and 'C' opens the comment editor
+        // ($VISUAL/$EDITOR) on our stdin; make that editor a no-op so the test cannot hang.
+        const QByteArray oldVisual = qgetenv("VISUAL");
+        const QByteArray oldEditor = qgetenv("EDITOR");
+        qputenv("VISUAL", "true");
+        qputenv("EDITOR", "true");
+
+        QStringList added;
+        {
+            TuiApp tui(&ctrl);
+            auto feed = [&](const QByteArray& bytes) {
+                QCOMPARE(::write(fds[1], bytes.constData(), static_cast<size_t>(bytes.size())),
+                         static_cast<ssize_t>(bytes.size()));
+                for (int i = 0; i < 8; ++i) {
+                    int pending = 0;
+                    ::ioctl(STDIN_FILENO, FIONREAD, &pending);
+                    if (pending <= 0) break;
+                    QMetaObject::invokeMethod(&tui, "onStdinActivated", Qt::DirectConnection);
+                }
+            };
+            feed("a");             // insert mode
+            feed("ab");
+            feed("\033[DX");       // Left + 'X' in one read  -> expected "aXb"
+            feed("Y\033[C");       // 'Y' + Right in one read -> expected "aXYb"
+            feed("\r");
+            for (int r = 0; r < ctrl.todoProxyModel()->rowCount(); ++r) {
+                added << ctrl.todoProxyModel()->data(ctrl.todoProxyModel()->index(r, 0),
+                                                     TaskStoreModel::DescriptionRole).toString();
+            }
+        }
+        if (oldVisual.isNull()) qunsetenv("VISUAL"); else qputenv("VISUAL", oldVisual);
+        if (oldEditor.isNull()) qunsetenv("EDITOR"); else qputenv("EDITOR", oldEditor);
+        std::fflush(stdout);
+        ::dup2(savedStdin, STDIN_FILENO);
+        ::dup2(savedStdout, STDOUT_FILENO);
+        ::close(savedStdin);
+        ::close(savedStdout);
+        ::close(devNull);
+        ::close(fds[0]);
+        ::close(fds[1]);
+
+        QCOMPARE(added, QStringList{QStringLiteral("aXYb")});
+    }
+
+    // KB-41: IssueTrackerService::mapPriorityName checks "low" before "lowest", so the
+    // standard Jira/YouTrack priority "Lowest" maps to (D), the same as "Low", and the
+    // (E) branch for "lowest" is unreachable. Remote "Lowest" issues are sorted and
+    // filtered as if they were "Low".
+    void testLowestRemotePriorityMapsToE() {
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Highest")), quint8(0));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("High")), quint8(1));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Medium")), quint8(2));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Low")), quint8(3));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Trivial")), quint8(4));
+        QCOMPARE(IssueTrackerService::mapPriorityName(QStringLiteral("Lowest")), quint8(4));
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

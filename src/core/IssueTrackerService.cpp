@@ -546,11 +546,11 @@ quint8 IssueTrackerService::mapPriorityName(const QString& priorityName) {
     if (p.contains(QStringLiteral("medium")) || p.contains(QStringLiteral("normal"))) {
         return 2; // (C)
     }
-    if (p.contains(QStringLiteral("low")) || p.contains(QStringLiteral("minor"))) {
-        return 3; // (D)
-    }
     if (p.contains(QStringLiteral("lowest")) || p.contains(QStringLiteral("trivial"))) {
         return 4; // (E)
+    }
+    if (p.contains(QStringLiteral("low")) || p.contains(QStringLiteral("minor"))) {
+        return 3; // (D)
     }
     return TxtTask::NoPriority;
 }
