@@ -1,278 +1,276 @@
-# Реєстр вирішених дефектів (Resolved Bugs Registry)
+# Resolved Bugs Registry
 
-Цей документ містить повний систематизований перелік усіх дефектів, архітектурних проблем та регресій, виявлених і успішно усунених у проєкті **Go for It Qt** (`go-for-it-qt`, `go-for-it-tui`).
+This document maintains a comprehensive, structured record of defects, edge cases, and architectural regressions identified and resolved in **Go for It Qt** (`go-for-it-qt`, `go-for-it-tui`).
 
-Усі наведені нижче виправлення покриті автоматичними регресійними тестами у [tests/tst_todotxt.cpp](file:///home/bladeroot/prj/other/Go-For-It/tests/tst_todotxt.cpp) (загалом **114 тестів**, 100% успішне проходження).
-
----
-
-## Зміст
-
-1. [Частина 1: Фундаментальні дефекти та архітектурна стабілізація (Pre-KB)](#частина-1-фундаментальні-дефекти-та-архітектурна-стабілізація-pre-kb)
-   - [1.1. SQLite, транзакційність та атомарність операцій](#11-sqlite-транзакційність-та-атомарність-операцій)
-   - [1.2. Таймер, облік робочого часу та захист від витоків (Anti-Leakage)](#12-таймер-облік-робочого-часу-та-захист-від-витоків-anti-leakage)
-   - [1.3. Синхронізація з трекерами завдань](#13-синхронізація-з-трекерами-завдань)
-   - [1.4. Ізоляція тестового середовища та системна безпека](#14-ізоляція-тестового-середовища-та-системна-безпека)
-   - [1.5. Інтерфейс користувача (GUI / QML / TUI)](#15-інтерфейс-користувача-gui--qml--tui)
-   - [1.6. Пакування та сумісність з дистрибутивами Linux](#16-пакування-та-сумісність-з-дистрибутивами-linux)
-2. [Частина 2: Дефекти регулярного аудиту (Серія KB-1 – KB-82)](#частина-2-дефекти-регулярного-аудиту-серія-kb-1--kb-82)
-   - [KB-1 – KB-14: Узгодження трекерів та пагінація](#kb-1--kb-14-узгодження-трекерів-та-пагінація)
-   - [KB-15 – KB-29: Безпека схем, переповнення чисел, транзакції та стан списків](#kb-15--kb-29-безпека-схем-переповнення-чисел-транзакції-та-стан-списків)
-   - [KB-30 – KB-43: Права доступу, експорт звітів, TUI та звуковий генератор](#kb-30--kb-43-права-доступу-експорт-звітів-tui-та-звуковий-генератор)
-   - [KB-44 – KB-56: Bearer-авторизація, мапінг пріоритетів та стабільність таймера](#kb-44--kb-56-bearer-авторизація-мапінг-пріоритетів-та-стабільність-таймера)
-   - [KB-57 – KB-69: Nextcloud CalDAV, Pomodoro, хуки та безпека токенів](#kb-57--kb-69-nextcloud-caldav-pomodoro-хуки-та-безпека-токенів)
-   - [KB-70 – KB-76: Форматування TUI, ANSI escape-послідовності та діалоги](#kb-70--kb-76-форматування-tui-ansi-escape-послідовності-та-діалоги)
-   - [KB-77 – KB-82: Фільтрація GitHub, збереження сесій TUI, теплокарта та Redmine](#kb-77--kb-82-фільтрація-github-збереження-сесій-tui-теплокарта-та-redmine)
+All entries are validated by regression tests in [tests/tst_todotxt.cpp](file:///home/bladeroot/prj/other/Go-For-It/tests/tst_todotxt.cpp).
 
 ---
 
-## Частина 1: Фундаментальні дефекти та архітектурна стабілізація (Pre-KB)
+## Table of Contents
 
-### 1.1. SQLite, транзакційність та атомарність операцій
-
-* **Захист від нульової кількості змінених рядків (Zero affected rows guard)**:
-  * *Проблема*: Під час пакетного перевпорядкування задач чи списків та перенесення виконаних задач збій одного рядка залишав базу даних у розсинхронізованому стані.
-  * *Виправлення*: Додано сувору перевірку кількості оновлених рядків (`rowsAffected > 0`) для кожного кроку пакета; у разі 0 повертається помилка та викликається відкат (`ROLLBACK`).
-  * *Коміти*: `a962389`, `458f702`, `77044f1`.
-  * *Тест*: `testAssertRollbackStateOnFailedBatchReorders`.
-
-* **Компактизація `sort_order` при видаленні задач**:
-  * *Проблема*: Видалення задач залишало розриви у послідовності `sort_order`, що призводило до переповнення та непередбачуваного сортування при повторних вставках.
-  * *Виправлення*: Впроваджено атомарну компактизацію порядку завдань у межах поточного списку.
-  * *Коміти*: `5f87bc7`, `10c146e`, `a742564`.
-
-* **Транзакційні точки збереження (`SAVEPOINT`) та відкат стану моделі**:
-  * *Проблема*: При виникненні помилок запису в SQLite локальна модель у пам'яті вже вважала операцію успішною, що призводило до розбіжностей між UI та диском.
-  * *Виправлення*: Реалізовано транзакційні `SAVEPOINT` у [DatabaseService.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/DatabaseService.cpp). Усі модифікації моделі виконуються через зворотні виклики (callbacks) лише після підтвердження збереження в базі.
-  * *Коміти*: `70e5134`, `77bd35c`, `f128e72`, `88d5289`, `136604c`, `7ea3b9e`, `4744c3b`, `65f7878`, `86cd472`.
-  * *Тести*: `testStatusNormalizationAndAtomicReorderAndSyncTx`, `testSyncCompletionDateTimerRestorationAndMultiListOrder`.
-
-* **Атомарне масове очищення виконаних завдань ("Clear Done")**:
-  * *Проблема*: Видалення виконаних завдань у режимі перегляду всіх списків ("All Lists") могло частково зависнути на середині, залишивши деякі списки неочищеними.
-  * *Виправлення*: Забезпечено атомарну транзакцію очищення виконаних завдань для всіх списків одночасно.
-  * *Коміт*: `7ea3b9e`.
-  * *Тест*: `testAllListsClearDoneAndStatusSideEffectsSafety`.
+1. [Part 1: Foundational Defects & Architectural Hardening (Pre-KB)](#part-1-foundational-defects--architectural-hardening-pre-kb)
+   - [1.1. SQLite Persistence, Transaction Atomicity & Reordering](#11-sqlite-persistence-transaction-atomicity--reordering)
+   - [1.2. Timer Integrity, Activity Logging & Anti-Leakage](#12-timer-integrity-activity-logging--anti-leakage)
+   - [1.3. Remote Issue Tracker Synchronization](#13-remote-issue-tracker-synchronization)
+   - [1.4. Test Environment Isolation & System Safety](#14-test-environment-isolation--system-safety)
+   - [1.5. User Interface (GUI / QML / TUI)](#15-user-interface-gui--qml--tui)
+   - [1.6. Packaging & Linux Distribution Compatibility](#16-packaging--linux-distribution-compatibility)
+2. [Part 2: Systematic Review Defects (KB-1 through KB-83)](#part-2-systematic-review-defects-kb-1-through-kb-83)
+   - [KB-1 – KB-14: Tracker Pagination & Reconciliation](#kb-1--kb-14-tracker-pagination--reconciliation)
+   - [KB-15 – KB-29: Scheme Validation, Arithmetic Bounds & List Mutation Safety](#kb-15--kb-29-scheme-validation-arithmetic-bounds--list-mutation-safety)
+   - [KB-30 – KB-43: Permissions, Export Failure Handling & TUI Multibyte Input](#kb-30--kb-43-permissions-export-failure-handling--tui-multibyte-input)
+   - [KB-44 – KB-56: Bearer Auth, Priority Mappings & Timer Reliability](#kb-44--kb-56-bearer-auth-priority-mappings--timer-reliability)
+   - [KB-57 – KB-69: Nextcloud CalDAV, Pomodoro Continuity & Token Masking](#kb-57--kb-69-nextcloud-caldav-pomodoro-continuity--token-masking)
+   - [KB-70 – KB-76: TUI Formatting, ANSI Sequences & Dialog Binding](#kb-70--kb-76-tui-formatting-ansi-sequences--dialog-binding)
+   - [KB-77 – KB-83: GitHub Queries, TUI Teardown, Heatmap, Redmine & Schedule Normalization](#kb-77--kb-83-github-queries-tui-teardown-heatmap-redmine--schedule-normalization)
 
 ---
 
-### 1.2. Таймер, облік робочого часу та захист від витоків (Anti-Leakage)
+## Part 1: Foundational Defects & Architectural Hardening (Pre-KB)
 
-* **Прив'язка таймера за унікальним `taskId` замість індексу рядка**:
-  * *Проблема*: Таймер спирався на індекс рядка в моделі. При зміні сортування, додаванні нових задач зверху чи перемиканні фільтрів таймер починав нараховувати час іншій задачі.
-  * *Виправлення*: Таймер тепер жорстко відстежує унікальний `taskId` ([AppController.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/AppController.cpp)).
-  * *Коміт*: `f7825fe`.
-  * *Тест*: `testTaskTimerTrackingAndDatabaseSafety`.
+### 1.1. SQLite Persistence, Transaction Atomicity & Reordering
 
-* **Запобігання витоку часу (Time Leakage Prevention)**:
-  * *Проблема*: При швидкому перемиканні задач, видаленні активної задачі або її позначенні виконаною секунди поточної сесії не встигали зафіксуватися і втрачалися.
-  * *Виправлення*: Перед зміною контексту чи видаленням обов'язково викликається примусовий скид накопиченого часу поточної сесії в базу даних.
-  * *Коміти*: `c6be0b2`, `205cda2`.
-  * *Тест*: `testTaskTimerSwitchingAndDatabaseAtomicity`.
+* **Zero Affected Rows Guard**:
+  * *Problem*: In batch reordering and moving completed tasks, a failure on a single row previously left database state silently desynchronized from the in-memory model.
+  * *Fix*: Enforced strict verification of `rowsAffected > 0` on every batch update step, rolling back (`ROLLBACK`) on zero affected rows.
+  * *Commits*: `a962389`, `458f702`, `77044f1`.
+  * *Test*: `testAssertRollbackStateOnFailedBatchReorders`.
 
-* **Захист від зупинки таймера на проміжних діях**:
-  * *Проблема*: Зміна статусу задачі на непроміжний або тимчасова помилка запису проміжного прогресу призводили до скидання таймера.
-  * *Виправлення*: Таймер зупиняється виключно при остаточному завершенні задачі або явній команді зупинки.
-  * *Коміти*: `f80bfcb`, `c434993`.
-  * *Тест*: `testDatabaseErrorHandlingAndNonFinalStatusTimer`.
+* **Sort Order Compaction on Task Deletion**:
+  * *Problem*: Deleting tasks left gaps in `sort_order`, resulting in integer exhaustion and erratic ordering on subsequent prepend/insert operations.
+  * *Fix*: Implemented atomic compaction of `sort_order` scoped to the current list on task removal.
+  * *Commits*: `5f87bc7`, `10c146e`, `a742564`.
 
-* **Захист від субсекундної інфляції часу**:
-  * *Проблема*: Багаторазові часті цикли старт/стоп призводили до штучного округлення мілісекунд у більший бік і спотворення статистики.
-  * *Виправлення*: Впроваджено накопичувальний мілісекундний буфер із точним округленням до цілих секунд.
-  * *Коміт*: `f7825fe`.
+* **Transactional Savepoints (`SAVEPOINT`) and Model Rollback**:
+  * *Problem*: When SQLite writes failed, the in-memory Qt models had already updated their internal vectors, causing UI and disk state to diverge.
+  * *Fix*: Introduced transactional savepoints in [DatabaseService.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/DatabaseService.cpp). Model vectors are updated only via callbacks after database commit confirmation, rolling back on failure.
+  * *Commits*: `70e5134`, `77bd35c`, `f128e72`, `88d5289`, `136604c`, `7ea3b9e`, `4744c3b`, `65f7878`, `86cd472`.
+  * *Tests*: `testStatusNormalizationAndAtomicReorderAndSyncTx`, `testSyncCompletionDateTimerRestorationAndMultiListOrder`.
 
----
-
-### 1.3. Синхронізація з трекерами завдань
-
-* **Справжня багатосторінкова пагінація**:
-  * *Проблема*: Запити до Jira, YouTrack, GitHub, GitLab та Redmine завантажували лише перші 50-100 елементів через відсутність обробки посторінкових посилань / зсувів.
-  * *Виправлення*: Реалізовано повноцінну пагінацію з накопиченням результатів у [IssueTrackerService.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/IssueTrackerService.cpp).
-  * *Коміт*: `7474d7f`.
-  * *Тест*: `testPaginationReconciliationForLargeLists`.
-
-* **Усунення циклічного захоплення лямбд (Circular Reference Cycle)**:
-  * *Проблема*: Рекурсивні асинхронні виклики пагінатора захоплювали shared-вказівники всередині лямбд, що блокувало їх знищення збірником сміття / лічильником посилань.
-  * *Виправлення*: Перехід на слабкі посилання (`QPointer` / `std::weak_ptr`) та розрив циклів.
-  * *Коміт*: `be76830`.
-
-* **Узгодження віддалено закритих задач (Reconciliation) на великих списках**:
-  * *Проблема*: Якщо на сервері закривали задачу, яка не потрапляла на першу сторінку синхронізації, клієнт міг помилково закрити інші активні задачі через часткові вибірки.
-  * *Виправлення*: Застосовано дворежимне узгодження з валідацією повного набору ключів завдань перед оновленням локальних статусів.
-  * *Коміти*: `a0a67da`, `d8afb42`, `8cb49bf`, `43aca05`.
-  * *Тест*: `testRemoteClosedIssuesReconciliation`.
-
-* **Автоматичне виявлення статусів у Redmine**:
-  * *Проблема*: У різних проєктах Redmine закриті статуси мають довільні ID та назви (Closed, Resolved, Rejected).
-  * *Виправлення*: Реалізовано попереднє опитування метаданих статусів трекера для автоматичного визначення їхньої категорії.
-  * *Коміти*: `303ca7d`, `c326227`.
+* **Atomic All-Lists Done Deletion ("Clear Done")**:
+  * *Problem*: Clearing completed tasks across all lists could fail mid-way, leaving some lists purged and others untouched.
+  * *Fix*: Wrapped multi-list done purging in a single atomic database transaction.
+  * *Commit*: `7ea3b9e`.
+  * *Test*: `testAllListsClearDoneAndStatusSideEffectsSafety`.
 
 ---
 
-### 1.4. Ізоляція тестового середовища та системна безпека
+### 1.2. Timer Integrity, Activity Logging & Anti-Leakage
 
-* **Повна ізоляція тестового середовища (Sandbox)**:
-  * *Проблема*: Тести читали й модифікували системні налаштування користувача у `~/.config/go-for-it/` та змінювали робочу базу SQLite.
-  * *Виправлення*: Змінні оточення `HOME`, `XDG_CONFIG_HOME` та `XDG_DATA_HOME` у тестах перенаправлено до тимчасових каталогів під `/tmp`, а тести працюють із пам'яттю або тимчасовими файлами.
-  * *Коміти*: `8d36acc`, `ff92ed9`.
+* **Timer Tracking by Unique Task ID**:
+  * *Problem*: The timer originally tracked tasks by raw model row index. Sorting, filtering, or prepending tasks reassigned the active timer to another task.
+  * *Fix*: Bound timer state strictly to `taskId` ([AppController.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/AppController.cpp)).
+  * *Commit*: `f7825fe`.
+  * *Test*: `testTaskTimerTrackingAndDatabaseSafety`.
 
-* **Headless запуск CTest без відтворення аудіо**:
-  * *Проблема*: Запуск тестів на серверах CI без звукової підсистеми або X11 спричиняв збої.
-  * *Виправлення*: Додано автоматичне перемикання на `offscreen` платформу Qt та мокінг звукового бекенду в тестовому режимі.
-  * *Коміти*: `8db30bb`, `eba483d`.
+* **Elapsed Time Leakage Prevention**:
+  * *Problem*: Rapidly switching tasks, deleting an active task, or marking it done lost elapsed session seconds before flushing to the database.
+  * *Fix*: Guaranteed a synchronous flush of accumulated session time to SQLite prior to any context change or task removal.
+  * *Commits*: `c6be0b2`, `205cda2`.
+  * *Test*: `testTaskTimerSwitchingAndDatabaseAtomicity`.
 
-* **Аварійне відновлення блокувань режиму "Не турбувати" (DND Crash Recovery)**:
-  * *Проблема*: У разі аварійного завершення програми блокування повідомлень робочого столу залишалося активним назавжди.
-  * *Виправлення*: Впроваджено `QLockFile` з перевіркою PID активного процесу для автоматичного зняття завислих блокувань.
-  * *Коміти*: `5465a59`, `0291b46`.
+* **Preserving Timer State on Non-Final Actions**:
+  * *Problem*: Non-final status toggles or transient progress write errors prematurely halted running timers.
+  * *Fix*: Confined timer termination strictly to final completion (`Status::Done`) or explicit user stop actions.
+  * *Commits*: `f80bfcb`, `c434993`.
+  * *Test*: `testDatabaseErrorHandlingAndNonFinalStatusTimer`.
 
----
-
-### 1.5. Інтерфейс користувача (GUI / QML / TUI)
-
-* **Виправлення невалідних властивостей QML**:
-  * *Проблема*: Використання властивості `shortcut` всередині `MenuItem` викликало попередження у рантаймі Qt 6 та ігнорувало гарячі клавіші.
-  * *Виправлення*: Замінено на окремий QML-елемент `Shortcut` (`Ctrl+M`).
-  * *Коміт*: `a0ff6ae`.
-* **Відсутність властивості `currentPriorityMapping`**:
-  * *Проблема*: Діалог редагування списку падав при спробі прочитати мапінг пріоритетів.
-  * *Виправлення*: Додано відсутню властивість до інтерфейсу діалогу ([TxtListEditDialog.qml](file:///home/bladeroot/prj/other/Go-For-It/qml/dialogs/TxtListEditDialog.qml)).
-  * *Коміт*: `4cf271e`.
-* **Експорт методів `entryAt` та `get` у `ListManagerModel`**:
-  * *Проблема*: QML не міг напряму звертатися до елементів моделі списків.
-  * *Виправлення*: Позначено методи атрибутом `Q_INVOKABLE`.
-  * *Коміт*: `1a06d47`.
+* **Subsecond Inflation Guard**:
+  * *Problem*: Frequent start/stop cycles artificially rounded fractional milliseconds up, corrupting activity logging metrics.
+  * *Fix*: Added a millisecond accumulator buffer with deterministic whole-second rounding.
+  * *Commit*: `f7825fe`.
 
 ---
 
-### 1.6. Пакування та сумісність з дистрибутивами Linux
+### 1.3. Remote Issue Tracker Synchronization
 
-* **Сумісність із версіями Qt (від 6.4 до 6.8)**:
-  * *Проблема*: Різні дистрибутиви (Ubuntu Jammy 22.04, Noble 24.04, Debian Trixie) постачаються з різними мінорними версіями Qt 6.
-  * *Виправлення*: Налаштовано умовну компіляцію, адаптовано CMake-політики (зокрема `QTP0004`) та розширено діапазон залежностей у `debian/control`.
-  * *Коміти*: `ecb6477`, `fef8d0d`, `715d8ad`, `bf200f3`, `71f0579`.
-* **Виправлення генерації CPack/Debian пакетів**:
-  * *Проблема*: Збої `shlibdeps` через відсутність утиліти `file` та помилка цілі `ninja test` під час пакування.
-  * *Виправлення*: Додано необхідні пакувальні залежності та скориговано `debian/rules`.
-  * *Коміти*: `81a5a62`, `07a3112`, `23a6364`.
+* **True Multi-Page Pagination**:
+  * *Problem*: Synchronizers for Jira, YouTrack, GitHub, GitLab, and Redmine fetched only the initial 50–100 issues due to missing page offset traversal.
+  * *Fix*: Implemented recursive asynchronous pagination with accumulated results in [IssueTrackerService.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/IssueTrackerService.cpp).
+  * *Commit*: `7474d7f`.
+  * *Test*: `testPaginationReconciliationForLargeLists`.
 
----
+* **Lambda Reference Cycle Elimination**:
+  * *Problem*: Paginator closures captured shared pointers, preventing garbage collection and leaking memory on repeated sync cycles.
+  * *Fix*: Transitioned to weak references (`QPointer` / `std::weak_ptr`) to break ownership cycles.
+  * *Commit*: `be76830`.
 
-## Частина 2: Дефекти регулярного аудиту (Серія KB-1 – KB-82)
+* **Reconciliation of Remotely Closed Issues on Large Lists**:
+  * *Problem*: Issues closed on the server that slipped beyond the first page window caused active local tasks to be closed erroneously due to partial page views.
+  * *Fix*: Implemented two-pass reconciliation with full issue key set validation before updating local statuses.
+  * *Commits*: `a0a67da`, `d8afb42`, `8cb49bf`, `43aca05`.
+  * *Test*: `testRemoteClosedIssuesReconciliation`.
 
-### KB-1 – KB-14: Узгодження трекерів та пагінація
-
-* **KB-1**: Nextcloud WebDAV — відповіді сервера без CalDAV-компонентів не повинні вважатися порожнім списком і призводити до закриття локальних завдань. (*Тест*: `testNextcloudNonCalDavBodyDoesNotCloseTasks`, коміт `96dede1`).
-* **KB-2**: Redmine — зміщення результатів пагінації при активних змінах на сервері більше не спричиняє закриття пропущених задач. (*Тест*: `testRedminePaginationShiftDoesNotCloseSkippedIssue`, коміт `96dede1`).
-* **KB-3**: Redmine — автоматичне вивчення закритих статусів ігнорує відхилені ("Rejected") задачі для уникнення помилкового мапінгу. (*Тест*: `testRedmineLearnedClosedFallbackSkipsRejected`, коміт `96dede1`).
-* **KB-4**: GitLab — захист від закриття задач при зміщенні сторінок через створення нових Issue під час синхронізації. (*Тест*: `testGitLabPaginationShiftDoesNotCloseSkippedIssue`, коміт `96dede1`).
-* **KB-5**: YouTrack — усунено закриття задач при пагінаційному зміщенні списків. (*Тест*: `testYouTrackPaginationShiftDoesNotCloseSkippedIssue`, коміт `96dede1`).
-* **KB-6**: Nextcloud — мультистатусна XML-відповідь без блоку `calendar-data` не закриває локальні задачі. (*Тест*: `testNextcloudMultistatusWithoutCalendarDataDoesNotCloseTasks`, коміт `96dede1`).
-* **KB-7**: Nextcloud — часткові або пошкоджені дані VCALENDAR не закривають відсутні задачі. (*Тест*: `testNextcloudPartialCalendarDataDoesNotCloseMissingTasks`, коміт `96dede1`).
-* **KB-8**: YouTrack — коректне узгодження закритих задач на багатосторінкових списках. (*Тест*: `testYouTrackMultiPageListStillReconcilesClosedIssue`, коміт `96dede1`).
-* **KB-9**: YouTrack — узгодження на великих стабільних списках (>100 елементів). (*Тест*: `testYouTrackLargeStableListStillReconcilesClosedIssue`, коміт `96dede1`).
-* **KB-10**: YouTrack — узгодження задач, розташованих на межі сторінок пагінації. (*Тест*: `testYouTrackClosedIssueAtPageBoundaryIsReconciled`, коміт `96dede1`).
-* **KB-11 – KB-14**: YouTrack — захист від міжпроєктного зсуву, незалежність результатів синхронізації від ідентифікатора списку та двопрохідний алгоритм виявлення реального зміщення завдань. (*Тести*: `testYouTrackCrossProjectShiftOnLaterPageDoesNotCloseSkippedIssue`, `testYouTrackSyncOutcomeDoesNotDependOnListId`, `testYouTrackTwoPassDetectsRealisticShift`, коміт `fb7e847`).
+* **Automatic Redmine Closed Status Learning**:
+  * *Problem*: Redmine installations use arbitrary IDs and names for closed statuses (e.g., Closed, Resolved, Rejected).
+  * *Fix*: Added pre-flight status metadata discovery to dynamically learn closed status IDs per instance.
+  * *Commits*: `303ca7d`, `c326227`.
 
 ---
 
-### KB-15 – KB-29: Безпека схем, переповнення чисел, транзакції та стан списків
+### 1.4. Test Environment Isolation & System Safety
 
-* **KB-15**: Запобігання повторному додаванню демонстраційних задач за замовчуванням після того, як користувач свідомо очистив свій список. (*Тест*: `testDefaultTasksNotReaddedAfterUserEmptiesList`, коміт `5edf4cc`).
-* **KB-16**: Блокування відкриття небезпечних схем посилань (`file://`, виконання shell-команд) через дію "Open in Browser". (*Тест*: `testOpenUrlExternallyRejectsUnsafeSchemes`, коміт `5edf4cc`).
-* **KB-17**: Збереження поточної робочої бази даних у разі невдалого перенесення SQLite файлу до нового шляху. (*Тест*: `testFailedDatabaseRelocationKeepsCurrentDatabase`, коміт `c77d5b7`).
-* **KB-18**: Обмеження кількості повторних спроб авторизації в Jira при одночасному збої Basic та Bearer схем (захист від нескінченного циклу). (*Тест*: `testJiraAuthRetryIsBoundedWhenBothSchemesFail`, коміт `c77d5b7`).
-* **KB-19 – KB-21**: Надійне розпізнавання заголовків авторизації у mock-сервері та коректна буферизація з'єднань. (*Коміти*: `b280825`, `fb43f6c`, `cd0923e`, `7c606aa`).
-* **KB-22 – KB-26**: Безпечні числові межі для пріоритетів та цілочисельних операцій. (*Коміти*: `24c0fd2`, `f7b3d91`).
-* **KB-27**: Відхилення спроб мутацій над списками, якщо цільовий рядок списку відсутній або був видалений. (*Тест*: `testListMutationsRejectMissingRows`, коміт `c816a12`).
-* **KB-28**: Автоматичне видалення списку з моделі UI, якщо його файл було видалено сторонньою програмою. (*Тест*: `testRemovingListAlreadyDeletedElsewhereDropsItFromModel`, коміт `360a0f6`).
-* **KB-29**: Захист парсера токенів тривалості від арифметичного переповнення при великих значеннях хвилин/годин. (*Тест*: `testDurationTokensRejectArithmeticOverflow`, коміт `6e2922d`).
+* **Test Sandbox Isolation**:
+  * *Problem*: Test suites inspected and modified the user's real `~/.config/go-for-it/` and production SQLite database.
+  * *Fix*: Sandboxed `HOME`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` to isolated `/tmp` directories for all test executions.
+  * *Commits*: `8d36acc`, `ff92ed9`.
 
----
+* **Headless Offscreen Execution & Audio Muting**:
+  * *Problem*: CI test runners without X11 or audio subsystems crashed on sound playback and QML component initialization.
+  * *Fix*: Defaulted test runs to `QT_QPA_PLATFORM=offscreen` and mocked audio output in headless environments.
+  * *Commits*: `8db30bb`, `eba483d`.
 
-### KB-30 – KB-43: Права доступу, експорт звітів, TUI та звуковий генератор
-
-* **KB-30**: Встановлення суворих прав доступу `0600` (лише для власника) для згенерованих файлів білінгового експорту. (*Тест*: `testBillingExportFilesAreOwnerOnly`, коміт `27dc901`).
-* **KB-31**: Сповіщення про помилку та коректне повернення статусу при неможливості записати PDF/CSV звіт. (*Тест*: `testBillingPdfExportReportsFailureWhenTargetCannotBeWritten`, коміт `07d9771`).
-* **KB-32**: Автоматичне очищення збереженої дати виконання (`due:`), якщо користувач видалив відповідний текст у рядку задачі. (*Тест*: `testEditingTextRemovesDueDate`, коміт `79cc64d`).
-* **KB-33**: Суворі права доступу `0600` на файл журналу активності таймера `activity.csv`. (*Тест*: `testActivityLogCsvIsOwnerOnly`, коміт `79cc64d`).
-* **KB-34**: Екранування HTML/XML розмітки в тілі системних сповіщень для захисту від ін'єкцій. (*Тест*: `testNotificationPayloadEscapesMarkup`, `testNotificationTitleIsNotHtmlEscaped`, коміт `79cc64d`).
-* **KB-35**: Розділення завдань із різних списків у структурі білінгового звіту. (*Тест*: `testBillingBreakdownKeepsTasksOfDifferentListsApart`, коміт `79d5091`).
-* **KB-36**: Повна заборона віддалених HTTP-запитів на запис під час роботи в тестовому режимі. (*Тест*: `testTrackerWritesAreNoOpsInTestMode`, коміт `79d5091`).
-* **KB-37**: Збереження оригінального пріоритету та тривалості при швидкому редагуванні назви задачі в консольному TUI. (*Тест*: `testTuiStyleTitleEditKeepsPriorityAndDuration`, коміт `79d5091`).
-* **KB-38 – KB-39**: Підтримка введення багатобайтових Unicode-символів (включно з кирилицею та символами за межами BMP/емодзі) у TUI. (*Тест*: `testTuiInputKeepsMultibyteAndNonBmpCharacters`, коміт `79d5091`).
-* **KB-40**: Токенізація ANSI escape-послідовностей клавіатурного вводу в TUI для уникнення артефактів. (*Тест*: `testTuiSplitsEscapeSequencesFromTypedText`, коміт `eb30c2c`).
-* **KB-41**: Коректний мапінг найнижчого віддаленого пріоритету задач на локальний пріоритет `(E)`. (*Тест*: `testLowestRemotePriorityMapsToE`, коміт `eb30c2c`).
-* **KB-42**: Обробка та явне повідомлення про збої надсилання робочих журналів (worklogs) у віддалений трекер. (*Тест*: `testFailedWorklogIsReported`, коміт `a897569`).
-* **KB-43**: Безпечна генерація звуків концентрації (рожевий/коричневий шум) в ізольованому каталозі замість спільного `/tmp`. (*Тест*: `testAmbientSoundIsNotGeneratedInSharedTmp`, коміт `a897569`).
+* **Do Not Disturb (DND) Crash Recovery**:
+  * *Problem*: An abnormal process crash left system notification suppression active indefinitely.
+  * *Fix*: Implemented PID-aware `QLockFile` recovery to release stale focus locks on crash.
+  * *Commits*: `5465a59`, `0291b46`.
 
 ---
 
-### KB-44 – KB-56: Bearer-авторизація, мапінг пріоритетів та стабільність таймера
+### 1.5. User Interface (GUI / QML / TUI)
 
-* **KB-44**: Автоматичний фолбек надсилання Jira worklog на схему `Bearer`, якщо `Basic Auth` повертає 401. (*Тест*: `testJiraWorklogFallsBackToBearerAuth`, коміт `82b5093`).
-* **KB-45**: Звичайні текстові мітки завдань більше не сприймаються помилково як маркери пріоритету. (*Тест*: `testNonPriorityLabelsDoNotMapToPriority`, коміт `82b5093`).
-* **KB-46**: Запобігання хибній класифікації заперечних статусів (наприклад, "Not Done") як виконаних. (*Тест*: `testNegatedRemoteStatusesAreNotMisclassified`, коміт `82b5093`).
-* **KB-47**: Ізоляція тестового режиму для примусової Bearer-авторизації. (*Тест*: `testForcedBearerWorklogIsNoOpInTestMode`, коміт `17b6a8b`).
-* **KB-48**: Запобігання "залипанню" режиму Bearer після успішного оновлення облікових даних Basic Auth. (*Тест*: `testJiraBearerModeIsNotStickyAfterCredentialFix`, коміт `17b6a8b`).
-* **KB-49**: Підтримка поширених стилів позначення міток пріоритетів у трекерах (наприклад, `prio:high`, `p1`). (*Тест*: `testCommonPriorityLabelStylesStillMap`, коміт `17b6a8b`).
-* **KB-50**: Підтримка мапінгу специфічних кодів пріоритетів за проєктами. (*Тест*: `testScopedPriorityCodeLabelsMap`, коміт `6f0d732`).
-* **KB-51**: Синхронізація стандартних ключів пріоритетів Todoist та Nextcloud із локальними значеннями. (*Тест*: `testDefaultPriorityMappingMatchesSyncedValues`, коміт `6f0d732`).
-* **KB-52**: Повторна спроба запиту пріоритетів Jira з Bearer-токеном при отриманні 401. (*Тест*: `testJiraFetchRemotePrioritiesRetriesWithBearer`, коміт `6f0d732`).
-* **KB-53**: Імпорт резервної копії бази більше не переприв'язує активний таймер до чужої задачі з таким самим ID. (*Тест*: `testImportBackupDoesNotRebindRunningTimerToOtherTask`, коміт `6f0d732`).
-* **KB-54**: Отримання не-JSON відповіді від Jira при запиті пріоритетів не скидає вже налаштований мапінг. (*Тест*: `testJiraPriorityFetchNonJsonDoesNotWipeMapping`, коміт `db35da5`).
-* **KB-55**: Повна синхронізація та переклад усіх нещодавно доданих ключів локалізації. (*Тест*: `testRecentTrStringsAreTranslated`, коміт `db35da5`).
-* **KB-56**: Ручний пропуск робочої сесії Pomodoro не враховується як успішно завершений помідор. (*Тест*: `testSkippedWorkSessionIsNotACompletedPomodoro`, коміт `db35da5`).
-
----
-
-### KB-57 – KB-69: Nextcloud CalDAV, Pomodoro, хуки та безпека токенів
-
-* **KB-57**: Коректне декодування URI-escape послідовностей (відсоткові кодування) у діалозі вибору файлів. (*Тест*: `testFileDialogPathConversionKeepsReservedCharacters`, коміт `a767f7f`).
-* **KB-58**: Автоматичне оновлення панелі дашборду продуктивності при зміні вибраного списку. (*Тест*: `testDashboardFollowsCurrentListChange`, коміт `a767f7f`).
-* **KB-59**: Збереження активної задачі та безперервності таймера при повторному виборі поточного списку. (*Тест*: `testEditingCurrentListKeepsRunningTimerTask`, коміт `598b460`).
-* **KB-60**: Повторний вибір віддаленого списку ініціює фонову синхронізацію без перезавантаження інтерфейсу. (*Тест*: `testEditingCurrentRemoteListStillSyncs`, коміт `e4ea0a8`).
-* **KB-61**: Конвертер Markdown у Atlassian Document Format (ADF) зберігає незакриті блоки коду без збоїв парсингу. (*Тест*: `testMarkdownToAdfKeepsUnclosedCodeFence`, коміт `e4ea0a8`).
-* **KB-62**: Заборона порожніх текстових вузлів в ADF, які відхилялися API Jira Cloud. (*Тест*: `testMarkdownToAdfHasNoEmptyTextNodes`, коміт `e4ea0a8`).
-* **KB-63**: Оновлення опису в Nextcloud зберігає всі інші сторонні властивості ICS-календаря. (*Тест*: `testNextcloudDescriptionUpdateKeepsOtherProperties`, коміт `0c3585a`).
-* **KB-64**: Редагування опису та коментарів у Nextcloud обмежується виключно блоком `VTODO` і не змінює `VALARM`. (*Тест*: `testNextcloudDescriptionUpdateDoesNotTouchAlarm`, коміт `393a146`).
-* **KB-65**: Безпечне оновлення подій Nextcloud, назва яких містить ключове слово `BEGIN`. (*Тест*: `testNextcloudDescriptionUpdateWithBeginTextInSummary`, коміт `12e796d`).
-* **KB-66**: Панель дашборду у режимі "All Lists" охоплює статистику всіх існуючих списків. (*Тест*: `testDashboardInAllListsViewCoversAllLists`, коміт `12e796d`).
-* **KB-67**: Збереження поточного прогресу та циклу техніки Pomodoro при повторному кліку на список. (*Тест*: `testReselectingCurrentListKeepsPomodoroCycle`, коміт `2ea130c`).
-* **KB-68**: Маскування API-токенів у TUI-редакторі списків для запобігання підгляданню паролів у консолі. (*Тест*: `testTuiListEditDoesNotPrintApiToken`, коміт `05688b9`).
-* **KB-69**: Передача актуальних значень `GOFI_REMAINING_SEC` та налаштованої тривалості в оточення системних хуків. (*Тест*: `testHookEnvironmentMatchesDocumentedVariables`, коміт `1e9326e`).
+* **QML Property Warnings & Invalid Shortcuts**:
+  * *Problem*: Using the deprecated `shortcut` property on `MenuItem` raised Qt runtime warnings and dropped `Ctrl+M`.
+  * *Fix*: Replaced with dedicated `Shortcut` elements.
+  * *Commit*: `a0ff6ae`.
+* **Missing `currentPriorityMapping` Property**:
+  * *Problem*: Opening list settings crashed on accessing undefined priority mapping properties.
+  * *Fix*: Declared property explicitly in [TxtListEditDialog.qml](file:///home/bladeroot/prj/other/Go-For-It/qml/dialogs/TxtListEditDialog.qml).
+  * *Commit*: `4cf271e`.
+* **Exposing Model Helpers to QML**:
+  * *Problem*: `entryAt` and `get` were inaccessible to QML views in `ListManagerModel`.
+  * *Fix*: Added `Q_INVOKABLE` qualifiers.
+  * *Commit*: `1a06d47`.
 
 ---
 
-### KB-70 – KB-76: Форматування TUI, ANSI escape-послідовності та діалоги
+### 1.6. Packaging & Linux Distribution Compatibility
 
-* **KB-70**: Обрізання наддовгих Markdown-заголовків та таблиць під ширину терміналу в TUI Markdown Viewer. (*Тест*: `testTuiMarkdownViewKeepsLongHeadingsInsideTerminalWidth`, коміт `3fc5b46`).
-* **KB-71**: Прив'язка діалогу деталей задачі ([TaskDetailsDialog.qml](file:///home/bladeroot/prj/other/Go-For-It/qml/dialogs/TaskDetailsDialog.qml)) до конкретного ID задачі замість динамічного рядка проксі-моделі (захист від редагування чужої задачі при зміні фільтра). (*Тест*: `testTaskDetailsDialogSavesToTheTaskItWasOpenedFor`, коміт `3fc5b46`).
-* **KB-72**: Миттєве застосування змінених гарячих клавіш у GUI через властивість `shortcutMap` без перезавантаження програми. (*Тест*: `testChangedShortcutAppliesWithoutRestart`, коміт `3fc5b46`).
-* **KB-73**: Автоматичне обмеження довжини назви списку та пошукового запиту у верхньому рядку TUI. (*Тест*: `testTuiHeaderKeepsLongListNameInsideTerminalWidth`, коміт `3fc5b46`).
-* **KB-74**: Пошуковий фільтр у [TaskFilterProxyModel.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/TaskFilterProxyModel.cpp) тепер підтримує підрядковий пошук посилань (URL) та слів із двокрапками (`http://`, `bug:`). (*Тест*: `testSearchFindsTasksByUrlAndColonWords`, коміт `3fc5b46`).
-* **KB-75**: Перевірка обов'язкової наявності поля `merged_at` перед позначенням GitHub Pull Request як злитого. (*Тест*: `testGitHubOpenPrWithoutMergedAtIsNotMerged`, коміт `3fc5b46`).
-* **KB-76**: Коректний розрахунок видимої ширини рядка та обрізання тексту в TUI з урахуванням ANSI escape-послідовностей (скидання стилів після трьох крапок `…`). (*Тест*: `testTuiTabRowIsNotTruncatedByAnsiCodes`, коміт `7f8b299`).
-
----
-
-### KB-77 – KB-82: Фільтрація GitHub, збереження сесій TUI, теплокарта та Redmine
-
-* **KB-77**: Запити до репозиторіїв GitHub автоматично додають критерій `is:open` та сортування за `updated desc`, якщо користувач не вказав інші фільтри стану. (*Тест*: `testGitHubRepoQueryRequestsOpenItemsOnly`, коміт `4691d59`).
-* **KB-78**: Вихід із консольного інтерфейсу TUI (клавіша `q`) або закриття програми тепер фіксують та зберігають активну сесію таймера в базі даних. (*Тест*: `testTuiQuitLogsRunningSession`, коміт `4691d59`).
-* **KB-79**: Натискання Enter у вікні вибору списків TUI відкриває підсвічений список, навіть якщо попередній вибір залишався в пам'яті. (*Тест*: `testTuiListPickerEnterOpensHighlightedList`, коміт `4691d59`).
-* **KB-80**: Обрізання рядків у панелі попереднього перегляду TUI під ширину терміналу для уникнення артефактів перенесення рядків. (*Тест*: `testTuiPreviewPaneKeepsLongTitleInsideTerminalWidth`, коміт `4691d59`).
-* **KB-81**: Вирівнювання початкової дати теплокарти активності (Heatmap) строго на понеділок із точним збереженням кількості днів (14, 28, 91) та локалізацією назв днів тижня. (*Тест*: `testHeatmapColumnsStartOnMonday`, коміт `4691d59`).
-* **KB-82**: Збереження оригінальної назви закритих статусів Redmine (наприклад, `Rejected`) при мапінгу віддалених статусів на категорію `done`. (*Тест*: `testRedmineClosedStatusKeepsNameForMapping`, коміт `4691d59`).
+* **Qt 6 Version Matrix (Qt 6.4 through 6.8)**:
+  * *Problem*: Supported distributions (Ubuntu 22.04 Jammy, 24.04 Noble, Debian Trixie) ship varying Qt 6 releases with policy differences.
+  * *Fix*: Guarded CMake policies (e.g. `QTP0004`), adjusted dependency packages in `debian/control`, and verified clean builds on all targets.
+  * *Commits*: `ecb6477`, `fef8d0d`, `715d8ad`, `bf200f3`, `71f0579`.
+* **CPack Debian Packaging Adjustments**:
+  * *Problem*: `shlibdeps` failed due to missing `file` utility and `dh_auto_test` conflicted with ninja test targets.
+  * *Fix*: Added build-essential tools and streamlined `debian/rules`.
+  * *Commits*: `81a5a62`, `07a3112`, `23a6364`.
 
 ---
 
-## Підсумок
+## Part 2: Systematic Review Defects (KB-1 through KB-83)
 
-Усі перелічені дефекти перевірені та підтверджені набором регресійних тестів у середовищі CTest:
+### KB-1 – KB-14: Tracker Pagination & Reconciliation
+
+* **KB-1**: Nextcloud WebDAV — Non-CalDAV XML responses must not be treated as empty task lists that close local tasks. (*Test*: `testNextcloudNonCalDavBodyDoesNotCloseTasks`, commit `96dede1`).
+* **KB-2**: Redmine — Pagination shifts caused by concurrent issue creations do not close skipped issues. (*Test*: `testRedminePaginationShiftDoesNotCloseSkippedIssue`, commit `96dede1`).
+* **KB-3**: Redmine — Automatic closed status discovery ignores rejected issues to prevent incorrect status mapping. (*Test*: `testRedmineLearnedClosedFallbackSkipsRejected`, commit `96dede1`).
+* **KB-4**: GitLab — Guarded against closing tasks when pagination results shift due to incoming issues during sync. (*Test*: `testGitLabPaginationShiftDoesNotCloseSkippedIssue`, commit `96dede1`).
+* **KB-5**: YouTrack — Eliminated premature task completion on pagination shifts. (*Test*: `testYouTrackPaginationShiftDoesNotCloseSkippedIssue`, commit `96dede1`).
+* **KB-6**: Nextcloud — Multistatus XML responses without `calendar-data` blocks do not close local tasks. (*Test*: `testNextcloudMultistatusWithoutCalendarDataDoesNotCloseTasks`, commit `96dede1`).
+* **KB-7**: Nextcloud — Incomplete or malformed VCALENDAR payloads do not close unmentioned tasks. (*Test*: `testNextcloudPartialCalendarDataDoesNotCloseMissingTasks`, commit `96dede1`).
+* **KB-8**: YouTrack — Corrected reconciliation of closed issues across multi-page result sets. (*Test*: `testYouTrackMultiPageListStillReconcilesClosedIssue`, commit `96dede1`).
+* **KB-9**: YouTrack — Guaranteed reliable reconciliation on large stable lists (>100 tasks). (*Test*: `testYouTrackLargeStableListStillReconcilesClosedIssue`, commit `96dede1`).
+* **KB-10**: YouTrack — Handled edge-case reconciliation for tasks positioned on page boundary transitions. (*Test*: `testYouTrackClosedIssueAtPageBoundaryIsReconciled`, commit `96dede1`).
+* **KB-11 – KB-14**: YouTrack — Protected against cross-project pagination shifts, ensured synchronization outcome independence from list ID, and implemented two-pass realistic shift detection. (*Tests*: `testYouTrackCrossProjectShiftOnLaterPageDoesNotCloseSkippedIssue`, `testYouTrackSyncOutcomeDoesNotDependOnListId`, `testYouTrackTwoPassDetectsRealisticShift`, commit `fb7e847`).
+
+---
+
+### KB-15 – KB-29: Scheme Validation, Arithmetic Bounds & List Mutation Safety
+
+* **KB-15**: Prevented default demo tasks from being re-added after a user explicitly empties their list. (*Test*: `testDefaultTasksNotReaddedAfterUserEmptiesList`, commit `5edf4cc`).
+* **KB-16**: Blocked unsafe URI schemes (e.g. `file://`, shell invocation) from being launched via "Open in Browser". (*Test*: `testOpenUrlExternallyRejectsUnsafeSchemes`, commit `5edf4cc`).
+* **KB-17**: Preserved existing working database file when a database relocation/move operation fails. (*Test*: `testFailedDatabaseRelocationKeepsCurrentDatabase`, commit `c77d5b7`).
+* **KB-18**: Bounded authentication retries in Jira when both Basic and Bearer auth schemes fail. (*Test*: `testJiraAuthRetryIsBoundedWhenBothSchemesFail`, commit `c77d5b7`).
+* **KB-19 – KB-21**: Mock test server header parsing and connection buffering improvements. (*Commits*: `b280825`, `fb43f6c`, `cd0923e`, `7c606aa`).
+* **KB-22 – KB-26**: Integer range bounds enforcement in task rows and priority mappings. (*Commits*: `24c0fd2`, `f7b3d91`).
+* **KB-27**: Rejected list mutation operations when target row is missing or deleted. (*Test*: `testListMutationsRejectMissingRows`, commit `c816a12`).
+* **KB-28**: Automatically dropped externally deleted lists from the UI model upon discovery. (*Test*: `testRemovingListAlreadyDeletedElsewhereDropsItFromModel`, commit `360a0f6`).
+* **KB-29**: Hardened duration token parsing against arithmetic integer overflow. (*Test*: `testDurationTokensRejectArithmeticOverflow`, commit `6e2922d`).
+
+---
+
+### KB-30 – KB-43: Permissions, Export Failure Handling & TUI Multibyte Input
+
+* **KB-30**: Enforced strict `0600` permissions (owner-only) on exported billing report files. (*Test*: `testBillingExportFilesAreOwnerOnly`, commit `27dc901`).
+* **KB-31**: Reported failure and returned false when PDF/CSV billing exports cannot be written. (*Test*: `testBillingPdfExportReportsFailureWhenTargetCannotBeWritten`, commit `07d9771`).
+* **KB-32**: Automatically removed due date metadata (`due:`) when the user deletes the token from task text. (*Test*: `testEditingTextRemovesDueDate`, commit `79cc64d`).
+* **KB-33**: Set strict `0600` permissions on the timer activity log (`activity.csv`). (*Test*: `testActivityLogCsvIsOwnerOnly`, commit `79cc64d`).
+* **KB-34**: Escaped markup in notification bodies to prevent desktop notification formatting injection. (*Test*: `testNotificationPayloadEscapesMarkup`, `testNotificationTitleIsNotHtmlEscaped`, commit `79cc64d`).
+* **KB-35**: Isolated tasks by list in the billing report breakdown view. (*Test*: `testBillingBreakdownKeepsTasksOfDifferentListsApart`, commit `79d5091`).
+* **KB-36**: Made remote tracker write operations explicit no-ops in test mode. (*Test*: `testTrackerWritesAreNoOpsInTestMode`, commit `79d5091`).
+* **KB-37**: Preserved priority and duration metadata during inline title edits in TUI. (*Test*: `testTuiStyleTitleEditKeepsPriorityAndDuration`, commit `79d5091`).
+* **KB-38 – KB-39**: Added full multibyte Unicode and non-BMP character support to TUI input buffers. (*Test*: `testTuiInputKeepsMultibyteAndNonBmpCharacters`, commit `79d5091`).
+* **KB-40**: Tokenized keyboard ANSI escape sequences from typed text to prevent display glitching in TUI. (*Test*: `testTuiSplitsEscapeSequencesFromTypedText`, commit `eb30c2c`).
+* **KB-41**: Mapped the lowest remote tracker priority level to local priority `(E)`. (*Test*: `testLowestRemotePriorityMapsToE`, commit `eb30c2c`).
+* **KB-42**: Propagated and logged remote worklog submission failures. (*Test*: `testFailedWorklogIsReported`, commit `a897569`).
+* **KB-43**: Isolated focus ambient sound generator files in dedicated directories away from shared `/tmp`. (*Test*: `testAmbientSoundIsNotGeneratedInSharedTmp`, commit `a897569`).
+
+---
+
+### KB-44 – KB-56: Bearer Auth, Priority Mappings & Timer Reliability
+
+* **KB-44**: Added Bearer token fallback for Jira worklog submissions upon 401 response. (*Test*: `testJiraWorklogFallsBackToBearerAuth`, commit `82b5093`).
+* **KB-45**: Prevented arbitrary text labels from being erroneously parsed as priority markers. (*Test*: `testNonPriorityLabelsDoNotMapToPriority`, commit `82b5093`).
+* **KB-46**: Corrected status negation parsing to avoid misclassifying "Not Done" as completed. (*Test*: `testNegatedRemoteStatusesAreNotMisclassified`, commit `82b5093`).
+* **KB-47**: Ensured forced Bearer worklog requests are no-ops in test mode. (*Test*: `testForcedBearerWorklogIsNoOpInTestMode`, commit `17b6a8b`).
+* **KB-48**: Prevented Bearer mode from becoming sticky after Basic credentials are corrected. (*Test*: `testJiraBearerModeIsNotStickyAfterCredentialFix`, commit `17b6a8b`).
+* **KB-49**: Expanded support for common remote priority label formats (e.g., `prio:high`, `p1`). (*Test*: `testCommonPriorityLabelStylesStillMap`, commit `17b6a8b`).
+* **KB-50**: Handled project-scoped priority code parsing. (*Test*: `testScopedPriorityCodeLabelsMap`, commit `6f0d732`).
+* **KB-51**: Aligned default priority mappings for Todoist and Nextcloud with local values. (*Test*: `testDefaultPriorityMappingMatchesSyncedValues`, commit `6f0d732`).
+* **KB-52**: Retried Jira remote priority queries with Bearer authentication on 401. (*Test*: `testJiraFetchRemotePrioritiesRetriesWithBearer`, commit `6f0d732`).
+* **KB-53**: Avoided re-binding running timers to mismatched tasks on database backup import. (*Test*: `testImportBackupDoesNotRebindRunningTimerToOtherTask`, commit `6f0d732`).
+* **KB-54**: Prevented non-JSON Jira priority responses from wiping existing priority mappings. (*Test*: `testJiraPriorityFetchNonJsonDoesNotWipeMapping`, commit `db35da5`).
+* **KB-55**: Completed localization coverage for recently added strings. (*Test*: `testRecentTrStringsAreTranslated`, commit `db35da5`).
+* **KB-56**: Ensured manual skip of a Pomodoro work session does not record a completed pomodoro. (*Test*: `testSkippedWorkSessionIsNotACompletedPomodoro`, commit `db35da5`).
+
+---
+
+### KB-57 – KB-69: Nextcloud CalDAV, Pomodoro Continuity & Token Masking
+
+* **KB-57**: Decoded percent-encoded URI sequences when picking files via file dialogs. (*Test*: `testFileDialogPathConversionKeepsReservedCharacters`, commit `a767f7f`).
+* **KB-58**: Reloaded the dashboard view immediately upon changing the active list. (*Test*: `testDashboardFollowsCurrentListChange`, commit `a767f7f`).
+* **KB-59**: Retained active task and running timer state when re-selecting the current list. (*Test*: `testEditingCurrentListKeepsRunningTimerTask`, commit `598b460`).
+* **KB-60**: Re-selecting the current remote list triggers background synchronization without resetting views. (*Test*: `testEditingCurrentRemoteListStillSyncs`, commit `e4ea0a8`).
+* **KB-61**: Preserved unclosed code fences in Markdown-to-ADF (Atlassian Document Format) conversion. (*Test*: `testMarkdownToAdfKeepsUnclosedCodeFence`, commit `e4ea0a8`).
+* **KB-62**: Eliminated empty text nodes in ADF output that were rejected by Jira Cloud API. (*Test*: `testMarkdownToAdfHasNoEmptyTextNodes`, commit `e4ea0a8`).
+* **KB-63**: Preserved unrelated ICS properties during Nextcloud task description updates. (*Test*: `testNextcloudDescriptionUpdateKeepsOtherProperties`, commit `0c3585a`).
+* **KB-64**: Confined description and comment updates in Nextcloud strictly to the `VTODO` block, leaving `VALARM` intact. (*Test*: `testNextcloudDescriptionUpdateDoesNotTouchAlarm`, commit `393a146`).
+* **KB-65**: Safely updated Nextcloud tasks containing the keyword `BEGIN` in their summary. (*Test*: `testNextcloudDescriptionUpdateWithBeginTextInSummary`, commit `12e796d`).
+* **KB-66**: Ensured "All Lists" dashboard mode aggregates metrics across every list. (*Test*: `testDashboardInAllListsViewCoversAllLists`, commit `12e796d`).
+* **KB-67**: Preserved Pomodoro cycle count when re-selecting the currently active list. (*Test*: `testReselectingCurrentListKeepsPomodoroCycle`, commit `2ea130c`).
+* **KB-68**: Masked API token input in the TUI list editor to prevent credential shoulder-surfing. (*Test*: `testTuiListEditDoesNotPrintApiToken`, commit `05688b9`).
+* **KB-69**: Populated `GOFI_REMAINING_SEC` and configured duration in hook execution environments. (*Test*: `testHookEnvironmentMatchesDocumentedVariables`, commit `1e9326e`).
+
+---
+
+### KB-70 – KB-76: TUI Formatting, ANSI Sequences & Dialog Binding
+
+* **KB-70**: Clamped long Markdown headings and tables to terminal width in TUI view. (*Test*: `testTuiMarkdownViewKeepsLongHeadingsInsideTerminalWidth`, commit `3fc5b46`).
+* **KB-71**: Bound [TaskDetailsDialog.qml](file:///home/bladeroot/prj/other/Go-For-It/qml/dialogs/TaskDetailsDialog.qml) strictly to task ID instead of dynamic proxy model rows. (*Test*: `testTaskDetailsDialogSavesToTheTaskItWasOpenedFor`, commit `3fc5b46`).
+* **KB-72**: Applied shortcut changes immediately without restart via `shortcutMap` binding. (*Test*: `testChangedShortcutAppliesWithoutRestart`, commit `3fc5b46`).
+* **KB-73**: Clamped long list names and search filter text in TUI header row. (*Test*: `testTuiHeaderKeepsLongListNameInsideTerminalWidth`, commit `3fc5b46`).
+* **KB-74**: Enabled substring search matches for URLs and colon-separated words (`http://`, `bug:`) in [TaskFilterProxyModel.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/TaskFilterProxyModel.cpp). (*Test*: `testSearchFindsTasksByUrlAndColonWords`, commit `3fc5b46`).
+* **KB-75**: Verified presence of `merged_at` before classifying GitHub pull requests as merged. (*Test*: `testGitHubOpenPrWithoutMergedAtIsNotMerged`, commit `3fc5b46`).
+* **KB-76**: Skipped ANSI SGR escape sequences when calculating display width and truncating text in TUI tabs. (*Test*: `testTuiTabRowIsNotTruncatedByAnsiCodes`, commit `7f8b299`).
+
+---
+
+### KB-77 – KB-83: GitHub Queries, TUI Teardown, Heatmap, Redmine & Schedule Normalization
+
+* **KB-77**: Appended `is:open` and `sort:updated-desc` to GitHub repository queries lacking explicit state filters. (*Test*: `testGitHubRepoQueryRequestsOpenItemsOnly`, commit `4691d59`).
+* **KB-78**: Recorded and flushed active timer session upon TUI exit (`q`) and application shutdown. (*Test*: `testTuiQuitLogsRunningSession`, commit `4691d59`).
+* **KB-79**: Ensured pressing Enter in the TUI list picker selects the highlighted list without stale selections. (*Test*: `testTuiListPickerEnterOpensHighlightedList`, commit `4691d59`).
+* **KB-80**: Truncated preview pane rows in TUI to terminal width to prevent layout overflow. (*Test*: `testTuiPreviewPaneKeepsLongTitleInsideTerminalWidth`, commit `4691d59`).
+* **KB-81**: Aligned heatmap start dates strictly to Monday, preserved exact counts (14, 28, 91), and localized weekday labels. (*Test*: `testHeatmapColumnsStartOnMonday`, commit `4691d59`).
+* **KB-82**: Retained original Redmine closed status names (e.g., `Rejected`) when mapped to category `done`. (*Test*: `testRedmineClosedStatusKeepsNameForMapping`, commit `4691d59`).
+* **KB-83**: Handled `INT_MIN` in [Schedule.cpp](file:///home/bladeroot/prj/other/Go-For-It/src/core/Schedule.cpp) to prevent two's-complement overflow and negative durations. (*Test*: `testScheduleNormalizesMinimumIntegerDurations`).
+
+---
+
+## Verification
+
+All listed issues are covered by Qt Test regression tests executed via CTest:
 
 ```bash
 QT_QPA_PLATFORM=offscreen ctest --test-dir /tmp/gofi-qt-build --output-on-failure
-# 100% tests passed, 0 tests failed out of 1
 ```
-
-Кожен новий виправлений дефект у майбутньому має документуватися у цьому файлі після додавання регресійного тесту та успішного проходження збірки.
