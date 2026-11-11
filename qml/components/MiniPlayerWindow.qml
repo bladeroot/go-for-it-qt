@@ -4,7 +4,7 @@ import QtQuick.Layouts
 
 Window {
     id: miniPlayer
-    width: 330
+    width: 400
     height: 56
     flags: Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool
     color: "transparent"
@@ -70,6 +70,20 @@ Window {
                 }
             }
 
+            // Switch the active task without restoring the main window
+            ToolButton {
+                objectName: "miniPrevTask"
+                implicitWidth: 24
+                implicitHeight: 30
+                padding: 0
+                text: "◀"
+                font.pixelSize: 11
+                enabled: app.activeTodoRow > 0
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Previous Task")
+                onClicked: app.switchToPreviousTask()
+            }
+
             // Task Name and Remaining Time
             ColumnLayout {
                 Layout.fillWidth: true
@@ -100,6 +114,18 @@ Window {
                         opacity: 0.75
                     }
                 }
+            }
+
+            ToolButton {
+                objectName: "miniNextTask"
+                implicitWidth: 24
+                implicitHeight: 30
+                padding: 0
+                text: "▶"
+                font.pixelSize: 11
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Next Task")
+                onClicked: app.switchToNextTask()
             }
 
             // Controls: Play/Pause, Mark Done, Restore, Close

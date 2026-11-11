@@ -6871,6 +6871,52 @@ private slots:
         const QString src = QString::fromUtf8(f.readAll());
         QVERIFY2(src.contains(QStringLiteral("startSystemMove()")), "drag must use Window.startSystemMove()");
     }
+
+    // Mini player: it has to offer previous/next task buttons so the active task can be switched
+    // without restoring the main window. The test loads the real built Main.qml, finds the two
+    // buttons by object name and clicks them.
+    void testMiniPlayerSwitchesTasks() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("mini_switch.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        controller.addNewTask(QStringLiteral("mini task A"));
+        controller.addNewTask(QStringLiteral("mini task B"));
+        controller.addNewTask(QStringLiteral("mini task C"));
+        controller.setActiveTodoRow(0);
+        QCOMPARE(controller.activeTodoRow(), 0);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString srcRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml");
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("mini_switch_qml"));
+        QDir(qmlRoot).removeRecursively();
+        QDirIterator it(srcRoot, {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString f = it.next();
+            const QString dst = qmlRoot + f.mid(srcRoot.size());
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            QVERIFY(QFile::copy(f, dst));
+        }
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+
+        QObject* next = root->findChild<QObject*>(QStringLiteral("miniNextTask"));
+        QObject* prev = root->findChild<QObject*>(QStringLiteral("miniPrevTask"));
+        QVERIFY2(next && prev, "mini player previous/next task buttons not found");
+
+        QVERIFY(QMetaObject::invokeMethod(next, "clicked"));
+        QCOMPARE(controller.activeTodoRow(), 1);
+        QVERIFY(QMetaObject::invokeMethod(next, "clicked"));
+        QCOMPARE(controller.activeTodoRow(), 2);
+        QVERIFY(QMetaObject::invokeMethod(prev, "clicked"));
+        QCOMPARE(controller.activeTodoRow(), 1);
+
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

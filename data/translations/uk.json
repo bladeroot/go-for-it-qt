@@ -513,6 +513,8 @@
   "Report Exported": "Звіт експортовано",
   "Reports": "Звіти",
   "Restore Full Window": "Розгорнути вікно",
+  "Previous Task": "Попередня задача",
+  "Next Task": "Наступна задача",
   "Search Query or repo (e.g. owner/repo, default: is:open involves:@me):": "Пошуковий запит або репозиторій (напр. owner/repo, за замовчуванням: is:open involves:@me):",
   "Select to view together with other lists": "Виберіть для спільного перегляду з іншими списками",
   "Selected Lists (%1)": "Вибрані списки (%1)",

@@ -513,6 +513,8 @@
   "Report Exported": "Rapport exporté",
   "Reports": "Rapports",
   "Restore Full Window": "Restaurer la fenêtre complète",
+  "Previous Task": "Tâche précédente",
+  "Next Task": "Tâche suivante",
   "Search Query or repo (e.g. owner/repo, default: is:open involves:@me):": "Requête de recherche ou dépôt (p. ex. owner/repo, défaut : is:open involves:@me) :",
   "Select to view together with other lists": "Sélectionner pour afficher avec d'autres listes",
   "Selected Lists (%1)": "Listes sélectionnées (%1)",
