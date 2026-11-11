@@ -113,6 +113,25 @@ private:
     QNetworkProxy m_previousProxy;
 };
 
+// KB-86 follow-up helpers: remote writes are no-ops in test mode, so the tests below switch
+// it off for their duration and always restore it, even when a QVERIFY returns early.
+struct RemoteWritesEnabled {
+    bool previous = QStandardPaths::isTestModeEnabled();
+    RemoteWritesEnabled() { QStandardPaths::setTestModeEnabled(false); }
+    ~RemoteWritesEnabled() { QStandardPaths::setTestModeEnabled(previous); }
+};
+
+inline TodoListEntry makeStatusPushEntry(const QString& provider, const QTcpServer& server) {
+    TodoListEntry entry;
+    entry.id = QStringLiteral("kb86_%1").arg(provider.toLower());
+    entry.provider = provider;
+    entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+    entry.jiraUser = QStringLiteral("user@example.com");
+    entry.apiToken = QStringLiteral("token");
+    entry.syncStatusToRemote = true;
+    return entry;
+}
+
 class TestTodoTxt : public QObject {
     Q_OBJECT
 
@@ -6663,6 +6682,131 @@ private slots:
 
         QVERIFY2(queries.contains(QStringLiteral("State Open")) || queries.contains(QStringLiteral("State {Open}")), qPrintable(queries.join(QStringLiteral(" | "))));
         QVERIFY2(queries.contains(QStringLiteral("State {In Review}")), qPrintable(queries.join(QStringLiteral(" | "))));
+        server.close();
+    }
+
+    // KB-86 (Jira reopen): the first transition into a "new" *or* "indeterminate" category was
+    // used, so reopening an issue could move it to "In Progress" instead of "To Do".
+    void testJiraReopenPrefersToDoTransition() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QByteArray postBody;
+        serveHttpFull(server, [&postBody](const QByteArray& method, const QByteArray&, const QByteArray&, const QByteArray& body) {
+            if (method == "POST") {
+                postBody = body;
+                return httpResponse("204 No Content", "application/json", "");
+            }
+            return httpResponse("200 OK", "application/json",
+                "{\"transitions\":["
+                "{\"id\":\"11\",\"name\":\"Start\",\"to\":{\"name\":\"In Progress\",\"statusCategory\":{\"key\":\"indeterminate\"}}},"
+                "{\"id\":\"21\",\"name\":\"Back\",\"to\":{\"name\":\"To Do\",\"statusCategory\":{\"key\":\"new\"}}}]}");
+        });
+        RemoteWritesEnabled enabled;
+        IssueTrackerService svc;
+        svc.updateIssueStatusRemote(makeStatusPushEntry(QStringLiteral("Jira"), server), QStringLiteral("GOFI-1"), false, QStringLiteral("todo"));
+        QTRY_VERIFY_WITH_TIMEOUT(!postBody.isEmpty(), 5000);
+        const QString id = QJsonDocument::fromJson(postBody).object().value(QStringLiteral("transition")).toObject()
+                               .value(QStringLiteral("id")).toString();
+        QCOMPARE(id, QStringLiteral("21"));
+        server.close();
+    }
+
+    // KB-86 (Jira auth): status push had no Bearer fallback, so Server/DC users with a PAT and an
+    // e-mail set got 401 until a sync had stored Bearer mode.
+    void testJiraStatusPushFallsBackToBearerAuth() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QByteArray postBody;
+        bool postWasBearer = false;
+        serveHttpFull(server, [&](const QByteArray& method, const QByteArray&, const QByteArray& head, const QByteArray& body) {
+            const QByteArray lower = head.toLower();
+            if (lower.contains("authorization: basic")) {
+                return httpResponse("401 Unauthorized", "application/json", "{}",
+                                    "X-Seraph-Loginreason: AUTHENTICATED_FAILED\r\n");
+            }
+            if (method == "POST") {
+                postBody = body;
+                postWasBearer = lower.contains("authorization: bearer");
+                return httpResponse("204 No Content", "application/json", "");
+            }
+            return httpResponse("200 OK", "application/json",
+                "{\"transitions\":[{\"id\":\"31\",\"name\":\"Done\",\"to\":{\"name\":\"Done\",\"statusCategory\":{\"key\":\"done\"}}}]}");
+        });
+        RemoteWritesEnabled enabled;
+        IssueTrackerService svc;
+        svc.updateIssueStatusRemote(makeStatusPushEntry(QStringLiteral("Jira"), server), QStringLiteral("GOFI-2"), true, QStringLiteral("done"));
+        QTRY_VERIFY_WITH_TIMEOUT(!postBody.isEmpty(), 5000);
+        QVERIFY(postWasBearer);
+        server.close();
+    }
+
+    // KB-86 (Jira silent miss): a missing matching transition left no trace for the user.
+    void testJiraStatusPushReportsMissingTransition() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        int posts = 0;
+        serveHttpFull(server, [&posts](const QByteArray& method, const QByteArray&, const QByteArray&, const QByteArray&) {
+            if (method == "POST") {
+                ++posts;
+                return httpResponse("204 No Content", "application/json", "");
+            }
+            return httpResponse("200 OK", "application/json",
+                "{\"transitions\":[{\"id\":\"31\",\"name\":\"Done\",\"to\":{\"name\":\"Done\",\"statusCategory\":{\"key\":\"done\"}}}]}");
+        });
+        RemoteWritesEnabled enabled;
+        IssueTrackerService svc;
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        svc.updateIssueStatusRemote(makeStatusPushEntry(QStringLiteral("Jira"), server), QStringLiteral("GOFI-3"), false, QStringLiteral("todo"));
+        QTRY_COMPARE_WITH_TIMEOUT(failSpy.count(), 1, 5000);
+        QCOMPARE(posts, 0);
+        server.close();
+    }
+
+    // KB-86 (Nextcloud): completing only set STATUS:COMPLETED; other CalDAV clients also read
+    // COMPLETED and PERCENT-COMPLETE, and reopening left both in place.
+    void testNextcloudStatusPushKeepsCompletionPropertiesConsistent() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QByteArray stored =
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:uid1\r\nSUMMARY:Task\r\n"
+            "STATUS:NEEDS-ACTION\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        int puts = 0;
+        serveHttpFull(server, [&](const QByteArray& method, const QByteArray&, const QByteArray&, const QByteArray& body) {
+            if (method == "PUT") {
+                stored = body;
+                ++puts;
+                return httpResponse("204 No Content", "text/calendar", "");
+            }
+            return httpResponse("200 OK", "text/calendar", stored);
+        });
+        RemoteWritesEnabled enabled;
+        IssueTrackerService svc;
+        TodoListEntry entry = makeStatusPushEntry(QStringLiteral("Nextcloud"), server);
+        entry.jiraUrl += QStringLiteral("/cal/");
+
+        svc.updateIssueStatusRemote(entry, QStringLiteral("NC#uid1"), true, QStringLiteral("done"));
+        QTRY_COMPARE_WITH_TIMEOUT(puts, 1, 5000);
+        const QString completed = QString::fromUtf8(stored);
+        QVERIFY2(completed.contains(QStringLiteral("STATUS:COMPLETED")), qPrintable(completed));
+        QVERIFY2(completed.contains(QStringLiteral("PERCENT-COMPLETE:100")), qPrintable(completed));
+        QVERIFY2(QRegularExpression(QStringLiteral("\\r\\nCOMPLETED:\\d{8}T\\d{6}Z")).match(completed).hasMatch(), qPrintable(completed));
+        QVERIFY2(!completed.contains(QStringLiteral("STATUS:NEEDS-ACTION")), qPrintable(completed));
+        QVERIFY2(completed.contains(QStringLiteral("SUMMARY:Task")), qPrintable(completed));
+
+        svc.updateIssueStatusRemote(entry, QStringLiteral("NC#uid1"), false, QStringLiteral("todo"));
+        QTRY_COMPARE_WITH_TIMEOUT(puts, 2, 5000);
+        const QString reopened = QString::fromUtf8(stored);
+        QVERIFY2(reopened.contains(QStringLiteral("STATUS:NEEDS-ACTION")), qPrintable(reopened));
+        QVERIFY2(!QRegularExpression(QStringLiteral("(^|\\n)(COMPLETED|PERCENT-COMPLETE)[:;]")).match(reopened).hasMatch(), qPrintable(reopened));
+        QVERIFY2(reopened.contains(QStringLiteral("SUMMARY:Task")), qPrintable(reopened));
         server.close();
     }
 };

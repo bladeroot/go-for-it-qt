@@ -3921,9 +3921,9 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
 void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry,
                                                   const QString& issueKey,
                                                   bool done,
-                                                  const QString& localStatus)
+                                                  const QString& localStatus,
+                                                  bool forceBearerAuth)
 {
-    Q_UNUSED(localStatus)
     if (!listEntry.syncStatusToRemote) return;
     if (QStandardPaths::isTestModeEnabled()) return;
     if (issueKey.trimmed().isEmpty() || listEntry.apiToken.trimmed().isEmpty()) return;
@@ -4065,60 +4065,91 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         const QString apiVer = isCloud ? QStringLiteral("3") : QStringLiteral("2");
         const QUrl transUrl(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed() + QStringLiteral("/transitions"));
         QNetworkRequest req(transUrl);
-        applyAuthHeader(req, listEntry);
+        applyAuthHeader(req, listEntry, forceBearerAuth);
 
         QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done, transUrl, handleReply]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done, localStatus, transUrl, forceBearerAuth]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                handleReply(reply);
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
+            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
+            auto fail = [this, &listEntry](const QString& errMsg) {
+                setStatusMessage(errMsg);
+                emit syncFailed(listEntry.id, errMsg);
+            };
+            if (reply->error() != QNetworkReply::NoError || authErr) {
+                if (forceBearerAuth) {
+                    m_jiraBearerTokens.remove(listEntry.id);
+                }
+                if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
+                    updateIssueStatusRemote(listEntry, issueKey, done, localStatus, true);
+                    return;
+                }
+                fail(tr("Failed to update status for %1 on %2 (%3): %4")
+                         .arg(issueKey, listEntry.provider).arg(httpStatus).arg(reply->errorString()));
                 return;
             }
-            const QJsonObject doc = QJsonDocument::fromJson(reply->readAll()).object();
-            const QJsonArray transitions = doc.value(QStringLiteral("transitions")).toArray();
-            QString selectedTransitionId;
 
+            // Reopening goes to the "To Do" category (or "In Progress" when the local status is
+            // in_progress); completing goes to the "done" category. Category matches win over
+            // name matches, and there is deliberately no fallback to another category.
+            const QString wantedCategory = done ? QStringLiteral("done")
+                : (localStatus == QStringLiteral("in_progress") ? QStringLiteral("indeterminate") : QStringLiteral("new"));
+            const QStringList toNames = done
+                ? QStringList{QStringLiteral("done"), QStringLiteral("closed"), QStringLiteral("resolved")}
+                : (wantedCategory == QStringLiteral("indeterminate")
+                       ? QStringList{QStringLiteral("in progress")}
+                       : QStringList{QStringLiteral("to do"), QStringLiteral("open"), QStringLiteral("reopened"), QStringLiteral("backlog")});
+
+            const QJsonArray transitions = QJsonDocument::fromJson(reply->readAll()).object()
+                                               .value(QStringLiteral("transitions")).toArray();
+            QString selectedTransitionId;
             for (const QJsonValue& val : transitions) {
-                const QJsonObject tObj = val.toObject();
-                const QString tId = tObj.value(QStringLiteral("id")).toString();
-                const QString tName = tObj.value(QStringLiteral("name")).toString();
-                const QJsonObject toObj = tObj.value(QStringLiteral("to")).toObject();
-                const QString toName = toObj.value(QStringLiteral("name")).toString();
+                const QJsonObject toObj = val.toObject().value(QStringLiteral("to")).toObject();
                 const QString catKey = toObj.value(QStringLiteral("statusCategory")).toObject()
                                            .value(QStringLiteral("key")).toString().toLower();
-
-                if (done) {
-                    if (catKey == QStringLiteral("done") ||
-                        toName.contains(QStringLiteral("Done"), Qt::CaseInsensitive) ||
-                        toName.contains(QStringLiteral("Closed"), Qt::CaseInsensitive) ||
-                        toName.contains(QStringLiteral("Resolved"), Qt::CaseInsensitive) ||
-                        tName.contains(QStringLiteral("Done"), Qt::CaseInsensitive) ||
-                        tName.contains(QStringLiteral("Close"), Qt::CaseInsensitive) ||
-                        tName.contains(QStringLiteral("Resolve"), Qt::CaseInsensitive)) {
-                        selectedTransitionId = tId;
-                        break;
-                    }
-                } else {
-                    if (catKey == QStringLiteral("new") || catKey == QStringLiteral("indeterminate") ||
-                        toName.contains(QStringLiteral("To Do"), Qt::CaseInsensitive) ||
-                        toName.contains(QStringLiteral("Open"), Qt::CaseInsensitive) ||
-                        toName.contains(QStringLiteral("Reopen"), Qt::CaseInsensitive) ||
-                        tName.contains(QStringLiteral("Reopen"), Qt::CaseInsensitive) ||
-                        tName.contains(QStringLiteral("Open"), Qt::CaseInsensitive)) {
-                        selectedTransitionId = tId;
+                if (catKey == wantedCategory) {
+                    selectedTransitionId = val.toObject().value(QStringLiteral("id")).toString();
+                    break;
+                }
+            }
+            if (selectedTransitionId.isEmpty()) {
+                for (const QJsonValue& val : transitions) {
+                    const QString toName = val.toObject().value(QStringLiteral("to")).toObject()
+                                               .value(QStringLiteral("name")).toString().toLower();
+                    if (toNames.contains(toName)) {
+                        selectedTransitionId = val.toObject().value(QStringLiteral("id")).toString();
                         break;
                     }
                 }
             }
-
-            if (!selectedTransitionId.isEmpty()) {
-                QNetworkRequest postReq(transUrl);
-                applyAuthHeader(postReq, listEntry);
-                postReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-                QJsonObject payload{{QStringLiteral("transition"), QJsonObject{{QStringLiteral("id"), selectedTransitionId}}}};
-                QNetworkReply* postReply = m_nam.post(postReq, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-                handleReply(postReply);
+            if (selectedTransitionId.isEmpty()) {
+                fail(tr("No matching Jira transition to update status of %1; status was not changed on %2.")
+                         .arg(issueKey, listEntry.provider));
+                return;
             }
+
+            QNetworkRequest postReq(transUrl);
+            applyAuthHeader(postReq, listEntry, forceBearerAuth);
+            postReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+            const QJsonObject payload{{QStringLiteral("transition"), QJsonObject{{QStringLiteral("id"), selectedTransitionId}}}};
+            QNetworkReply* postReply = m_nam.post(postReq, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+            connect(postReply, &QNetworkReply::finished, this, [this, postReply, listEntry, issueKey, done, forceBearerAuth]() {
+                postReply->deleteLater();
+                const int status = postReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                if (postReply->error() != QNetworkReply::NoError || (status >= 400 && status < 600)) {
+                    const QString errMsg = tr("Failed to update status for %1 on %2 (%3): %4")
+                        .arg(issueKey, listEntry.provider).arg(status).arg(postReply->errorString());
+                    setStatusMessage(errMsg);
+                    emit syncFailed(listEntry.id, errMsg);
+                    return;
+                }
+                if (forceBearerAuth) {
+                    m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
+                }
+                setStatusMessage(done ? tr("Updated %1 on %2: closed").arg(issueKey, listEntry.provider)
+                                      : tr("Updated %1 on %2: open").arg(issueKey, listEntry.provider));
+            });
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         QUrl url(baseUrl + QStringLiteral("/api/commands"));
@@ -4196,15 +4227,30 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
                 propBlockEnd = subBeginMatch.capturedStart(1);
             }
 
-            static const QRegularExpression statusRe(QStringLiteral("(^|\r?\n)STATUS:[^\r\n]*"));
-            const QString newStatus = done ? QStringLiteral("STATUS:COMPLETED") : QStringLiteral("STATUS:NEEDS-ACTION");
-            const auto match = statusRe.match(ics, vtodoStart);
-            if (match.hasMatch() && match.capturedStart() < propBlockEnd) {
-                ics.replace(match.capturedStart(), match.capturedLength(), match.captured(1) + newStatus);
-            } else {
-                const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
-                ics.insert(propBlockEnd, newStatus + nl);
+            // Rewrite STATUS together with COMPLETED / PERCENT-COMPLETE inside the VTODO property
+            // block only: other CalDAV clients read all three to decide whether a task is done.
+            const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
+            const QString block = ics.mid(vtodoPropsStart, propBlockEnd - vtodoPropsStart);
+            static const QRegularExpression managedRe(QStringLiteral("^(STATUS|COMPLETED|PERCENT-COMPLETE)[;:]"),
+                                                      QRegularExpression::CaseInsensitiveOption);
+            QStringList kept;
+            bool skippingFolded = false;
+            for (const QString& line : block.split(nl)) {
+                if (!line.isEmpty() && (line.at(0) == QLatin1Char(' ') || line.at(0) == QLatin1Char('\t'))) {
+                    if (!skippingFolded) kept << line;
+                    continue;
+                }
+                skippingFolded = managedRe.match(line).hasMatch();
+                if (!skippingFolded) kept << line;
             }
+            QStringList added{done ? QStringLiteral("STATUS:COMPLETED") : QStringLiteral("STATUS:NEEDS-ACTION")};
+            if (done) {
+                added << QStringLiteral("COMPLETED:") + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'"));
+                added << QStringLiteral("PERCENT-COMPLETE:100");
+            }
+            int insertAt = (!kept.isEmpty() && kept.last().isEmpty()) ? static_cast<int>(kept.size()) - 1 : static_cast<int>(kept.size());
+            for (const QString& prop : added) kept.insert(insertAt++, prop);
+            ics.replace(vtodoPropsStart, propBlockEnd - vtodoPropsStart, kept.join(nl));
 
             QNetworkRequest putReq = req;
             putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));

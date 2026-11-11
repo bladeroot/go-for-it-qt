@@ -55,7 +55,8 @@ public:
     void updateIssueStatusRemote(const TodoListEntry& listEntry,
                                  const QString& issueKey,
                                  bool done,
-                                 const QString& localStatus);
+                                 const QString& localStatus,
+                                 bool forceBearerAuth = false);
     void postIssueComment(const TodoListEntry& listEntry,
                           const QString& issueKey,
                           const QString& markdownComment,
