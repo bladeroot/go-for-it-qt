@@ -1,10 +1,22 @@
 [Desktop Entry]
 Name=Go for It Qt
 Name[uk]=Go for It Qt
+Name[de]=Go for It Qt
+Name[es]=Go for It Qt
+Name[fr]=Go for It Qt
+Name[it]=Go for It Qt
 GenericName=To-Do List & Pomodoro Timer
 GenericName[uk]=Список задач та Pomodoro-таймер
+GenericName[de]=Aufgabenliste & Pomodoro-Timer
+GenericName[es]=Lista de tareas y temporizador Pomodoro
+GenericName[fr]=Liste de tâches et minuteur Pomodoro
+GenericName[it]=Elenco attività e timer Pomodoro
 Comment=A stylish to-do list with built-in productivity timer, SQLite storage, TUI, and multi-tracker integrations (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud)
 Comment[uk]=Стильний список задач із вбудованим Pomodoro-таймером, сховищем SQLite, термінальним TUI та інтеграціями (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud)
+Comment[de]=Eine elegante Aufgabenliste mit integriertem Produktivitäts-Timer, SQLite-Speicher, Terminal-UI und Anbindung an Issue-Tracker (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud)
+Comment[es]=Una elegante lista de tareas con temporizador de productividad integrado, almacenamiento SQLite, interfaz de terminal e integraciones con gestores de incidencias (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud)
+Comment[fr]=Une liste de tâches élégante avec minuteur de productivité intégré, stockage SQLite, interface terminal et intégrations de suivi de tickets (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud)
+Comment[it]=Un elegante elenco di attività con timer di produttività integrato, archiviazione SQLite, interfaccia da terminale e integrazioni con tracker di issue (GitHub, GitLab, Jira, YouTrack, Redmine, Todoist, Nextcloud)
 Exec=go-for-it-qt
 Icon=go-for-it-qt
 Terminal=false
