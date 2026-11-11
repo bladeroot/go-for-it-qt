@@ -286,6 +286,13 @@ All fixed in commit `96dede1` unless noted.
 
 ---
 
+### User-reported defects
+
+* **Mini player closed with the main window**: `MiniPlayerWindow` is declared inside the main `ApplicationWindow`, so Qt made the main window its transient parent and hid the mini player whenever the main window was hidden to the tray. The mini player is now an independent top-level window (`transientParent: null`), and closing the main window while the mini player is open hides it instead of closing it. (*Test*: `testMiniPlayerSurvivesHidingMainWindow`).
+* **Mini player could not be dragged**: the drag area added the pointer delta to `window.x/y` while the window moved under the pointer (jitter on X11, no effect on Wayland). Dragging now calls `Window.startSystemMove()` and falls back to manual positioning with global coordinates only when that is unsupported. (*Test*: `testMiniPlayerDragUsesSystemMove`, a source-level check because window-system moves cannot be exercised offscreen).
+
+---
+
 ## Verification
 
 All listed issues are covered by Qt Test regression tests executed via CTest:

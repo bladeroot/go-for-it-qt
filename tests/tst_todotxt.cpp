@@ -21,6 +21,7 @@
 #include <QTcpSocket>
 #include <QDesktopServices>
 #include <QNetworkProxy>
+#include <QWindow>
 #include <QtTest>
 #include "ShortcutManager.h"
 #include <QQmlComponent>
@@ -6808,6 +6809,67 @@ private slots:
         QVERIFY2(!QRegularExpression(QStringLiteral("(^|\\n)(COMPLETED|PERCENT-COMPLETE)[:;]")).match(reopened).hasMatch(), qPrintable(reopened));
         QVERIFY2(reopened.contains(QStringLiteral("SUMMARY:Task")), qPrintable(reopened));
         server.close();
+    }
+
+    // Mini player: MiniPlayerWindow is declared as a child of the main ApplicationWindow, so Qt
+    // makes the main window its transient parent and hides it whenever the main window is hidden
+    // (closing to the tray). The test loads the real built Main.qml, shows the mini player, hides
+    // the main window and expects the mini player to stay visible.
+    void testMiniPlayerSurvivesHidingMainWindow() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("mini_player.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString srcRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml");
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("mini_qml"));
+        QDir(qmlRoot).removeRecursively();
+        QDirIterator it(srcRoot, {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString f = it.next();
+            const QString dst = qmlRoot + f.mid(srcRoot.size());
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            QVERIFY(QFile::copy(f, dst));
+        }
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mainWindow = qobject_cast<QWindow*>(root.get());
+        QVERIFY(mainWindow);
+
+        QWindow* mini = nullptr;
+        for (QWindow* w : root->findChildren<QWindow*>()) {
+            if (w->flags().testFlag(Qt::WindowStaysOnTopHint)) mini = w;
+        }
+        QVERIFY2(mini, "mini player window not found");
+        QVERIFY2(mini->transientParent() == nullptr, "mini player must not be transient for the main window");
+
+        mainWindow->show();
+        mini->show();
+        QCoreApplication::processEvents();
+        QVERIFY(mini->isVisible());
+        mainWindow->hide();
+        QCoreApplication::processEvents();
+        QVERIFY2(mini->isVisible(), "hiding the main window (tray) must keep the mini player open");
+
+        mini->hide();
+        mainWindow->hide();
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // Mini player: the drag area moved the window by adding the pointer delta to window.x/y while
+    // the window itself moved under the pointer. That jitters on X11 and does nothing on Wayland,
+    // where clients cannot position their own windows. Dragging has to start a compositor-driven
+    // move (Window.startSystemMove) and only fall back to manual positioning when unsupported.
+    void testMiniPlayerDragUsesSystemMove() {
+        QFile f(QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml/components/MiniPlayerWindow.qml"));
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
+        const QString src = QString::fromUtf8(f.readAll());
+        QVERIFY2(src.contains(QStringLiteral("startSystemMove()")), "drag must use Window.startSystemMove()");
     }
 };
 

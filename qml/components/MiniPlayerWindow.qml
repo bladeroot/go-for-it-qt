@@ -10,8 +10,10 @@ Window {
     color: "transparent"
     title: qsTr("Go for It — Mini Player")
 
-    property real dragStartX: 0
-    property real dragStartY: 0
+    // The mini player is declared inside the main ApplicationWindow, which would make that
+    // window its transient parent: hiding the main window (closing to the tray) would then hide
+    // the mini player too. It has to be an independent top-level window.
+    transientParent: null
 
     Rectangle {
         id: bg
@@ -26,14 +28,26 @@ Window {
             id: dragArea
             anchors.fill: parent
             cursorShape: Qt.SizeAllCursor
-            property point clickPos: "0,0"
+
+            // Ask the window system to move the window (works on X11 and Wayland, where a client
+            // cannot position its own window). Only if that is unsupported, move it by hand using
+            // global coordinates so the delta does not change while the window moves.
+            property bool manualMove: false
+            property point pressGlobal: Qt.point(0, 0)
+            property point startPos: Qt.point(0, 0)
+
             onPressed: function(mouse) {
-                clickPos = Qt.point(mouse.x, mouse.y)
+                manualMove = !miniPlayer.startSystemMove()
+                if (manualMove) {
+                    pressGlobal = dragArea.mapToGlobal(mouse.x, mouse.y)
+                    startPos = Qt.point(miniPlayer.x, miniPlayer.y)
+                }
             }
             onPositionChanged: function(mouse) {
-                const delta = Qt.point(mouse.x - clickPos.x, mouse.y - clickPos.y)
-                miniPlayer.x += delta.x
-                miniPlayer.y += delta.y
+                if (!manualMove || !pressed) return
+                const g = dragArea.mapToGlobal(mouse.x, mouse.y)
+                miniPlayer.x = startPos.x + (g.x - pressGlobal.x)
+                miniPlayer.y = startPos.y + (g.y - pressGlobal.y)
             }
         }
 

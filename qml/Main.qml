@@ -66,7 +66,8 @@ ApplicationWindow {
 
     onClosing: function(close) {
         rootWindow.persistGeometry()
-        if (!rootWindow.forceQuit && app.timer.running) {
+        // A running timer or an open mini player must survive closing the main window.
+        if (!rootWindow.forceQuit && (app.timer.running || miniPlayerWindow.visible)) {
             close.accepted = false
             rootWindow.hide()
         }
