@@ -6917,6 +6917,112 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }
+
+    // KB-90: since 96dede1 every GitLab request was sent with order_by=id. The GitLab REST API
+    // does not accept "id" for the issues and merge_requests endpoints and answers
+    // 400 {"error":"order_by does not have a valid value"}, so GitLab sync failed for every list
+    // (project, group: and assigned-to-me queries) whatever the URL and token. The local server
+    // below validates order_by like GitLab does.
+    void testGitLabSyncUsesOrderByAcceptedByGitLab() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        static const QStringList issueOrders = {
+            QStringLiteral("created_at"), QStringLiteral("updated_at"), QStringLiteral("priority"),
+            QStringLiteral("due_date"), QStringLiteral("relative_position"), QStringLiteral("label_priority"),
+            QStringLiteral("milestone_due"), QStringLiteral("popularity"), QStringLiteral("weight"),
+            QStringLiteral("title")};
+        static const QStringList mrOrders = {
+            QStringLiteral("created_at"), QStringLiteral("updated_at"), QStringLiteral("title"),
+            QStringLiteral("merged_at"), QStringLiteral("label_priority"), QStringLiteral("milestone_due"),
+            QStringLiteral("popularity"), QStringLiteral("priority")};
+        QStringList rejected;
+        int requests = 0;
+        serveHttpFull(server, [&](const QByteArray&, const QByteArray& target, const QByteArray&, const QByteArray&) {
+            ++requests;
+            const QUrl url(QString::fromUtf8(target));
+            const QString orderBy = QUrlQuery(url.query()).queryItemValue(QStringLiteral("order_by"));
+            const bool isMr = url.path().endsWith(QStringLiteral("/merge_requests"));
+            const QStringList& allowed = isMr ? mrOrders : issueOrders;
+            if (!orderBy.isEmpty() && !allowed.contains(orderBy)) {
+                rejected << url.path() + QStringLiteral("?order_by=") + orderBy;
+                return httpResponse("400 Bad Request", "application/json",
+                                    "{\"error\":\"order_by does not have a valid value\"}");
+            }
+            return httpResponse("200 OK", "application/json", "[]", "X-Total: 0\r\nX-Next-Page: \r\n");
+        });
+
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb90_gitlab.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString baseUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        const QStringList specs = {QStringLiteral("group/project"), QStringLiteral("group:mygroup"), QString()};
+        for (const QString& spec : specs) {
+            QVariantMap cfg{
+                {QStringLiteral("name"), QStringLiteral("KB90 GitLab %1").arg(spec)},
+                {QStringLiteral("provider"), QStringLiteral("GitLab")},
+                {QStringLiteral("jiraUrl"), baseUrl},
+                {QStringLiteral("apiToken"), QStringLiteral("glpat-token")},
+                {QStringLiteral("jiraJql"), spec}
+            };
+            const QString listId = controller.listManager()->saveListConfig(cfg, QStringLiteral("keep"));
+            QVERIFY(!listId.isEmpty());
+            const TodoListEntry entry = controller.listManager()->entry(controller.listManager()->indexOfId(listId));
+
+            IssueTrackerService* svc = controller.issueTracker();
+            QTRY_VERIFY_WITH_TIMEOUT(!svc->isSyncing(), 5000);
+            QSignalSpy syncedSpy(svc, &IssueTrackerService::listIssuesSynced);
+            QSignalSpy failedSpy(svc, &IssueTrackerService::syncFailed);
+            svc->syncListIssues(entry);
+            QTRY_VERIFY_WITH_TIMEOUT(syncedSpy.count() + failedSpy.count() > 0, 5000);
+            QVERIFY2(failedSpy.isEmpty(), qPrintable(QStringLiteral("spec '%1': %2").arg(spec,
+                failedSpy.isEmpty() ? QString() : failedSpy.first().at(1).toString())));
+            QCOMPARE(syncedSpy.count(), 1);
+        }
+        QVERIFY(requests >= 6);
+        QVERIFY2(rejected.isEmpty(), qPrintable(rejected.join(QStringLiteral(" | "))));
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+        server.close();
+    }
+
+    // KB-90 (companion): when GitLab rejects a request, the sync error only showed
+    // QNetworkReply::errorString() ("... server replied: Bad Request") and dropped the reason
+    // GitLab puts in the JSON body ({"error": "..."} or {"message": ...}), so a user could not tell
+    // a bad parameter from a bad token or URL.
+    void testGitLabSyncErrorShowsServerMessage() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttpFull(server, [](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            return httpResponse("400 Bad Request", "application/json", "{\"error\":\"KB90 server explanation\"}");
+        });
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb90_gitlab_err.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        QVariantMap cfg{
+            {QStringLiteral("name"), QStringLiteral("KB90 GitLab errors")},
+            {QStringLiteral("provider"), QStringLiteral("GitLab")},
+            {QStringLiteral("jiraUrl"), QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort())},
+            {QStringLiteral("apiToken"), QStringLiteral("glpat-token")},
+            {QStringLiteral("jiraJql"), QStringLiteral("group/project")}
+        };
+        const QString listId = controller.listManager()->saveListConfig(cfg, QStringLiteral("keep"));
+        const TodoListEntry entry = controller.listManager()->entry(controller.listManager()->indexOfId(listId));
+        IssueTrackerService* svc = controller.issueTracker();
+        QTRY_VERIFY_WITH_TIMEOUT(!svc->isSyncing(), 5000);
+        QSignalSpy failedSpy(svc, &IssueTrackerService::syncFailed);
+        svc->syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(failedSpy.count() > 0, 5000);
+        const QString msg = failedSpy.first().at(1).toString();
+        QVERIFY2(msg.contains(QStringLiteral("KB90 server explanation")), qPrintable(msg));
+        QTRY_VERIFY_WITH_TIMEOUT(!svc->isSyncing(), 5000);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+        server.close();
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

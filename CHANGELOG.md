@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mini player: previous/next task buttons to switch the active task without restoring the main window.
 
 ### Fixed
+- GitLab sync no longer fails with HTTP 400: requests used `order_by=id`, which GitLab rejects; they now use `order_by=created_at`, and sync errors show the reason returned by GitLab (KB-90).
 - Mini player no longer closes when the main window is hidden to the tray, and it can be dragged (uses the window system move, so it also works on Wayland).
 - Status push: Jira reopen targets "To Do", Jira falls back to Bearer auth and reports a missing transition, Nextcloud sets/clears `COMPLETED` and `PERCENT-COMPLETE`, YouTrack picks the mapped todo/done state and braces multi-word names, and invalid TUI duration input is rejected instead of setting the maximum.
 

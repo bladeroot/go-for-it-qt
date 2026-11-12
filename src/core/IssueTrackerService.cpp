@@ -2595,15 +2595,15 @@ void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
     if (projectSpec.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive)) {
         const QString groupName = projectSpec.mid(6).trimmed();
         const QString encodedGroup = QString::fromUtf8(QUrl::toPercentEncoding(groupName));
-        issuesPath = QStringLiteral("/api/v4/groups/%1/issues?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedGroup);
-        mrPath = QStringLiteral("/api/v4/groups/%1/merge_requests?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedGroup);
+        issuesPath = QStringLiteral("/api/v4/groups/%1/issues?state=opened&order_by=created_at&sort=asc&per_page=100").arg(encodedGroup);
+        mrPath = QStringLiteral("/api/v4/groups/%1/merge_requests?state=opened&order_by=created_at&sort=asc&per_page=100").arg(encodedGroup);
     } else if (!projectSpec.isEmpty() && !projectSpec.contains(QLatin1Char('=')) && !projectSpec.contains(QLatin1Char('&'))) {
         const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(projectSpec));
-        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedProj);
-        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&order_by=id&sort=asc&per_page=100").arg(encodedProj);
+        issuesPath = QStringLiteral("/api/v4/projects/%1/issues?state=opened&order_by=created_at&sort=asc&per_page=100").arg(encodedProj);
+        mrPath = QStringLiteral("/api/v4/projects/%1/merge_requests?state=opened&order_by=created_at&sort=asc&per_page=100").arg(encodedProj);
     } else {
-        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=assigned_to_me&order_by=id&sort=asc&per_page=100");
-        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=assigned_to_me&order_by=id&sort=asc&per_page=100");
+        issuesPath = QStringLiteral("/api/v4/issues?state=opened&scope=assigned_to_me&order_by=created_at&sort=asc&per_page=100");
+        mrPath = QStringLiteral("/api/v4/merge_requests?state=opened&scope=assigned_to_me&order_by=created_at&sort=asc&per_page=100");
         if (!projectSpec.isEmpty()) {
             issuesPath += QLatin1Char('&') + projectSpec;
             mrPath += QLatin1Char('&') + projectSpec;
@@ -2653,9 +2653,30 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
         if (reply->error() != QNetworkReply::NoError) {
             combinedState->hasError = true;
             if (combinedState->errorMsg.isEmpty()) {
+                // GitLab explains rejected requests in the JSON body ({"error": "..."} or {"message": ...});
+                // QNetworkReply::errorString() only says "Bad Request".
+                QString detail = reply->errorString();
+                const QJsonDocument errDoc = QJsonDocument::fromJson(reply->readAll());
+                if (errDoc.isObject()) {
+                    const QJsonObject errObj = errDoc.object();
+                    QString serverMsg = errObj.value(QStringLiteral("error")).toString().trimmed();
+                    if (serverMsg.isEmpty()) {
+                        const QJsonValue msgVal = errObj.value(QStringLiteral("message"));
+                        if (msgVal.isString()) {
+                            serverMsg = msgVal.toString().trimmed();
+                        } else if (msgVal.isObject() || msgVal.isArray()) {
+                            serverMsg = QString::fromUtf8(
+                                msgVal.isObject() ? QJsonDocument(msgVal.toObject()).toJson(QJsonDocument::Compact)
+                                                  : QJsonDocument(msgVal.toArray()).toJson(QJsonDocument::Compact));
+                        }
+                    }
+                    if (!serverMsg.isEmpty()) {
+                        detail += QStringLiteral(" (") + serverMsg + QLatin1Char(')');
+                    }
+                }
                 combinedState->errorMsg = isMr
-                    ? tr("GitLab merge requests error: %1").arg(reply->errorString())
-                    : tr("GitLab issues error: %1").arg(reply->errorString());
+                    ? tr("GitLab merge requests error: %1").arg(detail)
+                    : tr("GitLab issues error: %1").arg(detail);
             }
             combinedState->completedRequests++;
             checkDone();
