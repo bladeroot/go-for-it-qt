@@ -24,6 +24,11 @@
     </ul>
   </description>
   <releases>
+    <release version="2.0.2" date="2026-11-12">
+      <description>
+        <p>Bug-fix release 2.0.2: GitLab synchronization works again (requests no longer use an order_by value GitLab rejects with HTTP 400), the mini player stays open when the main window is hidden and gains previous/next task buttons, remote status push for Jira, YouTrack and Nextcloud is more reliable, and invalid TUI duration input is rejected.</p>
+      </description>
+    </release>
     <release version="2.0.1" date="2026-11-10">
       <description>
         <p>Maintenance release 2.0.1: resolves 87 stability defects across tracker synchronization (Jira, YouTrack, Nextcloud, GitHub, GitLab, Redmine, Todoist), Terminal UI formatting, schedule arithmetic normalization, and timer reliability.</p>

@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [2.0.2] - 2026-11-12
+
 ### Added
 - Mini player: previous/next task buttons to switch the active task without restoring the main window.
+- German, Spanish, French and Italian translations of the desktop entry.
 
 ### Fixed
 - GitLab sync no longer fails with HTTP 400: requests used `order_by=id`, which GitLab rejects; they now use `order_by=created_at`, and sync errors show the reason returned by GitLab (KB-90).

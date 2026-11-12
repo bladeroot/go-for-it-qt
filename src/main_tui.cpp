@@ -7,7 +7,7 @@
 #include <QTextStream>
 
 #ifndef GOFI_VERSION
-#define GOFI_VERSION "2.0.1"
+#define GOFI_VERSION "2.0.2"
 #endif
 
 int main(int argc, char* argv[]) {

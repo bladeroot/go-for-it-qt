@@ -1,6 +1,6 @@
 # Maintainer: Yurii Myronchuk <bladeroot@gmail.com>
 pkgname=go-for-it-qt
-pkgver=2.0.1
+pkgver=2.0.2
 pkgrel=1
 pkgdesc="A stylish to-do list with built-in productivity timer, SQLite storage, TUI, and multi-tracker integrations (Qt 6)"
 arch=('x86_64' 'aarch64')

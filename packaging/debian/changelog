@@ -1,3 +1,19 @@
+go-for-it-qt (2.0.2-1) unstable; urgency=medium
+
+  * Bug-fix release 2.0.2.
+  * Fix GitLab synchronization failing with HTTP 400 (invalid order_by value)
+    and show GitLab's error message in sync errors.
+  * Keep the mini player open when the main window is hidden to the tray,
+    make it draggable, and add previous/next task buttons.
+  * Status push: Jira reopen targets "To Do" and falls back to Bearer auth,
+    YouTrack uses the mapped states with braced multi-word names, Nextcloud
+    keeps COMPLETED/PERCENT-COMPLETE consistent.
+  * Reject empty or non-numeric TUI duration input instead of setting the
+    maximum.
+  * Add German, Spanish, French and Italian translations to the desktop entry.
+
+ -- Yurii Myronchuk <bladeroot@gmail.com>  Thu, 12 Nov 2026 12:00:00 +0100
+
 go-for-it-qt (2.0.1-1) unstable; urgency=medium
 
   * Maintenance Release 2.0.1: resolves 87 stability and synchronization defects.
