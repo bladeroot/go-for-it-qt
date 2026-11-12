@@ -105,6 +105,8 @@ public:
     Q_INVOKABLE bool updateTaskDetails(bool fromDoneList, int proxyRow, const QString& details);
     Q_INVOKABLE qint64 getTaskIdAt(bool fromDoneList, int proxyRow) const;
     Q_INVOKABLE int findProxyRowByTaskId(bool fromDoneList, qint64 taskId) const;
+    Q_INVOKABLE QVariantMap getTaskDetailsAt(bool fromDoneList, int proxyRow) const;
+    Q_INVOKABLE QVariantMap getActiveTaskDetails();
     Q_INVOKABLE bool updateTaskDetailsById(qint64 taskId, const QString& details);
     Q_INVOKABLE bool addTaskCommentById(qint64 taskId, const QString& commentText);
     Q_INVOKABLE bool changeTaskPriorityById(qint64 taskId, const QString& priorityLetter);

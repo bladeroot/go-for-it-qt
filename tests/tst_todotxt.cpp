@@ -6918,6 +6918,99 @@ private slots:
         QFile::remove(dbPath);
     }
 
+    // Main window: double-clicking a task row or pressing Enter/Return must open the task details
+    // dialog (description & comments) both in the task list view and in the timer view, rather than
+    // entering inline title editing or requiring the small row icon button.
+    void testMainWindowOpensTaskDetailsOnDoubleClickAndEnter() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("open_details.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listId = controller.listManager()->addList(QStringLiteral("Details Test List"));
+        controller.selectListById(listId);
+        while (controller.todoProxyModel()->rowCount() > 0) {
+            QVERIFY(controller.removeTask(false, 0));
+        }
+        controller.addNewTask(QStringLiteral("First task for details"));
+        controller.addNewTask(QStringLiteral("Second task for details"));
+        QVERIFY(controller.updateTaskDetails(false, 0, QStringLiteral("Detailed markdown body 1")));
+        QVERIFY(controller.addTaskComment(false, 0, QStringLiteral("First task comment")));
+        QVERIFY(controller.updateTaskDetails(false, 1, QStringLiteral("Detailed markdown body 2")));
+        controller.setActiveTodoRow(0);
+        controller.setShowingOverview(false);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString srcRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml");
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("open_details_qml"));
+        QDir(qmlRoot).removeRecursively();
+        QDirIterator it(srcRoot, {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString f = it.next();
+            const QString dst = qmlRoot + f.mid(srcRoot.size());
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            QVERIFY(QFile::copy(f, dst));
+        }
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mainWindow = qobject_cast<QWindow*>(root.get());
+        QVERIFY(mainWindow);
+        mainWindow->show();
+        QCoreApplication::processEvents();
+
+        QObject* todoDialog = root->findChild<QObject*>(QStringLiteral("todoTaskDetailsDialog"));
+        QObject* timerDialog = root->findChild<QObject*>(QStringLiteral("timerTaskDetailsDialog"));
+        QObject* todoList = root->findChild<QObject*>(QStringLiteral("todoTasksView"));
+        QVERIFY2(todoDialog && timerDialog && todoList, "task details dialogs or todo list view not found");
+
+        // 1. Pressing Return on the focused task list opens details for the active task (row 0).
+        QVERIFY(QMetaObject::invokeMethod(todoList, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(todoDialog->property("visible").toBool(), true);
+        QCOMPARE(todoDialog->property("taskDetails").toString(), QStringLiteral("Detailed markdown body 1"));
+        QCOMPARE(todoDialog->property("taskComments").toList().size(), 1);
+        QVERIFY(QMetaObject::invokeMethod(todoDialog, "close"));
+        QCoreApplication::processEvents();
+        QCOMPARE(todoDialog->property("visible").toBool(), false);
+
+        // 2. Double-clicking a task delegate opens its details (and does NOT enable inline title editing).
+        QObject* todoListViewObj = root->findChild<QObject*>(QStringLiteral("todoListView"));
+        QVERIFY(todoListViewObj);
+        QVariant delegateVar;
+        QVERIFY(QMetaObject::invokeMethod(todoListViewObj, "delegateAt",
+                                          Q_RETURN_ARG(QVariant, delegateVar),
+                                          Q_ARG(QVariant, 1)));
+        QObject* secondDelegate = delegateVar.value<QObject*>();
+        QVERIFY2(secondDelegate, "second task delegate not found");
+        QVERIFY(QMetaObject::invokeMethod(secondDelegate, "doubleClicked"));
+        QCoreApplication::processEvents();
+        QCOMPARE(secondDelegate->property("editing").toBool(), false);
+        QCOMPARE(todoDialog->property("visible").toBool(), true);
+        QCOMPARE(todoDialog->property("taskDetails").toString(), QStringLiteral("Detailed markdown body 2"));
+        QVERIFY(QMetaObject::invokeMethod(todoDialog, "close"));
+        QCoreApplication::processEvents();
+
+        // 3. In Timer view, pressing Return (or double-clicking the active task) opens its details dialog.
+        root->setProperty("currentActivityTab", 1);
+        QObject* timerViewObj = root->findChild<QObject*>(QStringLiteral("timerViewRoot"));
+        QVERIFY2(timerViewObj, "timerViewRoot not found");
+        QVERIFY(QMetaObject::invokeMethod(timerViewObj, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(timerDialog->property("visible").toBool(), true);
+        QCOMPARE(timerDialog->property("taskDetails").toString(), QStringLiteral("Detailed markdown body 2"));
+        QVERIFY(QMetaObject::invokeMethod(timerDialog, "close"));
+
+        mainWindow->hide();
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
     // KB-90: since 96dede1 every GitLab request was sent with order_by=id. The GitLab REST API
     // does not accept "id" for the issues and merge_requests endpoints and answers
     // 400 {"error":"order_by does not have a valid value"}, so GitLab sync failed for every list

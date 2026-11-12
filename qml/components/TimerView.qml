@@ -1,9 +1,48 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../dialogs"
 
 Item {
     id: timerViewRoot
+    objectName: "timerViewRoot"
+    focus: true
+
+    function openActiveTaskDetails() {
+        if (!app.timer.hasActiveTask) {
+            return false
+        }
+        const info = app.getActiveTaskDetails()
+        if (!info || info.id === undefined) {
+            return false
+        }
+        timerTaskDetailsDialog.openForTask(
+            false,
+            info.proxyRow !== undefined ? info.proxyRow : -1,
+            info.jiraKey !== "" ? info.jiraKey : info.description,
+            info.status,
+            info.details,
+            info.comments,
+            info.webUrl,
+            info.priorityString,
+            info.dueDateString
+        )
+        if (info.id > 0) {
+            timerTaskDetailsDialog.taskId = info.id
+        }
+        return true
+    }
+
+    Keys.onReturnPressed: function(event) {
+        if (timerViewRoot.openActiveTaskDetails()) {
+            event.accepted = true
+        }
+    }
+    Keys.onEnterPressed: function(event) {
+        if (timerViewRoot.openActiveTaskDetails()) {
+            event.accepted = true
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -24,6 +63,8 @@ Item {
         }
 
         Label {
+            id: activeTaskLabel
+            objectName: "timerActiveTaskLabel"
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignHCenter
             horizontalAlignment: Text.AlignHCenter
@@ -35,6 +76,19 @@ Item {
                 : qsTr("You have nothing to do.")
             font.pixelSize: 20
             font.bold: true
+            ToolTip.visible: activeTaskMouseArea.containsMouse && app.timer.hasActiveTask
+            ToolTip.text: qsTr("Double-click or press Enter to view description & comments")
+
+            MouseArea {
+                id: activeTaskMouseArea
+                objectName: "timerActiveTaskMouseArea"
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: app.timer.hasActiveTask
+                cursorShape: app.timer.hasActiveTask ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: timerViewRoot.forceActiveFocus()
+                onDoubleClicked: timerViewRoot.openActiveTaskDetails()
+            }
         }
 
         Label {
@@ -191,5 +245,10 @@ Item {
             to: 1.0
             value: app.timer.progress
         }
+    }
+
+    TaskDetailsDialog {
+        id: timerTaskDetailsDialog
+        objectName: "timerTaskDetailsDialog"
     }
 }

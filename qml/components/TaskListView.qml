@@ -15,6 +15,45 @@ Item {
         newTaskField.forceActiveFocus()
     }
 
+    function delegateAt(proxyRow) {
+        tasksView.forceLayout()
+        return tasksView.itemAtIndex(proxyRow)
+    }
+
+    function openDetailsForRow(proxyRow) {
+        if (proxyRow < 0 || !listRoot.proxyModel || proxyRow >= tasksView.count) {
+            return false
+        }
+        app.markTaskViewed(listRoot.isDoneList, proxyRow)
+        const info = app.getTaskDetailsAt(listRoot.isDoneList, proxyRow)
+        if (!info || info.id === undefined) {
+            return false
+        }
+        taskDetailsDialog.openForTask(
+            listRoot.isDoneList,
+            proxyRow,
+            info.jiraKey !== "" ? info.jiraKey : info.description,
+            info.status,
+            info.details,
+            info.comments,
+            info.webUrl,
+            info.priorityString,
+            info.dueDateString
+        )
+        return true
+    }
+
+    function openSelectedTaskDetails() {
+        let row = tasksView.currentIndex
+        if (row < 0 && !listRoot.isDoneList && listRoot.proxyModel && app.activeTodoRow >= 0) {
+            row = listRoot.proxyModel.mapFromSourceRow(app.activeTodoRow)
+        }
+        if (row < 0 && tasksView.count > 0) {
+            row = 0
+        }
+        return listRoot.openDetailsForRow(row)
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -196,19 +235,36 @@ Item {
 
         ListView {
             id: tasksView
+            objectName: listRoot.isDoneList ? "doneTasksView" : "todoTasksView"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            focus: true
+            keyNavigationEnabled: true
             model: listRoot.proxyModel
             spacing: 2
+
+            Keys.onReturnPressed: function(event) {
+                if (listRoot.openSelectedTaskDetails()) {
+                    event.accepted = true
+                }
+            }
+            Keys.onEnterPressed: function(event) {
+                if (listRoot.openSelectedTaskDetails()) {
+                    event.accepted = true
+                }
+            }
 
             delegate: TaskRowDelegate {
                 width: tasksView.width
                 totalCount: tasksView.count
                 isDoneList: listRoot.isDoneList
-                isSelectedActive: !listRoot.isDoneList
-                    && listRoot.proxyModel.mapToSourceRow(index) === app.activeTodoRow
+                isSelectedActive: (!listRoot.isDoneList
+                    && listRoot.proxyModel.mapToSourceRow(index) === app.activeTodoRow)
+                    || (listRoot.isDoneList && tasksView.currentIndex === index)
                 onRowClicked: {
+                    tasksView.currentIndex = index
+                    tasksView.forceActiveFocus()
                     if (!listRoot.isDoneList) {
                         app.activeTodoRow = listRoot.proxyModel.mapToSourceRow(index)
                     }
@@ -229,7 +285,7 @@ Item {
                     taskDetailsDialog.openForTask(
                         listRoot.isDoneList,
                         index,
-                        jiraKey,
+                        jiraKey !== "" ? jiraKey : description,
                         taskStatus,
                         details,
                         comments,
@@ -285,5 +341,6 @@ Item {
 
     TaskDetailsDialog {
         id: taskDetailsDialog
+        objectName: listRoot.isDoneList ? "doneTaskDetailsDialog" : "todoTaskDetailsDialog"
     }
 }

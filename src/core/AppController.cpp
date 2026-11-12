@@ -574,6 +574,61 @@ int AppController::findProxyRowByTaskId(bool fromDoneList, qint64 taskId) const 
     return -1;
 }
 
+QVariantMap AppController::getTaskDetailsAt(bool fromDoneList, int proxyRow) const {
+    const TaskFilterProxyModel& proxy = fromDoneList ? m_doneProxy : m_todoProxy;
+    const TaskStoreModel* store = fromDoneList ? m_taskManager.doneModel() : m_taskManager.todoModel();
+    const int sourceRow = proxy.mapToSourceRow(proxyRow);
+    if (sourceRow < 0 || sourceRow >= store->tasks().size()) {
+        return {};
+    }
+    const TxtTask task = store->taskAt(sourceRow);
+    return {
+        {QStringLiteral("id"), task.id()},
+        {QStringLiteral("fromDoneList"), fromDoneList},
+        {QStringLiteral("proxyRow"), proxyRow},
+        {QStringLiteral("jiraKey"), task.jiraKey()},
+        {QStringLiteral("description"), task.description()},
+        {QStringLiteral("status"), task.status()},
+        {QStringLiteral("details"), task.details()},
+        {QStringLiteral("comments"), task.comments()},
+        {QStringLiteral("webUrl"), getTaskBrowserUrl(task.listId(), task.jiraKey(), task.description()).toString()},
+        {QStringLiteral("priorityString"), task.priorityString()},
+        {QStringLiteral("dueDateString"), task.dueDateString()},
+        {QStringLiteral("listId"), task.listId()}
+    };
+}
+
+QVariantMap AppController::getActiveTaskDetails() {
+    TaskStoreModel* store = m_taskManager.todoModel();
+    int sourceRow = m_activeTodoRow;
+    if (sourceRow < 0 || sourceRow >= store->tasks().size()) {
+        const qint64 tid = m_timer.activeTaskId() > 0 ? m_timer.activeTaskId() : m_activeTaskId;
+        if (tid > 0) {
+            sourceRow = findActiveTodoRowById(tid);
+        }
+    }
+    if (sourceRow < 0 || sourceRow >= store->tasks().size()) {
+        return {};
+    }
+    store->markTaskViewed(sourceRow);
+    const TxtTask task = store->taskAt(sourceRow);
+    const int proxyRow = m_todoProxy.mapFromSourceRow(sourceRow);
+    return {
+        {QStringLiteral("id"), task.id()},
+        {QStringLiteral("fromDoneList"), false},
+        {QStringLiteral("proxyRow"), proxyRow},
+        {QStringLiteral("jiraKey"), task.jiraKey()},
+        {QStringLiteral("description"), task.description()},
+        {QStringLiteral("status"), task.status()},
+        {QStringLiteral("details"), task.details()},
+        {QStringLiteral("comments"), task.comments()},
+        {QStringLiteral("webUrl"), getTaskBrowserUrl(task.listId(), task.jiraKey(), task.description()).toString()},
+        {QStringLiteral("priorityString"), task.priorityString()},
+        {QStringLiteral("dueDateString"), task.dueDateString()},
+        {QStringLiteral("listId"), task.listId()}
+    };
+}
+
 bool AppController::updateTaskDetailsById(qint64 taskId, const QString& details) {
     if (taskId <= 0) return false;
     for (bool fromDone : {false, true}) {

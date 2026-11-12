@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 ItemDelegate {
     id: rowDelegate
+    objectName: "taskRowDelegate_" + index
 
     required property int index
     required property string description
@@ -49,9 +50,20 @@ ItemDelegate {
         }
     }
     onDoubleClicked: {
-        editField.text = rowDelegate.simpleText
-        rowDelegate.editing = true
-        editField.forceActiveFocus()
+        rowDelegate.rowClicked()
+        rowDelegate.detailsRequested()
+    }
+    Keys.onReturnPressed: function(event) {
+        if (!rowDelegate.editing) {
+            rowDelegate.detailsRequested()
+            event.accepted = true
+        }
+    }
+    Keys.onEnterPressed: function(event) {
+        if (!rowDelegate.editing) {
+            rowDelegate.detailsRequested()
+            event.accepted = true
+        }
     }
 
     function statusShortLabel(st) {
