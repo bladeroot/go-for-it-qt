@@ -21,10 +21,11 @@ makedepends=(
 )
 provides=('go-for-it-qt')
 conflicts=('go-for-it-qt-git')
-source=("git+${url}.git#branch=main")
+source=("git+${url}.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 
 build() {
+  rm -rf build
   cmake -B build -S "${pkgname}" \
     -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
