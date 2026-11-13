@@ -900,6 +900,13 @@ private slots:
         QVERIFY(QFile::exists(rainPath));
         QVERIFY(QFileInfo(rainPath).size() > 44);
 
+        const QString oceanPath = m_testSandbox.filePath(QStringLiteral("test_ocean.wav"));
+        QFile::remove(oceanPath);
+        QVERIFY(AmbientSoundService::generateAmbientWav(QStringLiteral("ocean"), oceanPath));
+        QVERIFY(QFile::exists(oceanPath));
+        QVERIFY(QFileInfo(oceanPath).size() > 44);
+        QFile::remove(oceanPath);
+
         QVERIFY(AmbientSoundService::generateAmbientWav(QStringLiteral("clock"), clockPath));
         QVERIFY(QFile::exists(clockPath));
         QVERIFY(QFileInfo(clockPath).size() > 44);
@@ -7028,7 +7035,7 @@ private slots:
 
         // Verify availableModes() exposes both "name" and "label" with non-empty text.
         const QVariantList modes = controller.ambient()->availableModes();
-        QCOMPARE(modes.size(), 4);
+        QCOMPARE(modes.size(), 5);
         for (const QVariant& m : modes) {
             const QVariantMap map = m.toMap();
             QVERIFY(!map.value(QStringLiteral("id")).toString().isEmpty());
@@ -7097,6 +7104,8 @@ private slots:
 
         QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
         QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("rain"));
+        QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("ocean"));
         QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
         QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("clock"));
         QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));

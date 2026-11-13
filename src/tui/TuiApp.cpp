@@ -1705,11 +1705,14 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
         } else if (mode.startsWith(QStringLiteral("rain"))) {
             m_app->ambient()->setAmbientMode(QStringLiteral("rain"));
             m_statusMessage = tr("Ambient focus sound: Gentle Rain.");
+        } else if (mode.startsWith(QStringLiteral("ocean")) || mode.startsWith(QStringLiteral("wave"))) {
+            m_app->ambient()->setAmbientMode(QStringLiteral("ocean"));
+            m_statusMessage = tr("Ambient focus sound: Ocean Waves.");
         } else if (mode.startsWith(QStringLiteral("clock")) || mode.startsWith(QStringLiteral("tick"))) {
             m_app->ambient()->setAmbientMode(QStringLiteral("clock"));
             m_statusMessage = tr("Ambient focus sound: Mechanical Clock Ticking.");
         } else {
-            m_statusMessage = tr("Unknown ambient mode. Available: none, white, rain, clock");
+            m_statusMessage = tr("Unknown ambient mode. Available: none, white, rain, ocean, clock");
         }
         return;
     }

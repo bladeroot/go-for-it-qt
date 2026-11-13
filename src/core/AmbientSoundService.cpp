@@ -42,11 +42,13 @@ QVariantList AmbientSoundService::availableModes() const {
     const QString offName = tr("Off (No ambient sound)");
     const QString whiteName = tr("White / Pink Noise (Focus Hum)");
     const QString rainName = tr("Gentle Rain (Rainfall)");
+    const QString oceanName = tr("Ocean Waves (Surf)");
     const QString clockName = tr("Mechanical Clock Ticking");
     return QVariantList{
         QVariantMap{{QStringLiteral("id"), QStringLiteral("none")}, {QStringLiteral("name"), offName}, {QStringLiteral("label"), offName}},
         QVariantMap{{QStringLiteral("id"), QStringLiteral("white_noise")}, {QStringLiteral("name"), whiteName}, {QStringLiteral("label"), whiteName}},
         QVariantMap{{QStringLiteral("id"), QStringLiteral("rain")}, {QStringLiteral("name"), rainName}, {QStringLiteral("label"), rainName}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("ocean")}, {QStringLiteral("name"), oceanName}, {QStringLiteral("label"), oceanName}},
         QVariantMap{{QStringLiteral("id"), QStringLiteral("clock")}, {QStringLiteral("name"), clockName}, {QStringLiteral("label"), clockName}}
     };
 }
@@ -57,6 +59,9 @@ QString AmbientSoundService::ambientModeName() const {
     }
     if (m_mode == QStringLiteral("rain")) {
         return tr("Gentle Rain (Rainfall)");
+    }
+    if (m_mode == QStringLiteral("ocean")) {
+        return tr("Ocean Waves (Surf)");
     }
     if (m_mode == QStringLiteral("clock")) {
         return tr("Mechanical Clock Ticking");
@@ -70,6 +75,8 @@ void AmbientSoundService::cycleAmbientMode() {
     } else if (m_mode == QStringLiteral("white_noise")) {
         setAmbientMode(QStringLiteral("rain"));
     } else if (m_mode == QStringLiteral("rain")) {
+        setAmbientMode(QStringLiteral("ocean"));
+    } else if (m_mode == QStringLiteral("ocean")) {
         setAmbientMode(QStringLiteral("clock"));
     } else {
         setAmbientMode(QStringLiteral("none"));
@@ -203,6 +210,7 @@ bool AmbientSoundService::generateAmbientWav(const QString& type, const QString&
 
     auto* rng = QRandomGenerator::global();
     double filterState = 0.0;
+    double deepSurfState = 0.0;
 
     for (int i = 0; i < totalSamples; ++i) {
         const double t = static_cast<double>(i) / sampleRate;
@@ -226,6 +234,21 @@ bool AmbientSoundService::generateAmbientWav(const QString& type, const QString&
             if (rng->bounded(1000) < 6) {
                 sample += (rng->generateDouble() * 0.4 - 0.2);
             }
+        } else if (type == QStringLiteral("ocean")) {
+            // Ocean waves: periodic swell over the 4s loop combining deep surf rumble and
+            // dynamic low-pass filtered foam wash as the wave crests and recedes.
+            const double phase = 2.0 * M_PI * (t / durationSec);
+            const double primarySwell = 0.5 * (1.0 - std::cos(phase));
+            const double secondarySwell = 0.5 * (1.0 - std::cos(2.0 * phase - 0.6));
+            const double swell = 0.72 * std::pow(primarySwell, 1.35) + 0.28 * secondarySwell;
+
+            const double rawNoise = rng->generateDouble() * 2.0 - 1.0;
+            deepSurfState = deepSurfState * 0.985 + rawNoise * 0.015;
+            const double washAlpha = 0.025 + 0.14 * swell;
+            filterState = filterState * (1.0 - washAlpha) + rawNoise * washAlpha;
+
+            const double envelope = 0.18 + 0.82 * swell;
+            sample = (deepSurfState * 0.55 + filterState * 0.45) * envelope * 0.48;
         } else {
             // White / Pink Noise: smoothed random noise (comfortable focus hum)
             const double rawNoise = rng->generateDouble() * 2.0 - 1.0;
