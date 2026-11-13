@@ -162,16 +162,27 @@ Item {
 
             ComboBox {
                 id: ambientCombo
-                implicitWidth: 150
-                textRole: "label"
+                objectName: "timerAmbientCombo"
+                implicitWidth: 210
+                textRole: "name"
                 valueRole: "id"
                 model: app.ambient ? app.ambient.availableModes() : []
-                currentIndex: {
-                    if (!app.ambient) return 0
+                function syncMode() {
+                    if (!app.ambient) return
                     for (let i = 0; i < count; ++i) {
-                        if (model[i].id === app.ambient.ambientMode) return i
+                        if (model[i].id === app.ambient.ambientMode) {
+                            currentIndex = i
+                            return
+                        }
                     }
-                    return 0
+                    currentIndex = 0
+                }
+                Component.onCompleted: syncMode()
+                Connections {
+                    target: app.ambient
+                    function onAmbientModeChanged() {
+                        ambientCombo.syncMode()
+                    }
                 }
                 onActivated: {
                     if (app.ambient) {

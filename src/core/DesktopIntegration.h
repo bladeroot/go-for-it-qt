@@ -19,11 +19,16 @@ public:
                                 SettingsManager* settings,
                                 TaskTimer* timer,
                                 QObject* parent = nullptr);
+    ~DesktopIntegration() override;
 
     void showTrayMessage(const QString& title, const QString& body);
+    void setMiniPlayerVisible(bool visible);
+    [[nodiscard]] QMenu* trayMenu() const noexcept { return m_trayMenu; }
+    [[nodiscard]] QAction* toggleMiniPlayerAction() const noexcept { return m_toggleMiniPlayerAction; }
 
 signals:
     void showWindowRequested();
+    void toggleMiniPlayerRequested();
     void quitRequested();
 
 private slots:
@@ -43,6 +48,7 @@ private:
     QSystemTrayIcon* m_trayIcon = nullptr;
     QIcon m_baseIcon;
     QMenu* m_trayMenu = nullptr;
+    QAction* m_toggleMiniPlayerAction = nullptr;
     QAction* m_taskDescAction = nullptr;
     QAction* m_markDoneAction = nullptr;
     QAction* m_nextTaskAction = nullptr;

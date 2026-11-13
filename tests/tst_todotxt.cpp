@@ -7011,6 +7011,143 @@ private slots:
         QFile::remove(dbPath);
     }
 
+    // Mini player & Ambient Sound:
+    // 1. TimerView's ambient sound ComboBox previously bound textRole: "label" while availableModes()
+    //    only provided "name", leaving all dropdown items blank.
+    // 2. MiniPlayerWindow previously set Qt::Tool, causing window managers to hide it when switching
+    //    windows, and lacked a toggle for Always on Top.
+    // 3. MiniPlayerWindow lacked a control to switch the ambient sound ("melody").
+    // 4. The Play/Pause button on MiniPlayerWindow jumped when toggling running state.
+    void testMiniPlayerAlwaysOnTopAmbientSoundAndStablePlayPause() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("mini_ambient.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        controller.addNewTask(QStringLiteral("Focus task for mini player"));
+        controller.setActiveTodoRow(0);
+        controller.setShowingOverview(false);
+
+        // Verify availableModes() exposes both "name" and "label" with non-empty text.
+        const QVariantList modes = controller.ambient()->availableModes();
+        QCOMPARE(modes.size(), 4);
+        for (const QVariant& m : modes) {
+            const QVariantMap map = m.toMap();
+            QVERIFY(!map.value(QStringLiteral("id")).toString().isEmpty());
+            QVERIFY(!map.value(QStringLiteral("name")).toString().isEmpty());
+            QCOMPARE(map.value(QStringLiteral("label")).toString(), map.value(QStringLiteral("name")).toString());
+        }
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString srcRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml");
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("mini_ambient_qml"));
+        QDir(qmlRoot).removeRecursively();
+        QDirIterator it(srcRoot, {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            const QString f = it.next();
+            const QString dst = qmlRoot + f.mid(srcRoot.size());
+            QDir().mkpath(QFileInfo(dst).absolutePath());
+            QVERIFY(QFile::copy(f, dst));
+        }
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mainWindow = qobject_cast<QWindow*>(root.get());
+        QVERIFY(mainWindow);
+
+        QWindow* mini = root->findChild<QWindow*>(QStringLiteral("miniPlayerWindow"));
+        QVERIFY2(mini, "mini player window not found");
+
+        // 1. Mini player must NOT have Qt::Tool (so it doesn't hide when switching windows),
+        //    and must allow toggling Always on Top while staying visible.
+        QVERIFY2(!mini->flags().testFlag(Qt::Tool), "mini player must not use Qt::Tool");
+        QVERIFY(mini->flags().testFlag(Qt::WindowStaysOnTopHint));
+        mini->show();
+        QCoreApplication::processEvents();
+        QVERIFY(mini->isVisible());
+
+        QObject* pinBtn = root->findChild<QObject*>(QStringLiteral("miniAlwaysOnTopToggle"));
+        QVERIFY2(pinBtn, "miniAlwaysOnTopToggle button not found");
+        QVERIFY(QMetaObject::invokeMethod(pinBtn, "clicked"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mini->property("alwaysOnTop").toBool(), false);
+        QVERIFY(!mini->flags().testFlag(Qt::WindowStaysOnTopHint));
+        QVERIFY(mini->isVisible());
+
+        QVERIFY(QMetaObject::invokeMethod(pinBtn, "clicked"));
+        QCoreApplication::processEvents();
+        QCOMPARE(mini->property("alwaysOnTop").toBool(), true);
+        QVERIFY(mini->flags().testFlag(Qt::WindowStaysOnTopHint));
+        QVERIFY(mini->isVisible());
+
+        // 2. TimerView's ambient ComboBox must show non-empty displayText, and clicking
+        //    miniAmbientToggle in the mini player must cycle through all ambient modes.
+        QObject* ambientCombo = root->findChild<QObject*>(QStringLiteral("timerAmbientCombo"));
+        QObject* miniAmbientBtn = root->findChild<QObject*>(QStringLiteral("miniAmbientToggle"));
+        QVERIFY2(ambientCombo && miniAmbientBtn, "ambient controls not found");
+        QVERIFY2(!ambientCombo->property("displayText").toString().trimmed().isEmpty(),
+                 "TimerView ambient ComboBox displayText must not be blank");
+
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("none"));
+        QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("white_noise"));
+        QCOMPARE(ambientCombo->property("currentIndex").toInt(), 1);
+        QVERIFY(!ambientCombo->property("displayText").toString().trimmed().isEmpty());
+
+        QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("rain"));
+        QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("clock"));
+        QVERIFY(QMetaObject::invokeMethod(miniAmbientBtn, "clicked"));
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("none"));
+
+        // 3. Play/Pause button on the mini player must not jump (x, y, width, height stay constant)
+        //    when toggling the timer between stopped and running.
+        QObject* playPauseBtn = root->findChild<QObject*>(QStringLiteral("miniPlayPauseButton"));
+        QVERIFY2(playPauseBtn, "miniPlayPauseButton not found");
+        QCoreApplication::processEvents();
+        const double xBefore = playPauseBtn->property("x").toDouble();
+        const double yBefore = playPauseBtn->property("y").toDouble();
+        const double wBefore = playPauseBtn->property("width").toDouble();
+        const double hBefore = playPauseBtn->property("height").toDouble();
+
+        QVERIFY(QMetaObject::invokeMethod(playPauseBtn, "clicked"));
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.timer()->isRunning(), true);
+        QCOMPARE(playPauseBtn->property("x").toDouble(), xBefore);
+        QCOMPARE(playPauseBtn->property("y").toDouble(), yBefore);
+        QCOMPARE(playPauseBtn->property("width").toDouble(), wBefore);
+        QCOMPARE(playPauseBtn->property("height").toDouble(), hBefore);
+
+        QVERIFY(QMetaObject::invokeMethod(playPauseBtn, "clicked"));
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.timer()->isRunning(), false);
+        QCOMPARE(playPauseBtn->property("x").toDouble(), xBefore);
+        QCOMPARE(playPauseBtn->property("y").toDouble(), yBefore);
+        QCOMPARE(playPauseBtn->property("width").toDouble(), wBefore);
+        QCOMPARE(playPauseBtn->property("height").toDouble(), hBefore);
+
+        // 4. Tray menu includes a checkable action to toggle the mini player window.
+        QAction* trayMiniAct = controller.desktopIntegration()->toggleMiniPlayerAction();
+        QVERIFY2(trayMiniAct, "tray toggleMiniPlayerAction not found");
+        QCOMPARE(trayMiniAct->isChecked(), true);
+        trayMiniAct->trigger();
+        QCoreApplication::processEvents();
+        QCOMPARE(mini->isVisible(), false);
+        QCOMPARE(trayMiniAct->isChecked(), false);
+        trayMiniAct->trigger();
+        QCoreApplication::processEvents();
+        QCOMPARE(mini->isVisible(), true);
+        QCOMPARE(trayMiniAct->isChecked(), true);
+
+        mini->hide();
+        mainWindow->hide();
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
     // KB-90: since 96dede1 every GitLab request was sent with order_by=id. The GitLab REST API
     // does not accept "id" for the issues and merge_requests endpoints and answers
     // 400 {"error":"order_by does not have a valid value"}, so GitLab sync failed for every list

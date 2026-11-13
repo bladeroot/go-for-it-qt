@@ -42,14 +42,60 @@ DesktopIntegration::DesktopIntegration(AppController* controller,
     updatePluginStates();
 }
 
+DesktopIntegration::~DesktopIntegration() {
+    delete m_trayMenu;
+    m_trayMenu = nullptr;
+}
+
 void DesktopIntegration::showTrayMessage(const QString& title, const QString& body) {
     if (m_trayIcon && m_trayIcon->isVisible()) {
         m_trayIcon->showMessage(title, body, QSystemTrayIcon::Information, 4000);
     }
 }
 
+void DesktopIntegration::setMiniPlayerVisible(bool visible) {
+    if (m_toggleMiniPlayerAction && m_toggleMiniPlayerAction->isChecked() != visible) {
+        const QSignalBlocker blocker(m_toggleMiniPlayerAction);
+        m_toggleMiniPlayerAction->setChecked(visible);
+    }
+}
+
 void DesktopIntegration::setupTrayIcon() {
-    if (!qobject_cast<QApplication*>(QCoreApplication::instance()) || !QSystemTrayIcon::isSystemTrayAvailable()) {
+    if (!qobject_cast<QApplication*>(QCoreApplication::instance())) {
+        return;
+    }
+
+    m_trayMenu = new QMenu();
+    QAction* openAct = m_trayMenu->addAction(tr("Open Go for It Qt"));
+    connect(openAct, &QAction::triggered, this, &DesktopIntegration::showWindowRequested);
+
+    m_toggleMiniPlayerAction = m_trayMenu->addAction(tr("Always on Top Mini-Player"));
+    m_toggleMiniPlayerAction->setCheckable(true);
+    connect(m_toggleMiniPlayerAction, &QAction::triggered, this, &DesktopIntegration::toggleMiniPlayerRequested);
+
+    QAction* closeAct = m_trayMenu->addAction(tr("Close"));
+    connect(closeAct, &QAction::triggered, this, &DesktopIntegration::quitRequested);
+
+    m_trayMenu->addSeparator();
+
+    m_taskDescAction = m_trayMenu->addAction(tr("No task has been selected"));
+    m_taskDescAction->setEnabled(false);
+
+    m_trayMenu->addSeparator();
+
+    m_markDoneAction = m_trayMenu->addAction(tr("Mark the task as complete"));
+    connect(m_markDoneAction, &QAction::triggered, m_controller, &AppController::markActiveTaskDone);
+
+    m_nextTaskAction = m_trayMenu->addAction(tr("Switch to next task"));
+    connect(m_nextTaskAction, &QAction::triggered, m_controller, &AppController::switchToNextTask);
+
+    m_prevTaskAction = m_trayMenu->addAction(tr("Switch to the previous task"));
+    connect(m_prevTaskAction, &QAction::triggered, m_controller, &AppController::switchToPreviousTask);
+
+    m_toggleTimerAction = m_trayMenu->addAction(tr("Start the timer"));
+    connect(m_toggleTimerAction, &QAction::triggered, m_timer, &TaskTimer::toggleRunning);
+
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         return;
     }
 
@@ -75,32 +121,6 @@ void DesktopIntegration::setupTrayIcon() {
     }
     m_baseIcon = icon;
     m_trayIcon->setIcon(icon);
-
-    m_trayMenu = new QMenu();
-    QAction* openAct = m_trayMenu->addAction(tr("Open Go for It Qt"));
-    connect(openAct, &QAction::triggered, this, &DesktopIntegration::showWindowRequested);
-
-    QAction* closeAct = m_trayMenu->addAction(tr("Close"));
-    connect(closeAct, &QAction::triggered, this, &DesktopIntegration::quitRequested);
-
-    m_trayMenu->addSeparator();
-
-    m_taskDescAction = m_trayMenu->addAction(tr("No task has been selected"));
-    m_taskDescAction->setEnabled(false);
-
-    m_trayMenu->addSeparator();
-
-    m_markDoneAction = m_trayMenu->addAction(tr("Mark the task as complete"));
-    connect(m_markDoneAction, &QAction::triggered, m_controller, &AppController::markActiveTaskDone);
-
-    m_nextTaskAction = m_trayMenu->addAction(tr("Switch to next task"));
-    connect(m_nextTaskAction, &QAction::triggered, m_controller, &AppController::switchToNextTask);
-
-    m_prevTaskAction = m_trayMenu->addAction(tr("Switch to the previous task"));
-    connect(m_prevTaskAction, &QAction::triggered, m_controller, &AppController::switchToPreviousTask);
-
-    m_toggleTimerAction = m_trayMenu->addAction(tr("Start the timer"));
-    connect(m_toggleTimerAction, &QAction::triggered, m_timer, &TaskTimer::toggleRunning);
 
     m_trayIcon->setContextMenu(m_trayMenu);
     connect(m_trayIcon, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {

@@ -56,6 +56,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         emit notificationRequested(title, body);
     });
     connect(&m_desktopIntegration, &DesktopIntegration::showWindowRequested, this, &AppController::showWindowRequested);
+    connect(&m_desktopIntegration, &DesktopIntegration::toggleMiniPlayerRequested, this, &AppController::toggleMiniPlayerRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::quitRequested, this, &AppController::quitRequested);
     connect(&m_issueTracker, &IssueTrackerService::listStatusMappingUpdated, &m_listManager, &ListManagerModel::updateListStatusMapping);
 
@@ -1149,6 +1150,10 @@ void AppController::reloadTranslations() {
     m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
     applyLanguageTranslator();
     emit languageChanged();
+}
+
+void AppController::setMiniPlayerVisible(bool visible) {
+    m_desktopIntegration.setMiniPlayerVisible(visible);
 }
 
 QVariantList AppController::availableLanguages() const {

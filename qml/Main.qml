@@ -80,6 +80,9 @@ ApplicationWindow {
             rootWindow.raise()
             rootWindow.requestActivate()
         }
+        function onToggleMiniPlayerRequested() {
+            rootWindow.toggleMiniPlayer()
+        }
         function onQuitRequested() {
             rootWindow.persistGeometry()
             rootWindow.forceQuit = true
@@ -453,5 +456,10 @@ ApplicationWindow {
 
     MiniPlayerWindow {
         id: miniPlayerWindow
+        onVisibleChanged: {
+            if (typeof app !== "undefined" && app && app.setMiniPlayerVisible) {
+                app.setMiniPlayerVisible(miniPlayerWindow.visible)
+            }
+        }
     }
 }

@@ -69,6 +69,7 @@ public:
     [[nodiscard]] AnalyticsService* analytics() noexcept { return &m_analytics; }
     [[nodiscard]] AmbientSoundService* ambient() noexcept { return &m_ambient; }
     [[nodiscard]] SystemHookService* systemHooks() noexcept { return &m_systemHooks; }
+    [[nodiscard]] DesktopIntegration* desktopIntegration() noexcept { return &m_desktopIntegration; }
 
     [[nodiscard]] bool showingOverview() const noexcept { return m_showingOverview; }
     void setShowingOverview(bool value);
@@ -129,6 +130,7 @@ public:
     Q_INVOKABLE QUrl taskBrowserUrl(bool fromDoneList, int proxyRow) const;
     Q_INVOKABLE void openTaskInBrowser(bool fromDoneList, int proxyRow);
     Q_INVOKABLE void openUrlExternally(const QUrl& url);
+    Q_INVOKABLE void setMiniPlayerVisible(bool visible);
     Q_INVOKABLE void checkDueReminders();
     Q_INVOKABLE void reloadTranslations();
     [[nodiscard]] QVariantList availableLanguages() const;
@@ -146,6 +148,7 @@ signals:
     void notificationRequested(const QString& title, const QString& body);
     void databaseError(const QString& message);
     void showWindowRequested();
+    void toggleMiniPlayerRequested();
     void quitRequested();
 
 private slots:

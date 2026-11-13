@@ -39,12 +39,41 @@ void AmbientSoundService::ensurePlayerInitialized() {
 }
 
 QVariantList AmbientSoundService::availableModes() const {
+    const QString offName = tr("Off (No ambient sound)");
+    const QString whiteName = tr("White / Pink Noise (Focus Hum)");
+    const QString rainName = tr("Gentle Rain (Rainfall)");
+    const QString clockName = tr("Mechanical Clock Ticking");
     return QVariantList{
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("none")}, {QStringLiteral("name"), tr("Off (No ambient sound)")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("white_noise")}, {QStringLiteral("name"), tr("White / Pink Noise (Focus Hum)")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("rain")}, {QStringLiteral("name"), tr("Gentle Rain (Rainfall)")}},
-        QVariantMap{{QStringLiteral("id"), QStringLiteral("clock")}, {QStringLiteral("name"), tr("Mechanical Clock Ticking")}}
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("none")}, {QStringLiteral("name"), offName}, {QStringLiteral("label"), offName}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("white_noise")}, {QStringLiteral("name"), whiteName}, {QStringLiteral("label"), whiteName}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("rain")}, {QStringLiteral("name"), rainName}, {QStringLiteral("label"), rainName}},
+        QVariantMap{{QStringLiteral("id"), QStringLiteral("clock")}, {QStringLiteral("name"), clockName}, {QStringLiteral("label"), clockName}}
     };
+}
+
+QString AmbientSoundService::ambientModeName() const {
+    if (m_mode == QStringLiteral("white_noise")) {
+        return tr("White / Pink Noise (Focus Hum)");
+    }
+    if (m_mode == QStringLiteral("rain")) {
+        return tr("Gentle Rain (Rainfall)");
+    }
+    if (m_mode == QStringLiteral("clock")) {
+        return tr("Mechanical Clock Ticking");
+    }
+    return tr("Off (No ambient sound)");
+}
+
+void AmbientSoundService::cycleAmbientMode() {
+    if (m_mode == QStringLiteral("none")) {
+        setAmbientMode(QStringLiteral("white_noise"));
+    } else if (m_mode == QStringLiteral("white_noise")) {
+        setAmbientMode(QStringLiteral("rain"));
+    } else if (m_mode == QStringLiteral("rain")) {
+        setAmbientMode(QStringLiteral("clock"));
+    } else {
+        setAmbientMode(QStringLiteral("none"));
+    }
 }
 
 void AmbientSoundService::setVolume(double vol) {

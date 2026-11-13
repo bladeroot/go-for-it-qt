@@ -4,9 +4,11 @@ import QtQuick.Layouts
 
 Window {
     id: miniPlayer
-    width: 400
-    height: 56
-    flags: Qt.Window | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool
+    objectName: "miniPlayerWindow"
+    width: 440
+    height: 58
+    property bool alwaysOnTop: true
+    flags: Qt.Window | Qt.FramelessWindowHint | (miniPlayer.alwaysOnTop ? Qt.WindowStaysOnTopHint : 0)
     color: "transparent"
     title: qsTr("Go for It — Mini Player")
 
@@ -14,6 +16,17 @@ Window {
     // window its transient parent: hiding the main window (closing to the tray) would then hide
     // the mini player too. It has to be an independent top-level window.
     transientParent: null
+
+    function toggleAlwaysOnTop() {
+        const wasVisible = miniPlayer.visible
+        miniPlayer.alwaysOnTop = !miniPlayer.alwaysOnTop
+        if (wasVisible) {
+            miniPlayer.show()
+            if (miniPlayer.alwaysOnTop) {
+                miniPlayer.raise()
+            }
+        }
+    }
 
     Rectangle {
         id: bg
@@ -55,10 +68,13 @@ Window {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 10
-            spacing: 8
+            spacing: 6
 
             // Status Icon / Pomodoro indicator
             Label {
+                Layout.preferredWidth: 22
+                Layout.alignment: Qt.AlignVCenter
+                horizontalAlignment: Text.AlignHCenter
                 text: app.timer.breakActive ? "☕" : "🍅"
                 font.pixelSize: 18
                 ToolTip.visible: iconMa.containsMouse
@@ -73,20 +89,31 @@ Window {
             // Switch the active task without restoring the main window
             ToolButton {
                 objectName: "miniPrevTask"
-                implicitWidth: 24
-                implicitHeight: 30
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 28
+                Layout.minimumWidth: 24
+                Layout.maximumWidth: 24
+                Layout.minimumHeight: 28
+                Layout.maximumHeight: 28
+                Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                text: "◀"
-                font.pixelSize: 11
                 enabled: app.activeTodoRow > 0
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Previous Task")
                 onClicked: app.switchToPreviousTask()
+                contentItem: Text {
+                    text: "◀"
+                    font.pixelSize: 11
+                    color: parent.enabled ? palette.buttonText : "#7f8c8d"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
 
-            // Task Name and Remaining Time
+            // Task Name, Remaining Time, and Ambient Sound Switcher
             ColumnLayout {
                 Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
                 spacing: 1
 
                 Label {
@@ -99,67 +126,180 @@ Window {
                 }
 
                 RowLayout {
+                    Layout.fillWidth: true
                     spacing: 6
+
                     Label {
+                        Layout.minimumWidth: 52
                         text: app.timer.formattedRemainingTime
+                        font.family: "monospace"
                         font.bold: true
-                        font.pixelSize: 15
+                        font.pixelSize: 14
                         color: app.timer.breakActive ? "#27ae60" : palette.highlight
                     }
 
-                    Label {
-                        visible: app.ambient && app.ambient.isPlaying
-                        text: "🎧"
-                        font.pixelSize: 10
-                        opacity: 0.75
+                    ToolButton {
+                        id: miniAmbientBtn
+                        objectName: "miniAmbientToggle"
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 20
+                        Layout.minimumHeight: 20
+                        Layout.maximumHeight: 20
+                        Layout.alignment: Qt.AlignVCenter
+                        leftPadding: 5
+                        rightPadding: 5
+                        topPadding: 0
+                        bottomPadding: 0
+                        ToolTip.visible: hovered
+                        ToolTip.text: "🎧 " + (app.ambient ? app.ambient.ambientModeName : "")
+                        onClicked: {
+                            if (app.ambient) {
+                                app.ambient.cycleAmbientMode()
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 4
+                            color: (app.ambient && app.ambient.ambientMode !== "none") ? palette.highlight : "transparent"
+                            opacity: miniAmbientBtn.hovered ? 0.35 : ((app.ambient && app.ambient.ambientMode !== "none") ? 0.2 : 0.0)
+                            border.color: (app.ambient && app.ambient.ambientMode !== "none") ? palette.highlight : "#7f8c8d"
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: "🎧 " + (app.ambient ? app.ambient.ambientModeName : "")
+                            font.pixelSize: 10
+                            font.bold: app.ambient && app.ambient.ambientMode !== "none"
+                            color: palette.windowText
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
             }
 
             ToolButton {
                 objectName: "miniNextTask"
-                implicitWidth: 24
-                implicitHeight: 30
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 28
+                Layout.minimumWidth: 24
+                Layout.maximumWidth: 24
+                Layout.minimumHeight: 28
+                Layout.maximumHeight: 28
+                Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                text: "▶"
-                font.pixelSize: 11
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Next Task")
                 onClicked: app.switchToNextTask()
+                contentItem: Text {
+                    text: "▶"
+                    font.pixelSize: 11
+                    color: palette.buttonText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
 
-            // Controls: Play/Pause, Mark Done, Restore, Close
+            // Controls: Play/Pause, Mark Done, Always on Top, Restore, Close
             ToolButton {
-                implicitWidth: 30
-                implicitHeight: 30
+                id: miniPlayPauseBtn
+                objectName: "miniPlayPauseButton"
+                Layout.preferredWidth: 30
+                Layout.preferredHeight: 30
+                Layout.minimumWidth: 30
+                Layout.maximumWidth: 30
+                Layout.minimumHeight: 30
+                Layout.maximumHeight: 30
+                Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                text: app.timer.running ? "⏸" : "▶"
-                font.pixelSize: 13
-                font.bold: true
                 ToolTip.visible: hovered
                 ToolTip.text: app.timer.running ? qsTr("Pause Timer") : qsTr("Start Timer")
                 onClicked: app.timer.toggleRunning()
+                contentItem: Item {
+                    // Use fixed vector geometry for Play and Pause so switching state never
+                    // changes font metrics or causes the button to jump.
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 3
+                        visible: app.timer.running
+                        Rectangle { width: 3.5; height: 12; radius: 1; color: palette.buttonText }
+                        Rectangle { width: 3.5; height: 12; radius: 1; color: palette.buttonText }
+                    }
+                    Text {
+                        anchors.fill: parent
+                        visible: !app.timer.running
+                        text: "▶"
+                        font.pixelSize: 12
+                        font.bold: true
+                        color: palette.buttonText
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
             }
 
             ToolButton {
-                visible: app.timer.hasActiveTask && !app.timer.breakActive
-                implicitWidth: 30
-                implicitHeight: 30
+                objectName: "miniDoneButton"
+                enabled: app.timer.hasActiveTask && !app.timer.breakActive
+                Layout.preferredWidth: 28
+                Layout.preferredHeight: 28
+                Layout.minimumWidth: 28
+                Layout.maximumWidth: 28
+                Layout.minimumHeight: 28
+                Layout.maximumHeight: 28
+                Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                text: "✓"
-                font.pixelSize: 13
-                font.bold: true
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Mark Task as Done")
                 onClicked: app.markActiveTaskDone()
+                contentItem: Text {
+                    text: "✓"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: parent.enabled ? palette.buttonText : "#7f8c8d"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
 
             ToolButton {
-                implicitWidth: 26
-                implicitHeight: 26
+                id: pinBtn
+                objectName: "miniAlwaysOnTopToggle"
+                Layout.preferredWidth: 26
+                Layout.preferredHeight: 26
+                Layout.minimumWidth: 26
+                Layout.maximumWidth: 26
+                Layout.minimumHeight: 26
+                Layout.maximumHeight: 26
+                Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                text: "⤢"
-                font.pixelSize: 12
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Always on Top Mini-Player (Ctrl+M)")
+                onClicked: miniPlayer.toggleAlwaysOnTop()
+                background: Rectangle {
+                    radius: 4
+                    color: miniPlayer.alwaysOnTop ? palette.highlight : "transparent"
+                    opacity: pinBtn.hovered ? 0.4 : (miniPlayer.alwaysOnTop ? 0.25 : 0.0)
+                    border.color: miniPlayer.alwaysOnTop ? palette.highlight : "transparent"
+                    border.width: 1
+                }
+                contentItem: Text {
+                    text: "📌"
+                    font.pixelSize: 11
+                    opacity: miniPlayer.alwaysOnTop ? 1.0 : 0.45
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            ToolButton {
+                objectName: "miniRestoreButton"
+                Layout.preferredWidth: 26
+                Layout.preferredHeight: 26
+                Layout.minimumWidth: 26
+                Layout.maximumWidth: 26
+                Layout.minimumHeight: 26
+                Layout.maximumHeight: 26
+                Layout.alignment: Qt.AlignVCenter
+                padding: 0
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Restore Full Window")
                 onClicked: {
@@ -168,17 +308,35 @@ Window {
                     rootWindow.raise()
                     rootWindow.requestActivate()
                 }
+                contentItem: Text {
+                    text: "⤢"
+                    font.pixelSize: 12
+                    color: palette.buttonText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
 
             ToolButton {
-                implicitWidth: 24
-                implicitHeight: 24
+                objectName: "miniCloseButton"
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 24
+                Layout.minimumWidth: 24
+                Layout.maximumWidth: 24
+                Layout.minimumHeight: 24
+                Layout.maximumHeight: 24
+                Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                text: "✕"
-                font.pixelSize: 10
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Close Mini Player")
                 onClicked: miniPlayer.hide()
+                contentItem: Text {
+                    text: "✕"
+                    font.pixelSize: 10
+                    color: palette.buttonText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
         }
     }

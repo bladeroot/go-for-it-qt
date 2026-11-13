@@ -13,6 +13,7 @@ namespace gofi {
 class AmbientSoundService : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString ambientMode READ ambientMode WRITE setAmbientMode NOTIFY ambientModeChanged)
+    Q_PROPERTY(QString ambientModeName READ ambientModeName NOTIFY ambientModeChanged)
     Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool isPlaying READ isPlaying NOTIFY playingChanged)
 
@@ -22,6 +23,8 @@ public:
 
     [[nodiscard]] QString ambientMode() const { return m_mode; }
     void setAmbientMode(const QString& mode);
+    [[nodiscard]] QString ambientModeName() const;
+    Q_INVOKABLE void cycleAmbientMode();
 
     [[nodiscard]] double volume() const noexcept { return m_volume; }
     void setVolume(double vol);
