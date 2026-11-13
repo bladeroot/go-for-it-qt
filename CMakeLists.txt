@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(go-for-it-qt
-    VERSION 2.0.2
+    VERSION 2.0.3
     DESCRIPTION "Go for It Qt — A stylish to-do list with built-in productivity timer (Qt 6)"
     HOMEPAGE_URL "https://github.com/bladeroot/go-for-it-qt"
     LANGUAGES CXX

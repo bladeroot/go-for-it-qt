@@ -1,3 +1,16 @@
+go-for-it-qt (2.0.3-1) unstable; urgency=medium
+
+  * Release 2.0.3.
+  * Open task details dialog (Markdown description and comments) on Enter or
+    double-click in task lists and on the active task in the timer view.
+  * Add Ocean Waves (Surf) ambient focus sound in GUI, Mini Player and TUI.
+  * Mini player: remove Qt.Tool flag so it stays visible when switching
+    windows, add Always on Top toggle, ambient sound switcher, system tray
+    menu toggle, and stabilize Play/Pause button geometry.
+  * Fix blank item labels in the timer view ambient sound selector.
+
+ -- Yurii Myronchuk <bladeroot@gmail.com>  Fri, 13 Nov 2026 19:00:00 +0100
+
 go-for-it-qt (2.0.2-1) unstable; urgency=medium
 
   * Bug-fix release 2.0.2.

@@ -24,6 +24,11 @@
     </ul>
   </description>
   <releases>
+    <release version="2.0.3" date="2026-11-13">
+      <description>
+        <p>Release 2.0.3: open task details (description and comments) on Enter or double-click in both task lists and the timer view, add Ocean Waves ambient focus sound, add Always on Top, ambient sound and system tray toggles for the mini player, prevent the mini player from hiding when switching windows, and fix blank ambient sound names and Play/Pause button jitter.</p>
+      </description>
+    </release>
     <release version="2.0.2" date="2026-11-12">
       <description>
         <p>Bug-fix release 2.0.2: GitLab synchronization works again (requests no longer use an order_by value GitLab rejects with HTTP 400), the mini player stays open when the main window is hidden and gains previous/next task buttons, remote status push for Jira, YouTrack and Nextcloud is more reliable, and invalid TUI duration input is rejected.</p>

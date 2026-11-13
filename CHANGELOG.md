@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [2.0.3] - 2026-11-13
+
 ### Added
 - Main window: double-clicking a task or pressing `Enter`/`Return` now opens the task details dialog (Markdown description and comments) both in the task list view and on the active task in the timer view.
 - Mini player: added an `Always on Top` (`📌`) toggle button, an ambient sound ("melody") switcher (`🎧`), and a checkable action in the system tray menu to show/hide the mini player.
