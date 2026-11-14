@@ -39,6 +39,9 @@ ApplicationWindow {
             miniPlayerWindow.show()
             miniPlayerWindow.raise()
             miniPlayerWindow.requestActivate()
+            if (typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
+                app.configureMiniPlayerWindow(miniPlayerWindow, miniPlayerWindow.alwaysOnTop)
+            }
         }
     }
 

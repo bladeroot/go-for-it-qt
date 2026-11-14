@@ -7549,6 +7549,55 @@ private slots:
         QFile::remove(dbPath);
         server.close();
     }
+
+    // KB-96: Under Wayland (KWin / KDE Plasma), regular xdg_toplevel windows cannot set
+    // WindowStaysOnTopHint via standard xdg-shell protocols, and declaring MiniPlayerWindow
+    // inside ApplicationWindow sets its QWindow/QObject parent to the main window. As a result,
+    // the mini player is treated as a transient child: when switching to other application
+    // windows the mini player drops behind them or disappears.
+    // configureMiniPlayerWindow detaches the window as a true independent top-level window
+    // (setParent(nullptr), setTransientParent(nullptr)), sets Qt::WindowStaysOnTopHint, and
+    // invokes KWin scripting (keepAbove, onAllDesktops) when running under KWin/Wayland.
+    void testMiniPlayerDetachAndAlwaysOnTopConfiguration() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb96.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+
+        QWindow dummyParent;
+        QWindow miniWindow(&dummyParent);
+        miniWindow.setTransientParent(&dummyParent);
+        QCOMPARE(miniWindow.parent(), &dummyParent);
+        QCOMPARE(miniWindow.transientParent(), &dummyParent);
+
+        controller.configureMiniPlayerWindow(&miniWindow, true);
+        QVERIFY(miniWindow.parent() == nullptr);
+        QVERIFY(miniWindow.transientParent() == nullptr);
+        QVERIFY(miniWindow.flags().testFlag(Qt::WindowStaysOnTopHint));
+
+        controller.configureMiniPlayerWindow(&miniWindow, false);
+        QVERIFY(miniWindow.parent() == nullptr);
+        QVERIFY(miniWindow.transientParent() == nullptr);
+        QVERIFY(!miniWindow.flags().testFlag(Qt::WindowStaysOnTopHint));
+
+        // Loading real Main.qml should configure miniPlayerWindow automatically on creation
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb96_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mini = qobject_cast<QWindow*>(root->findChild<QObject*>(QStringLiteral("miniPlayerWindow")));
+        QVERIFY(mini);
+        QVERIFY(mini->parent() == nullptr);
+        QVERIFY(mini->transientParent() == nullptr);
+        QVERIFY(mini->flags().testFlag(Qt::WindowStaysOnTopHint));
+
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
 };
 
 QTEST_MAIN(TestTodoTxt)

@@ -9,6 +9,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QWindow>
 
 namespace gofi {
 
@@ -1273,5 +1274,23 @@ void AppController::checkDueReminders() {
     }
 }
 
+void AppController::configureMiniPlayerWindow(QObject* windowObject, bool alwaysOnTop) {
+    if (!windowObject) return;
+    QWindow* win = qobject_cast<QWindow*>(windowObject);
+    if (!win) return;
+
+    if (win->parent()) {
+        win->setParent(nullptr);
+    }
+    if (win->transientParent()) {
+        win->setTransientParent(nullptr);
+    }
+
+    win->setFlag(Qt::WindowStaysOnTopHint, alwaysOnTop);
+
+    if (m_desktopIntegration.kwinIntegrationAvailable()) {
+        m_desktopIntegration.setKWinWindowProperties(win, alwaysOnTop);
+    }
+}
 
 } // namespace gofi

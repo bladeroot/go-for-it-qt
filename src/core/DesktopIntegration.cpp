@@ -2,13 +2,19 @@
 #include "AppController.h"
 #include <QApplication>
 #include <QDBusConnection>
+#include <QDBusConnectionInterface>
 #include <QDBusMessage>
+#include <QDBusReply>
+#include <QDir>
 #include <QFileInfo>
 #include <QFontMetrics>
 #include <QIcon>
 #include <QPainter>
 #include <QStandardPaths>
 #include <QStyle>
+#include <QTemporaryFile>
+#include <QTimer>
+#include <QWindow>
 
 namespace gofi {
 
@@ -288,6 +294,85 @@ void DesktopIntegration::emitUnityLauncherUpdate(const QVariantMap& properties) 
     sig << QStringLiteral("application://go-for-it-qt.desktop")
         << properties;
     bus.send(sig);
+}
+
+bool DesktopIntegration::kwinIntegrationAvailable() const {
+    if (QStandardPaths::isTestModeEnabled()) {
+        return false;
+    }
+    const QString sessionType = qEnvironmentVariable("XDG_SESSION_TYPE").toLower();
+    const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP").toLower();
+    if (!desktop.contains(QStringLiteral("kde")) && sessionType != QStringLiteral("wayland")) {
+        return false;
+    }
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) {
+        return false;
+    }
+    auto iface = bus.interface();
+    return iface && iface->isServiceRegistered(QStringLiteral("org.kde.KWin"));
+}
+
+void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop) {
+    if (!win || QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
+
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) return;
+
+    // Use KWin Scripting to directly mark the mini player window as keepAbove and onAllDesktops.
+    // Under Wayland xdg-shell, clients cannot set stay-on-top themselves, but KWin scripts can.
+    const QString winTitle = win->title().replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    const QString script = QStringLiteral(
+        "for (var i = 0; i < workspace.windowList().length; ++i) {\n"
+        "    var w = workspace.windowList()[i];\n"
+        "    if (w.caption && (w.caption === \"%1\" || w.caption.indexOf(\"Mini Player\") !== -1 || w.caption.indexOf(\"Міні-плеєр\") !== -1 || w.caption.indexOf(\"Mini-Player\") !== -1)) {\n"
+        "        w.keepAbove = %2;\n"
+        "        w.onAllDesktops = %2;\n"
+        "        w.skipTaskbar = true;\n"
+        "        w.skipPager = true;\n"
+        "    }\n"
+        "}\n"
+    ).arg(winTitle, alwaysOnTop ? QStringLiteral("true") : QStringLiteral("false"));
+
+    QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi_kwin_XXXXXX.js"));
+    tempFile.setAutoRemove(true);
+    if (!tempFile.open()) return;
+    tempFile.write(script.toUtf8());
+    tempFile.flush();
+    const QString tempPath = tempFile.fileName();
+
+    const QString pluginName = QStringLiteral("gofi_pin_%1").arg(QCoreApplication::applicationPid());
+
+    QDBusMessage loadMsg = QDBusMessage::createMethodCall(
+        QStringLiteral("org.kde.KWin"),
+        QStringLiteral("/Scripting"),
+        QStringLiteral("org.kde.kwin.Scripting"),
+        QStringLiteral("loadScript")
+    );
+    loadMsg << tempPath << pluginName;
+    QDBusReply<int> reply = bus.call(loadMsg);
+    if (reply.isValid()) {
+        const int scriptId = reply.value();
+        const QString scriptPath = QStringLiteral("/Scripting/Script%1").arg(scriptId);
+        QDBusMessage runMsg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            scriptPath,
+            QStringLiteral("org.kde.kwin.Script"),
+            QStringLiteral("run")
+        );
+        bus.call(runMsg);
+
+        QDBusMessage unloadMsg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"),
+            QStringLiteral("/Scripting"),
+            QStringLiteral("org.kde.kwin.Scripting"),
+            QStringLiteral("unloadScript")
+        );
+        unloadMsg << pluginName;
+        bus.call(unloadMsg);
+    }
 }
 
 } // namespace gofi

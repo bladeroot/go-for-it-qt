@@ -23,6 +23,8 @@ public:
 
     void showTrayMessage(const QString& title, const QString& body);
     void setMiniPlayerVisible(bool visible);
+    [[nodiscard]] bool kwinIntegrationAvailable() const;
+    void setKWinWindowProperties(QWindow* win, bool alwaysOnTop);
     [[nodiscard]] QMenu* trayMenu() const noexcept { return m_trayMenu; }
     [[nodiscard]] QAction* toggleMiniPlayerAction() const noexcept { return m_toggleMiniPlayerAction; }
 

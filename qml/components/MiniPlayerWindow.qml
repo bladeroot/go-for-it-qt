@@ -17,9 +17,24 @@ Window {
     // the mini player too. It has to be an independent top-level window.
     transientParent: null
 
+    Component.onCompleted: {
+        if (typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
+            app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
+        }
+    }
+
+    onVisibleChanged: {
+        if (visible && typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
+            app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
+        }
+    }
+
     function toggleAlwaysOnTop() {
         const wasVisible = miniPlayer.visible
         miniPlayer.alwaysOnTop = !miniPlayer.alwaysOnTop
+        if (typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
+            app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
+        }
         if (wasVisible) {
             miniPlayer.show()
             if (miniPlayer.alwaysOnTop) {
