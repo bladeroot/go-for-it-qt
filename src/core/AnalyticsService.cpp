@@ -264,10 +264,8 @@ QVariantList AnalyticsService::getActivityHeatmap(int daysBack, const QString& l
     QVariantList list;
     const int numDays = qBound(7, daysBack, 365);
     const QDate today = QDate::currentDate();
-    const QDate endOfWeek = today.addDays(7 - today.dayOfWeek());
-    const QDate startDate = (numDays % 7 == 0)
-        ? endOfWeek.addDays(-(numDays - 1))
-        : today.addDays(-(numDays - 1) - (today.addDays(-(numDays - 1)).dayOfWeek() - 1));
+    const QDate nominalStart = today.addDays(-(numDays - 1));
+    const QDate startDate = nominalStart.addDays(-(nominalStart.dayOfWeek() - 1));
 
     const QDateTime startUtc = QDateTime(startDate, QTime(0, 0, 0)).toUTC();
     const QDateTime endUtc = QDateTime(today, QTime(23, 59, 59)).toUTC();
@@ -285,7 +283,8 @@ QVariantList AnalyticsService::getActivityHeatmap(int daysBack, const QString& l
         }
     }
 
-    for (int i = 0; i < numDays; ++i) {
+    const int totalDays = static_cast<int>(startDate.daysTo(today)) + 1;
+    for (int i = 0; i < totalDays; ++i) {
         const QDate d = startDate.addDays(i);
         const quint64 sec = dateSeconds.value(d, 0);
         const int pom = datePomodoros.value(d, 0);

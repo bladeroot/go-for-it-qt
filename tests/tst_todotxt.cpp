@@ -794,7 +794,9 @@ private slots:
 
         // Heatmap
         const QVariantList heatmap = analytics.getActivityHeatmap(14);
-        QCOMPARE(heatmap.size(), 14);
+        QVERIFY(heatmap.size() >= 14);
+        QCOMPARE(heatmap.first().toMap().value(QStringLiteral("dayOfWeek")).toInt(), 1);
+        QCOMPARE(heatmap.last().toMap().value(QStringLiteral("date")).toString(), QDate::currentDate().toString(Qt::ISODate));
 
         // CSV Export
         const QString csvPath = m_testSandbox.filePath(QStringLiteral("test_billing.csv"));
@@ -3669,9 +3671,8 @@ private slots:
 
         IssueTrackerService svc;
         // updateIssueStatusRemote is a no-op in test mode; lift it only for this local request.
-        QStandardPaths::setTestModeEnabled(false);
+        RemoteWritesEnabled enableWrites;
         svc.updateIssueStatusRemote(entry, QStringLiteral("RM#proj#42"), true, QStringLiteral("done"));
-        QStandardPaths::setTestModeEnabled(true);
 
         QTRY_VERIFY_WITH_TIMEOUT(!putBody.isEmpty(), 5000);
         QCOMPARE(putTarget, QByteArray("/issues/42.json"));
@@ -3721,8 +3722,7 @@ private slots:
             nextcloudServer.serverPort()
         };
 
-        const bool testModeEnabled = QStandardPaths::isTestModeEnabled();
-        QStandardPaths::setTestModeEnabled(false);
+        RemoteWritesEnabled enableWrites;
         IssueTrackerService service;
         QStringList providersWithoutRequests;
         for (int i = 0; i < providers.size(); ++i) {
@@ -3741,7 +3741,6 @@ private slots:
                 providersWithoutRequests.append(providers.at(i));
             }
         }
-        QStandardPaths::setTestModeEnabled(testModeEnabled);
 
         QVERIFY2(providersWithoutRequests.isEmpty(),
                  qPrintable(QStringLiteral("No remote status request sent for: %1")
@@ -4752,9 +4751,8 @@ private slots:
         IssueTrackerService svc;
         QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
         // postWorklog is a no-op in test mode (KB-37); lift it only for this local request.
-        QStandardPaths::setTestModeEnabled(false);
+        RemoteWritesEnabled enableWrites;
         svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), QDateTime::currentDateTimeUtc().addSecs(-1500), 1500);
-        QStandardPaths::setTestModeEnabled(true);
 
         QTRY_VERIFY_WITH_TIMEOUT(requests >= 1, 5000);
         QTest::qWait(300);
@@ -4815,14 +4813,13 @@ private slots:
 
         IssueTrackerService svc;
         QSignalSpy postedSpy(&svc, &IssueTrackerService::worklogPosted);
-        QStandardPaths::setTestModeEnabled(false);
+        RemoteWritesEnabled enableWrites;
         // Keep test mode off for the whole exchange: the Bearer retry is issued from the
         // reply handler, after the first request returns. (Re-enabling test mode right after
         // the first call made the retry hit the test-mode guard; see KB-47.)
         svc.postWorklog(entry, 1, 1, QStringLiteral("KB-1"), QDateTime::currentDateTimeUtc().addSecs(-1500), 1500);
         QTRY_VERIFY_WITH_TIMEOUT(postedSpy.count() >= 1 || bearer >= 1, 5000);
         QTest::qWait(300);
-        QStandardPaths::setTestModeEnabled(true);
 
         QCOMPARE(basic, 1);
         QCOMPARE(bearer, 1);
@@ -5519,10 +5516,9 @@ private slots:
         entry.apiToken = QStringLiteral("app-password");
 
         IssueTrackerService svc;
-        QStandardPaths::setTestModeEnabled(false); // updateIssueDescription is a no-op in test mode
+        RemoteWritesEnabled enableWrites;
         svc.updateIssueDescription(entry, QStringLiteral("NC#kb63uid"), QStringLiteral("new KB63 description"));
         QTRY_VERIFY_WITH_TIMEOUT(putSeen, 5000);
-        QStandardPaths::setTestModeEnabled(true);
 
         const QString put = QString::fromUtf8(putBody);
         QVERIFY2(put.contains(QStringLiteral("DESCRIPTION:new KB63 description")), qPrintable(put));
@@ -5565,10 +5561,9 @@ private slots:
         entry.apiToken = QStringLiteral("app-password");
 
         IssueTrackerService svc;
-        QStandardPaths::setTestModeEnabled(false); // updateIssueDescription is a no-op in test mode
+        RemoteWritesEnabled enableWrites;
         svc.updateIssueDescription(entry, QStringLiteral("NC#kb64uid"), QStringLiteral("new KB64 description"));
         QTRY_VERIFY_WITH_TIMEOUT(putSeen, 5000);
-        QStandardPaths::setTestModeEnabled(true);
 
         const QString put = QString::fromUtf8(putBody);
         const int alarmStart = put.indexOf(QStringLiteral("BEGIN:VALARM"));
@@ -5616,10 +5611,9 @@ private slots:
         entry.apiToken = QStringLiteral("app-password");
 
         IssueTrackerService svc;
-        QStandardPaths::setTestModeEnabled(false); // updateIssueDescription is a no-op in test mode
+        RemoteWritesEnabled enableWrites;
         svc.updateIssueDescription(entry, QStringLiteral("NC#kb65uid"), QStringLiteral("new KB65 description"));
         QTRY_VERIFY_WITH_TIMEOUT(putSeen, 5000);
-        QStandardPaths::setTestModeEnabled(true);
 
         const QString put = QString::fromUtf8(putBody);
         QVERIFY2(put.contains(QStringLiteral("\r\nSUMMARY:KB65 fix BEGIN: handling\r\n"))
@@ -6601,6 +6595,40 @@ private slots:
         QFile::remove(dbPath);
     }
 
+    // KB-99: getActivityHeatmap shifted start date to Monday but kept a rigid loop of numDays,
+    // which truncated recent days when daysBack was not a multiple of 7 (e.g. 365 days ended
+    // several days before today) or produced future days up to Sunday when it was a multiple of 7.
+    void testActivityHeatmapRangeAndBoundaryAlignment() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb99.db"));
+        QFile::remove(dbPath);
+        QVERIFY(DatabaseManager::instance().initialize(dbPath));
+        AnalyticsService analytics;
+        const QDate today = QDate::currentDate();
+
+        for (int daysBack : {7, 10, 14, 28, 91, 365}) {
+            const QVariantList heat = analytics.getActivityHeatmap(daysBack, QStringLiteral("__ALL__"));
+            QVERIFY(!heat.isEmpty());
+            // First entry must be Monday
+            const int firstDow = heat.first().toMap().value(QStringLiteral("dayOfWeek")).toInt();
+            QCOMPARE(firstDow, 1);
+            // Last entry must be today
+            const QString lastDateStr = heat.last().toMap().value(QStringLiteral("date")).toString();
+            QCOMPARE(lastDateStr, today.toString(Qt::ISODate));
+            // All entries must be <= today (no future days)
+            // And days must be strictly consecutive
+            QDate prevDate = QDate::fromString(heat.first().toMap().value(QStringLiteral("date")).toString(), Qt::ISODate);
+            for (int i = 1; i < heat.size(); ++i) {
+                const QDate curDate = QDate::fromString(heat.at(i).toMap().value(QStringLiteral("date")).toString(), Qt::ISODate);
+                QCOMPARE(curDate, prevDate.addDays(1));
+                QVERIFY(curDate <= today);
+                QCOMPARE(heat.at(i).toMap().value(QStringLiteral("dayOfWeek")).toInt(), (i % 7) + 1);
+                prevDate = curDate;
+            }
+        }
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
     // KB-82: parseRedmineIssuesJson replaces the status name of every closed Redmine issue
     // (`status.is_closed == true`) with the literal "Closed" and sets no status category. The
     // per-list status mapping, which the list dialog fills with the real Redmine status names
@@ -6702,11 +6730,10 @@ private slots:
         };
 
         IssueTrackerService svc;
-        QStandardPaths::setTestModeEnabled(false); // remote writes are no-ops in test mode
+        RemoteWritesEnabled enableWrites;
         svc.updateIssueStatusRemote(entry, QStringLiteral("KB-89"), false, QStringLiteral("todo"));
         svc.updateIssueStatusRemote(entry, QStringLiteral("KB-89"), true, QStringLiteral("done"));
         QTRY_VERIFY_WITH_TIMEOUT(queries.size() >= 2, 5000);
-        QStandardPaths::setTestModeEnabled(true);
 
         QVERIFY2(queries.contains(QStringLiteral("State Open")) || queries.contains(QStringLiteral("State {Open}")), qPrintable(queries.join(QStringLiteral(" | "))));
         QVERIFY2(queries.contains(QStringLiteral("State {In Review}")), qPrintable(queries.join(QStringLiteral(" | "))));
@@ -6835,6 +6862,39 @@ private slots:
         QVERIFY2(reopened.contains(QStringLiteral("STATUS:NEEDS-ACTION")), qPrintable(reopened));
         QVERIFY2(!QRegularExpression(QStringLiteral("(^|\\n)(COMPLETED|PERCENT-COMPLETE)[:;]")).match(reopened).hasMatch(), qPrintable(reopened));
         QVERIFY2(reopened.contains(QStringLiteral("SUMMARY:Task")), qPrintable(reopened));
+        server.close();
+    }
+
+    // KB-98: Nextcloud status push failed silently if GET returned an HTTP error or if the
+    // response body did not contain a valid VTODO block (handleReply was called on an already-finished
+    // reply, which never fired, and missing VTODO returned early without error).
+    void testNextcloudStatusPushEmitsSyncFailedOnErrorAndInvalidVTodo() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        bool return500 = true;
+        serveHttpFull(server, [&](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            if (return500) {
+                return httpResponse("500 Internal Server Error", "text/plain", "Server failure");
+            }
+            return httpResponse("200 OK", "text/calendar", "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n");
+        });
+        RemoteWritesEnabled enabled;
+        IssueTrackerService svc;
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        TodoListEntry entry = makeStatusPushEntry(QStringLiteral("Nextcloud"), server);
+        entry.jiraUrl += QStringLiteral("/cal/");
+
+        // 1. GET returns 500 error: syncFailed must be emitted
+        svc.updateIssueStatusRemote(entry, QStringLiteral("NC#uid1"), true, QStringLiteral("done"));
+        QTRY_COMPARE_WITH_TIMEOUT(failSpy.count(), 1, 5000);
+
+        // 2. GET returns 200 OK but without VTODO: syncFailed must be emitted
+        return500 = false;
+        svc.updateIssueStatusRemote(entry, QStringLiteral("NC#uid1"), true, QStringLiteral("done"));
+        QTRY_COMPARE_WITH_TIMEOUT(failSpy.count(), 2, 5000);
+
         server.close();
     }
 

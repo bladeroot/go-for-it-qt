@@ -4,6 +4,8 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
+#include <QDBusPendingCall>
+#include <QDBusPendingCallWatcher>
 #include <QDBusReply>
 #include <QDir>
 #include <QFileInfo>
@@ -15,6 +17,7 @@
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QWindow>
+#include <memory>
 
 namespace gofi {
 
@@ -339,12 +342,12 @@ static void executeKWinPinScript(const QString& script) {
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) return;
 
-    QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi_kwin_XXXXXX.js"));
-    tempFile.setAutoRemove(true);
-    if (!tempFile.open()) return;
-    tempFile.write(script.toUtf8());
-    tempFile.flush();
-    const QString tempPath = tempFile.fileName();
+    auto tempFile = std::make_shared<QTemporaryFile>(QDir::tempPath() + QStringLiteral("/gofi_kwin_XXXXXX.js"));
+    tempFile->setAutoRemove(true);
+    if (!tempFile->open()) return;
+    tempFile->write(script.toUtf8());
+    tempFile->flush();
+    const QString tempPath = tempFile->fileName();
 
     const QString pluginName = QStringLiteral("gofi_pin_%1_%2")
         .arg(QCoreApplication::applicationPid())
@@ -357,27 +360,34 @@ static void executeKWinPinScript(const QString& script) {
         QStringLiteral("loadScript")
     );
     loadMsg << tempPath << pluginName;
-    QDBusReply<int> reply = bus.call(loadMsg);
-    if (reply.isValid()) {
-        const int scriptId = reply.value();
-        const QString scriptPath = QStringLiteral("/Scripting/Script%1").arg(scriptId);
-        QDBusMessage runMsg = QDBusMessage::createMethodCall(
-            QStringLiteral("org.kde.KWin"),
-            scriptPath,
-            QStringLiteral("org.kde.kwin.Script"),
-            QStringLiteral("run")
-        );
-        bus.call(runMsg);
 
-        QDBusMessage unloadMsg = QDBusMessage::createMethodCall(
-            QStringLiteral("org.kde.KWin"),
-            QStringLiteral("/Scripting"),
-            QStringLiteral("org.kde.kwin.Scripting"),
-            QStringLiteral("unloadScript")
-        );
-        unloadMsg << pluginName;
-        bus.call(unloadMsg);
-    }
+    auto* loadWatcher = new QDBusPendingCallWatcher(bus.asyncCall(loadMsg, 500));
+    QObject::connect(loadWatcher, &QDBusPendingCallWatcher::finished, [bus, pluginName, tempFile](QDBusPendingCallWatcher* watcher) {
+        watcher->deleteLater();
+        QDBusPendingReply<int> reply = *watcher;
+        if (reply.isValid()) {
+            const int scriptId = reply.value();
+            const QString scriptPath = QStringLiteral("/Scripting/Script%1").arg(scriptId);
+            QDBusMessage runMsg = QDBusMessage::createMethodCall(
+                QStringLiteral("org.kde.KWin"),
+                scriptPath,
+                QStringLiteral("org.kde.kwin.Script"),
+                QStringLiteral("run")
+            );
+            auto* runWatcher = new QDBusPendingCallWatcher(bus.asyncCall(runMsg, 500));
+            QObject::connect(runWatcher, &QDBusPendingCallWatcher::finished, [bus, pluginName](QDBusPendingCallWatcher* rw) {
+                rw->deleteLater();
+                QDBusMessage unloadMsg = QDBusMessage::createMethodCall(
+                    QStringLiteral("org.kde.KWin"),
+                    QStringLiteral("/Scripting"),
+                    QStringLiteral("org.kde.kwin.Scripting"),
+                    QStringLiteral("unloadScript")
+                );
+                unloadMsg << pluginName;
+                bus.asyncCall(unloadMsg, 500);
+            });
+        }
+    });
 }
 
 void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop) {

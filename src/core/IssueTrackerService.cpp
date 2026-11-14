@@ -3950,18 +3950,22 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
     if (issueKey.trimmed().isEmpty() || listEntry.apiToken.trimmed().isEmpty()) return;
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
 
-    auto handleReply = [this, listEntry, issueKey, done](QNetworkReply* reply) {
+    auto failWithError = [this, listEntry, issueKey](int statusCode, const QString& errStr) {
+        const QString errMsg = tr("Failed to update status for %1 on %2 (%3): %4")
+            .arg(issueKey, listEntry.provider)
+            .arg(statusCode)
+            .arg(errStr);
+        setStatusMessage(errMsg);
+        emit syncFailed(listEntry.id, errMsg);
+    };
+
+    auto handleReply = [this, listEntry, issueKey, done, failWithError](QNetworkReply* reply) {
         if (!reply) return;
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done]() {
+        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done, failWithError]() {
             reply->deleteLater();
             const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             if (reply->error() != QNetworkReply::NoError || (statusCode >= 400 && statusCode < 600)) {
-                const QString errMsg = tr("Failed to update status for %1 on %2 (%3): %4")
-                    .arg(issueKey, listEntry.provider)
-                    .arg(statusCode)
-                    .arg(reply->errorString());
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
+                failWithError(statusCode, reply->errorString());
             } else {
                 setStatusMessage(done ? tr("Updated %1 on %2: closed").arg(issueKey, listEntry.provider)
                                       : tr("Updated %1 on %2: open").arg(issueKey, listEntry.provider));
@@ -4223,22 +4227,29 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         applyAuthHeader(req, listEntry);
 
         QNetworkReply* getReply = m_nam.get(req);
-        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, done, handleReply]() {
+        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, done, handleReply, failWithError]() {
             getReply->deleteLater();
-            if (getReply->error() != QNetworkReply::NoError) {
-                handleReply(getReply);
+            const int statusCode = getReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (getReply->error() != QNetworkReply::NoError || (statusCode >= 400 && statusCode < 600)) {
+                failWithError(statusCode, getReply->errorString());
                 return;
             }
             QString ics = QString::fromUtf8(getReply->readAll());
             static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
             const auto vtodoStartMatch = vtodoStartRe.match(ics);
-            if (!vtodoStartMatch.hasMatch()) return;
+            if (!vtodoStartMatch.hasMatch()) {
+                failWithError(422, tr("Invalid CalDAV VTODO response"));
+                return;
+            }
             const int vtodoStart = vtodoStartMatch.capturedStart(1);
             const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
 
             static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
             const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
-            if (!vtodoEndMatch.hasMatch()) return;
+            if (!vtodoEndMatch.hasMatch()) {
+                failWithError(422, tr("Invalid CalDAV VTODO response"));
+                return;
+            }
             const int vtodoEnd = vtodoEndMatch.capturedStart(1);
 
             int propBlockEnd = vtodoEnd;
