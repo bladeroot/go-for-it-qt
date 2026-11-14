@@ -9,3 +9,5 @@ CMakeUserPresets.json
 *.db-wal
 *.swp
 *~
+*.pkg.tar.zst
+/go-for-it-qt/
