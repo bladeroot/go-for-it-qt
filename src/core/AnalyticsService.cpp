@@ -444,7 +444,7 @@ bool AnalyticsService::exportBillingPdf(const QString& filePath,
         for (const QVariant& pv : projs) {
             const QVariantMap pm = pv.toMap();
             html += QStringLiteral("<tr><td><strong>+%1</strong></td><td>%2</td><td>%3h</td><td>%4%</td></tr>")
-                .arg(pm.value(QStringLiteral("name")).toString(),
+                .arg(pm.value(QStringLiteral("name")).toString().toHtmlEscaped(),
                      pm.value(QStringLiteral("formattedTime")).toString(),
                      QString::number(pm.value(QStringLiteral("hours")).toDouble(), 'f', 2),
                      QString::number(pm.value(QStringLiteral("percentage")).toDouble(), 'f', 1));

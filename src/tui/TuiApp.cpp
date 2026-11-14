@@ -1288,11 +1288,14 @@ void TuiApp::addTaskCommentInVim() {
         const QString commentMd = QString::fromUtf8(in.readAll()).trimmed();
         in.close();
         if (!commentMd.isEmpty()) {
-            m_app->addTaskComment(isClosedTab(), m_selectedRow, commentMd);
-            if (m_mode == Mode::MarkdownView) {
-                openTaskMarkdownView();
+            if (m_app->addTaskComment(isClosedTab(), m_selectedRow, commentMd)) {
+                if (m_mode == Mode::MarkdownView) {
+                    openTaskMarkdownView();
+                }
+                m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
+            } else {
+                m_statusMessage = tr("Failed to save comment to database.");
             }
-            m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
         } else {
             m_statusMessage = tr("Empty comment ignored.");
         }
@@ -1673,10 +1676,17 @@ void TuiApp::executeExCommand(const QString& cmdLine) {
     }
     if (cmdLine.startsWith(QStringLiteral("comment "))) {
         const QString cText = cmdLine.mid(8).trimmed();
-        if (!cText.isEmpty() && currentProxy()->rowCount() > 0) {
-            m_app->addTaskComment(isClosedTab(), m_selectedRow, cText);
-            if (m_mode == Mode::MarkdownView) openTaskMarkdownView();
-            m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
+        if (!cText.isEmpty()) {
+            if (currentProxy()->rowCount() > 0 && m_selectedRow >= 0 && m_selectedRow < currentProxy()->rowCount()) {
+                if (m_app->addTaskComment(isClosedTab(), m_selectedRow, cText)) {
+                    if (m_mode == Mode::MarkdownView) openTaskMarkdownView();
+                    m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
+                } else {
+                    m_statusMessage = tr("Failed to save comment to database.");
+                }
+            } else {
+                m_statusMessage = tr("Failed to save comment to database.");
+            }
         }
         return;
     }
@@ -2250,9 +2260,18 @@ void TuiApp::render() {
                  QString::number(stats.value(QStringLiteral("totalSessions")).toInt())));
 
         lines.append(QString());
-        lines.append(FG_GREEN + ESC_BOLD + tr("  ── 28-DAY ACTIVITY HEATMAP ──") + ESC_RESET);
+        lines.append(FG_GREEN + ESC_BOLD + tr("  ── %1-DAY ACTIVITY HEATMAP ──").arg(heatmap.size()) + ESC_RESET);
+        const int maxWeeks = (m_cols - 2) / 21;
+        const int cellsPerRow = maxWeeks >= 1 ? maxWeeks * 7 : qMax(1, (m_cols - 2) / 3);
+
         QString heatRow = QStringLiteral("  ");
+        int countInRow = 0;
         for (const QVariant& hv : heatmap) {
+            if (countInRow >= cellsPerRow) {
+                lines.append(heatRow);
+                heatRow = QStringLiteral("  ");
+                countInRow = 0;
+            }
             const QVariantMap hm = hv.toMap();
             const int lvl = hm.value(QStringLiteral("intensity")).toInt();
             if (lvl == 0) heatRow += FG_GRAY + QStringLiteral("[ ]") + ESC_RESET;
@@ -2260,8 +2279,11 @@ void TuiApp::render() {
             else if (lvl == 2) heatRow += QStringLiteral("\033[38;5;114m[▒]") + ESC_RESET;
             else if (lvl == 3) heatRow += QStringLiteral("\033[38;5;120m[▓]") + ESC_RESET;
             else heatRow += QStringLiteral("\033[38;5;46m[█]") + ESC_RESET;
+            ++countInRow;
         }
-        lines.append(heatRow);
+        if (!heatRow.trimmed().isEmpty()) {
+            lines.append(heatRow);
+        }
 
         lines.append(QString());
         lines.append(FG_ORANGE + ESC_BOLD + tr("  ── PROJECTS (+Project) ──") + ESC_RESET);

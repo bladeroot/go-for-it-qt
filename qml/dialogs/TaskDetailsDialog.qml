@@ -273,11 +273,13 @@ Dialog {
                         onClicked: {
                             const body = newCommentArea.text.trim()
                             if (body === "" || (detailsDialog.taskId <= 0 && detailsDialog.taskRow < 0)) return
+                            let ok = false
                             if (detailsDialog.taskId > 0 && typeof app !== "undefined" && app && app.addTaskCommentById) {
-                                app.addTaskCommentById(detailsDialog.taskId, body)
-                            } else {
-                                app.addTaskComment(detailsDialog.fromDoneList, detailsDialog.taskRow, body)
+                                ok = app.addTaskCommentById(detailsDialog.taskId, body)
+                            } else if (typeof app !== "undefined" && app && app.addTaskComment) {
+                                ok = app.addTaskComment(detailsDialog.fromDoneList, detailsDialog.taskRow, body)
                             }
+                            if (!ok) return
                             let updated = detailsDialog.taskComments ? detailsDialog.taskComments.slice() : []
                             updated.push({
                                 author: qsTr("You"),

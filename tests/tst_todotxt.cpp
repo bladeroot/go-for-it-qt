@@ -1164,9 +1164,13 @@ private slots:
 
         // Heatmap
         const QVariantList heatmap = analytics.getActivityHeatmap(14);
-        QVERIFY(heatmap.size() >= 14);
+        const QDate today = QDate::currentDate();
+        const QDate nominalStart = today.addDays(-13);
+        const QDate startDate = nominalStart.addDays(-(nominalStart.dayOfWeek() - 1));
+        const int expectedDays = static_cast<int>(startDate.daysTo(today)) + 1;
+        QCOMPARE(heatmap.size(), expectedDays);
         QCOMPARE(heatmap.first().toMap().value(QStringLiteral("dayOfWeek")).toInt(), 1);
-        QCOMPARE(heatmap.last().toMap().value(QStringLiteral("date")).toString(), QDate::currentDate().toString(Qt::ISODate));
+        QCOMPARE(heatmap.last().toMap().value(QStringLiteral("date")).toString(), today.toString(Qt::ISODate));
 
         // CSV Export
         const QString csvPath = m_testSandbox.filePath(QStringLiteral("test_billing.csv"));
@@ -8027,6 +8031,22 @@ private slots:
         QVERIFY(mini->transientParent() == nullptr);
         QVERIFY(mini->flags().testFlag(Qt::WindowStaysOnTopHint));
 
+        // KB-96 strengthening: simulate compositor transient hierarchy and verify Main.qml
+        // and MiniPlayerWindow.qml reconfigure the window on toggle and visibility changes
+        QWindow* rootWin = qobject_cast<QWindow*>(root.get());
+        QVERIFY(rootWin);
+        mini->setTransientParent(rootWin);
+        QCOMPARE(mini->transientParent(), rootWin);
+
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "toggleMiniPlayer"));
+        QVERIFY(mini->transientParent() == nullptr);
+
+        QVERIFY(QMetaObject::invokeMethod(mini, "toggleAlwaysOnTop"));
+        QVERIFY(!mini->flags().testFlag(Qt::WindowStaysOnTopHint));
+
+        QVERIFY(QMetaObject::invokeMethod(mini, "toggleAlwaysOnTop"));
+        QVERIFY(mini->flags().testFlag(Qt::WindowStaysOnTopHint));
+
         root.reset();
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
@@ -8855,6 +8875,165 @@ private slots:
         QCOMPARE(lockedLoad, QString());
         QVERIFY(storedWhileLocked);
         QCOMPARE(afterUnlock, QStringLiteral("pat_new_current"));
+    }
+
+    // KB-115: TUI dashboard "── 28-DAY ACTIVITY HEATMAP ──" hardcoded 28 days even though
+    // getActivityHeatmap returns 28..34 days (Monday-aligned since KB-99), and on an 80-column
+    // terminal (2 + 3*days cols = 86..104 cols) truncateVisible cut off the rightmost cells,
+    // causing today's activity to be completely invisible.
+    void testTuiDashboardHeatmapFitsStandardTerminalAndCountsDaysAccurately() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb115_tui.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString list = ctrl.listManager()->addList(QStringLiteral("KB115"));
+        ctrl.selectListById(list);
+
+        // Record 3 hours today so today's heatmap cell has highest intensity ([█])
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        QVERIFY(DatabaseManager::instance().insertActivityLog(list, QStringLiteral("KB115"), -1, QString(),
+                QStringLiteral("Intensive Work Session"), now.addSecs(-10800), 10800, now, true, false) > 0);
+
+        const QVariantList heatmap = ctrl.analytics()->getActivityHeatmap(28, ctrl.activeListFilter());
+        const int actualDays = heatmap.size();
+        QVERIFY(actualDays >= 28 && actualDays <= 34);
+
+        QString screen;
+        {
+            PtyTerminal term;
+            QVERIFY(term.open(30, 80)); // Standard 80-column terminal
+            TuiApp tui(&ctrl);
+            QVERIFY(tui.start());
+            QTest::qWait(100);
+            term.takeOutput();
+            term.type("U"); // Open Dashboard
+            QTest::qWait(300);
+            screen = QString::fromUtf8(term.takeOutput());
+        }
+
+        const qsizetype lastFrame = screen.lastIndexOf(QStringLiteral("\x1b[H"));
+        if (lastFrame >= 0) screen = screen.mid(lastFrame);
+        screen.remove(QRegularExpression(QStringLiteral("\x1b\\[[0-9;?]*[A-Za-z]")));
+
+        // Title must show the accurate day count, not hardcoded 28-DAY
+        const QString expectedTitle = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──").arg(actualDays).trimmed();
+        QVERIFY2(screen.contains(expectedTitle), qPrintable(screen.left(2000)));
+
+        // Today's cell ([█]) must be visible on the 80-column terminal, not truncated away
+        QVERIFY2(screen.contains(QStringLiteral("[█]")), qPrintable(screen));
+
+        // Count all cells in heatmap rows: must equal actualDays
+        int renderedCells = 0;
+        for (const QString& line : screen.split(QRegularExpression(QStringLiteral("[\r\n]+")))) {
+            if (line.contains(QLatin1Char('[')) && line.contains(QLatin1Char(']')) &&
+                !line.contains(QStringLiteral("PROJECTS")) && !line.contains(QStringLiteral("CONTEXTS")) &&
+                !line.contains(QStringLiteral("TOP TASKS")) && !line.contains(QStringLiteral("Focus"))) {
+                renderedCells += line.count(QStringLiteral("[ ]"))
+                               + line.count(QStringLiteral("[░]"))
+                               + line.count(QStringLiteral("[▒]"))
+                               + line.count(QStringLiteral("[▓]"))
+                               + line.count(QStringLiteral("[█]"));
+            }
+        }
+        QCOMPARE(renderedCells, actualDays);
+
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-116: AnalyticsService::exportBillingPdf did not HTML-escape project names, causing
+    // projects with angle brackets like "+Security<Core>" to be treated as HTML markup and
+    // stripped from the document.
+    void testPdfReportEscapesProjectNames() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb116_pdf.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString list = ctrl.listManager()->addList(QStringLiteral("KB116"));
+        ctrl.selectListById(list);
+
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        QVERIFY(DatabaseManager::instance().insertActivityLog(list, QStringLiteral("KB116"), -1, QString(),
+                QStringLiteral("Refactor kernel +Security<Core>"), now.addSecs(-3600), 3600, now, false, false) > 0);
+
+        const QString pdfPath = m_testSandbox.filePath(QStringLiteral("kb116_billing.pdf"));
+        QFile::remove(pdfPath);
+        QVERIFY(ctrl.analytics()->exportBillingPdf(pdfPath, QStringLiteral("all"), list));
+        QVERIFY(QFile::exists(pdfPath));
+
+        // In QPdfWriter output, text strings from QTextDocument appear in the rendered document.
+        // If "+Security<Core>" was not HTML-escaped, "<Core>" is parsed as an HTML tag and omitted entirely.
+        QProcess pdfProc;
+        pdfProc.start(QStringLiteral("pdftotext"), {pdfPath, QStringLiteral("-")});
+        QVERIFY(pdfProc.waitForFinished(3000));
+        const QString pdfText = QString::fromUtf8(pdfProc.readAllStandardOutput());
+        QFile::remove(pdfPath);
+        QVERIFY2(pdfText.contains(QStringLiteral("Security<Core>")),
+                 qPrintable(QStringLiteral("Project name with angle brackets was stripped from the generated PDF: %1").arg(pdfText)));
+
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-117: TaskDetailsDialog.qml and TuiApp reported comment as posted and displayed it even
+    // when database save failed (AppController::addTaskCommentById / addTaskComment returned false).
+    void testPostCommentDoesNotDisplayCommentWhenDbSaveFails() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb117_comment.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString list = ctrl.listManager()->addList(QStringLiteral("KB117"));
+        ctrl.selectListById(list);
+
+        // 1. TUI verification: posting a comment when row is invalid or DB write fails must not report success
+        QString tuiScreen;
+        {
+            PtyTerminal term;
+            QVERIFY(term.open(30, 80));
+            TuiApp tui(&ctrl);
+            QVERIFY(tui.start());
+            QTest::qWait(100);
+            term.takeOutput();
+            term.type(":comment Unsaved Comment\r");
+            QTest::qWait(200);
+            tuiScreen = QString::fromUtf8(term.takeOutput());
+        }
+        QVERIFY2(!tuiScreen.contains(QStringLiteral("Comment posted")), qPrintable(tuiScreen));
+
+        // 2. QML verification: TaskDetailsDialog must not append comment or clear text area on failure
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &ctrl);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb117_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/dialogs/TaskDetailsDialog.qml")));
+        std::unique_ptr<QObject> dialog(comp.create());
+        QVERIFY2(dialog, qPrintable(comp.errorString()));
+
+        // Target non-existent task ID so DB save fails
+        dialog->setProperty("taskId", 999999);
+        dialog->setProperty("taskRow", -1);
+        QObject* area = nullptr;
+        QObject* postBtn = nullptr;
+        for (QObject* c : dialog->findChildren<QObject*>()) {
+            if (c->property("placeholderText").isValid() && c->property("wrapMode").isValid()) {
+                area = c;
+            }
+            if (c->inherits("QQuickAbstractButton")) {
+                const QString txt = c->property("text").toString();
+                if (txt.contains(QStringLiteral("💬")) || txt.contains(QStringLiteral("Post Comment")) || txt.contains(QStringLiteral("Додати коментар"))) {
+                    postBtn = c;
+                }
+            }
+        }
+        QVERIFY(area);
+        QVERIFY(postBtn);
+        area->setProperty("text", QStringLiteral("Failing Comment"));
+
+        QVERIFY(QMetaObject::invokeMethod(postBtn, "clicked"));
+
+        const QVariantList comments = dialog->property("taskComments").toList();
+        QCOMPARE(comments.size(), 0);
+        QCOMPARE(area->property("text").toString(), QStringLiteral("Failing Comment"));
+
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
     }
 };
 

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remote credentials: hardened keyring token isolation in test mode, completed prompt-based wallet unlock flow with database-wide batch unlocking, scoped tokens by database path, enforced atomic 0600 file permissions via umask 0077, and prioritized newer fallback file tokens over stale keyring entries (KB-106..114).
 
 ### Fixed
+- TUI: activity heatmap on dashboard view now dynamically reflects the exact date range and wraps into week-aligned rows, preventing truncation of recent days on standard 80-column terminals (KB-115).
+- Billing reports: project names containing angle brackets or special characters are now HTML-escaped, preventing them from being stripped in generated PDF documents (KB-116).
+- Task comments: TaskDetailsDialog and TUI now verify database write results when posting comments, preventing unpersisted comments from falsely displaying as saved (KB-117).
 - Mini player: detached window as an independent top-level window and integrated KWin Scripting to keep the mini player always on top and across all workspaces under Wayland without modifying foreign application windows (KB-96, KB-97).
 - Mini player: resolved duplicate `Ctrl+M` shortcut conflict in `Main.qml` (KB-93).
 - Keyboard navigation: pressing `Enter`/`Return` inside text editors or spin boxes no longer opens task details dialog, and pressing `Enter` on the To-Do list now opens the highlighted active task (KB-91, KB-92).
