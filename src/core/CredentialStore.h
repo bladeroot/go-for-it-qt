@@ -62,6 +62,10 @@ public:
     // Check if Freedesktop Secret Service is currently available
     [[nodiscard]] bool isKeyringAvailable() const;
 
+    // Batch unlock all items for the currently opened database upfront
+    void unlockKeyringForCurrentDatabase();
+    void resetPromptState();
+
     // Token operations
     [[nodiscard]] QString loadToken(const QString& listId);
     bool storeToken(const QString& listId, const QString& token);
@@ -101,6 +105,7 @@ private:
 
     mutable std::optional<QDBusConnection> m_customBus;
     QString m_serviceName = QStringLiteral("org.freedesktop.secrets");
+    mutable bool m_unlockPromptDismissed = false;
 };
 
 } // namespace gofi

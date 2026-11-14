@@ -84,11 +84,17 @@ void CredentialStore::clearInMemoryTokens() {
 void CredentialStore::setDBusConnection(const QDBusConnection& connection, const QString& serviceName) {
     m_customBus = connection;
     m_serviceName = serviceName;
+    m_unlockPromptDismissed = false;
 }
 
 void CredentialStore::resetDBusConnection() {
     m_customBus.reset();
     m_serviceName = QStringLiteral("org.freedesktop.secrets");
+    m_unlockPromptDismissed = false;
+}
+
+void CredentialStore::resetPromptState() {
+    m_unlockPromptDismissed = false;
 }
 
 QDBusConnection CredentialStore::activeBus() const {
@@ -139,7 +145,7 @@ QString CredentialStore::defaultFallbackFilePath() const {
 }
 
 QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPath>& locked) const {
-    if (locked.isEmpty()) {
+    if (locked.isEmpty() || m_unlockPromptDismissed) {
         return {};
     }
     QDBusConnection bus = activeBus();
@@ -190,10 +196,10 @@ QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPat
         QStringLiteral("Prompt")
     );
     promptMsg << QStringLiteral("");
-    bus.call(promptMsg, QDBus::BlockWithGui, 2000);
+    bus.call(promptMsg, QDBus::BlockWithGui, 30000);
 
     if (!helper.finished) {
-        timer.start(5000);
+        timer.start(120000);
         loop.exec();
     }
 
@@ -207,6 +213,7 @@ QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPat
     );
 
     if (helper.dismissed) {
+        m_unlockPromptDismissed = true;
         return {};
     }
 
@@ -215,6 +222,38 @@ QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPat
         unlockedFromPrompt = locked;
     }
     return unlockedFromPrompt;
+}
+
+void CredentialStore::unlockKeyringForCurrentDatabase() {
+    if (m_inMemory || !isKeyringAvailable() || m_unlockPromptDismissed) {
+        return;
+    }
+    const QString dbScope = currentDbScope();
+    if (dbScope.isEmpty()) {
+        return;
+    }
+    QDBusConnection bus = activeBus();
+    StringStringMap attributes;
+    attributes.insert(QStringLiteral("application"), QStringLiteral("go-for-it-qt"));
+    attributes.insert(QStringLiteral("db_path"), dbScope);
+
+    QDBusMessage searchMsg = QDBusMessage::createMethodCall(
+        m_serviceName,
+        QStringLiteral("/org/freedesktop/secrets"),
+        QStringLiteral("org.freedesktop.Secret.Service"),
+        QStringLiteral("SearchItems")
+    );
+    searchMsg << QVariant::fromValue(attributes);
+
+    const QDBusMessage searchReply = bus.call(searchMsg, QDBus::BlockWithGui, 2000);
+    if (searchReply.type() != QDBusMessage::ReplyMessage || searchReply.arguments().size() < 2) {
+        return;
+    }
+
+    const QList<QDBusObjectPath> locked = parseObjectPathList(searchReply.arguments().at(1));
+    if (!locked.isEmpty()) {
+        unlockObjects(locked);
+    }
 }
 
 bool CredentialStore::openSecretServiceSession(QString& sessionPath) const {

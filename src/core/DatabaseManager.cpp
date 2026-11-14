@@ -194,6 +194,7 @@ void DatabaseManager::close() {
     m_dbPath.clear();
     m_initFailed = false;
     CredentialStore::instance().clearInMemoryTokens();
+    CredentialStore::instance().resetPromptState();
 }
 
 bool DatabaseManager::initialize(const QString& customDbPath) {
@@ -784,6 +785,7 @@ bool DatabaseManager::setSetting(const QString& key, const QVariant& value) {
 
 QVector<TodoListEntry> DatabaseManager::loadLists() const {
     QVector<TodoListEntry> result;
+    CredentialStore::instance().unlockKeyringForCurrentDatabase();
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "SELECT id, name, provider, activity_log_path, add_creation_dates, "

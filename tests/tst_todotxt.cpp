@@ -259,6 +259,7 @@ public:
     QSet<QString> lockedPaths;
     int unlockCalls = 0;
     bool unlockNeedsPrompt = false;  // real KWallet / GNOME Keyring: Unlock of a locked collection returns a prompt
+    int promptDelayMs = 0;           // time the user needs to type the wallet password
     QList<QDBusObjectPath> pendingUnlock;
     int nextId = 0;
 
@@ -379,12 +380,21 @@ public:
         if (member == QStringLiteral("Prompt") && msg.path() == QStringLiteral("/org/freedesktop/secrets/prompt/u1")) {
             conn.send(msg.createReply());
             // The user entered the wallet password: unlock and report completion.
-            for (const auto& p : pendingUnlock) {
-                lockedPaths.remove(p.path());
+            const QString promptPath = msg.path();
+            QDBusConnection c = conn;
+            auto complete = [this, c, promptPath]() mutable {
+                for (const auto& p : pendingUnlock) {
+                    lockedPaths.remove(p.path());
+                }
+                QDBusMessage completed = QDBusMessage::createSignal(promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Completed"));
+                completed << false << QVariant::fromValue(QDBusVariant(QVariant::fromValue(pendingUnlock)));
+                c.send(completed);
+            };
+            if (promptDelayMs > 0) {
+                QTimer::singleShot(promptDelayMs, complete);
+            } else {
+                complete();
             }
-            QDBusMessage completed = QDBusMessage::createSignal(msg.path(), QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Completed"));
-            completed << false << QVariant::fromValue(QDBusVariant(QVariant::fromValue(pendingUnlock)));
-            conn.send(completed);
             return true;
         }
         if (member == QStringLiteral("GetSecret")) {
@@ -8719,6 +8729,53 @@ private slots:
         QFile f(credsPath);
         QVERIFY(f.open(QIODevice::ReadOnly));
         QVERIFY2(!f.readAll().contains("pat_unscoped_plain"), "token moved to the keyring is still in plaintext in credentials.json");
+    }
+
+    void testCredentialStoreWaitsForUserToAnswerUnlockPrompt() {
+        // Typing a wallet password takes a human several seconds. A prompt answered after 8 s must still give
+        // the token instead of an empty one (which also leads to deleting it on the next settings save).
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_slowprompt_fake");
+        const QString clientName = QStringLiteral("cs_slowprompt_client");
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("cs_slowprompt_fallback.json"));
+        QFile::remove(credsPath);
+        QString loaded;
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.freedesktop.secrets");
+            FakeSecretService fakeSecrets;
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+
+            auto& store = gofi::CredentialStore::instance();
+            store.setInMemoryMode(false);
+            store.setFallbackFilePath(credsPath);
+            store.setDBusConnection(clientConn, service);
+
+            QVERIFY(store.storeToken(QStringLiteral("cs_slowprompt_list"), QStringLiteral("pat_slow_secret")));
+            fakeSecrets.lockedPaths.insert(fakeSecrets.items.firstKey());
+            fakeSecrets.unlockNeedsPrompt = true;
+            fakeSecrets.promptDelayMs = 8000;
+
+            loaded = store.loadToken(QStringLiteral("cs_slowprompt_list"));
+            QTRY_VERIFY_WITH_TIMEOUT(fakeSecrets.lockedPaths.isEmpty(), 10000);  // let the delayed reply finish
+
+            store.resetDBusConnection();
+            fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+            fakeConn.unregisterService(service);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+        gofi::CredentialStore::instance().setFallbackFilePath(QString());
+        QFile::remove(credsPath);
+
+        QCOMPARE(loaded, QStringLiteral("pat_slow_secret"));
     }
 };
 
