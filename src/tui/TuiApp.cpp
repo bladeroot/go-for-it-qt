@@ -2274,9 +2274,9 @@ void TuiApp::render() {
                 const double pct = pm.value(QStringLiteral("percentage")).toDouble();
                 const int barLen = qBound(0, static_cast<int>(pct / 5.0), 20);
                 const QString bar = QString(barLen, QChar(0x2588)) + QString(20 - barLen, QChar(0x2591));
-                lines.append(QStringLiteral("  +%-16s [%1] %2%  (%3)")
-                    .arg(pm.value(QStringLiteral("name")).toString())
-                    .arg(bar, QString::number(pct, 'f', 1), pm.value(QStringLiteral("formattedTime")).toString()));
+                const QString name = pm.value(QStringLiteral("name")).toString().leftJustified(16, QLatin1Char(' '));
+                lines.append(QStringLiteral("  +%1 [%2] %3%  (%4)")
+                    .arg(name, bar, QString::number(pct, 'f', 1), pm.value(QStringLiteral("formattedTime")).toString()));
             }
         }
 
@@ -2291,9 +2291,9 @@ void TuiApp::render() {
                 const double pct = cm.value(QStringLiteral("percentage")).toDouble();
                 const int barLen = qBound(0, static_cast<int>(pct / 5.0), 20);
                 const QString bar = QString(barLen, QChar(0x2588)) + QString(20 - barLen, QChar(0x2591));
-                lines.append(QStringLiteral("  @%-16s [%1] %2%  (%3)")
-                    .arg(cm.value(QStringLiteral("name")).toString())
-                    .arg(bar, QString::number(pct, 'f', 1), cm.value(QStringLiteral("formattedTime")).toString()));
+                const QString name = cm.value(QStringLiteral("name")).toString().leftJustified(16, QLatin1Char(' '));
+                lines.append(QStringLiteral("  @%1 [%2] %3%  (%4)")
+                    .arg(name, bar, QString::number(pct, 'f', 1), cm.value(QStringLiteral("formattedTime")).toString()));
             }
         }
 

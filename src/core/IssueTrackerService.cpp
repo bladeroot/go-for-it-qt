@@ -4238,7 +4238,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
             static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
             const auto vtodoStartMatch = vtodoStartRe.match(ics);
             if (!vtodoStartMatch.hasMatch()) {
-                failWithError(422, tr("Invalid CalDAV VTODO response"));
+                failWithError(statusCode, tr("Invalid CalDAV VTODO response"));
                 return;
             }
             const int vtodoStart = vtodoStartMatch.capturedStart(1);
@@ -4247,7 +4247,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
             static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
             const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
             if (!vtodoEndMatch.hasMatch()) {
-                failWithError(422, tr("Invalid CalDAV VTODO response"));
+                failWithError(statusCode, tr("Invalid CalDAV VTODO response"));
                 return;
             }
             const int vtodoEnd = vtodoEndMatch.capturedStart(1);

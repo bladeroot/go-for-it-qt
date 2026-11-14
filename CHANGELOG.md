@@ -13,8 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mini player: detached window as an independent top-level window and integrated KWin Scripting to keep the mini player always on top and across all workspaces under Wayland without modifying foreign application windows (KB-96, KB-97).
 - Mini player: resolved duplicate `Ctrl+M` shortcut conflict in `Main.qml` (KB-93).
 - Keyboard navigation: pressing `Enter`/`Return` inside text editors or spin boxes no longer opens task details dialog, and pressing `Enter` on the To-Do list now opens the highlighted active task (KB-91, KB-92).
-- Localization: added missing translation strings across all supported languages (uk, de, fr, es, it) and sorted dictionaries for fast binary lookup in `QJsonObject` (KB-94).
+- Localization: added 7 missing translation strings (ambient mode help, task details hint, Jira transition and invalid number messages, heatmap weekday labels) to all supported languages (uk, de, fr, es, it) (KB-94).
+- Localization: added missing translation for CalDAV VTODO response error and preserved actual server status codes (KB-104).
+- Mini player: executed KWin Scripting calls asynchronously without blocking the UI thread (KB-100), ensuring the temporary script file stays readable until evaluation completes with unique plugin identifiers (KB-102).
+- TUI: corrected project and context line rendering on dashboard view that previously printed raw format placeholders (KB-103).
+- Nextcloud: a failed status push (network or HTTP error while reading the task, or a response without a VTODO) is now reported in the status bar instead of failing silently (KB-98).
+- Dashboard: the activity heatmap now always starts on a Monday and ends today, instead of showing future days or leaving out the most recent days (KB-99).
 - Tests: anchored analytics dashboard test timestamps to prevent rollover failures after local midnight (KB-95).
+- Tests: network tests that lift test mode now restore it with an RAII guard, also when an assertion fails (KB-101).
 
 ---
 

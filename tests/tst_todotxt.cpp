@@ -13,6 +13,9 @@
 #include "todotxt/TaskStoreModel.h"
 #include "todotxt/TxtTask.h"
 #include "tui/TuiApp.h"
+#include <QDBusConnection>
+#include <QDBusContext>
+#include <QDBusMessage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -38,6 +41,11 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <atomic>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
+#include <poll.h>
 
 using namespace gofi;
 
@@ -152,6 +160,170 @@ inline bool copyBuiltQmlTree(const QString& dstRoot) {
     }
     return copied;
 }
+
+
+// Minimal model of KWin's scripting D-Bus API (kwin src/scripting/scripting.cpp):
+// - Scripting.loadScript(path, name) only stores the path and returns -1 if `name` is still loaded;
+// - Script.run() reads the file asynchronously and answers with a delayed reply after evaluation;
+//   an unreadable file is never evaluated;
+// - Scripting.unloadScript(name) drops the script, and a load still in flight is never evaluated.
+class FakeKWinScripting;
+
+class FakeKWinScript : public QObject, protected QDBusContext {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.kwin.Script")
+public:
+    FakeKWinScript(FakeKWinScripting* owner, const QString& path, const QString& name)
+        : QObject(nullptr), m_owner(owner), m_path(path), m_name(name) {}
+    QString pluginName() const { return m_name; }
+    bool unloaded = false;
+public slots:
+    Q_SCRIPTABLE void run();
+private:
+    FakeKWinScripting* m_owner;
+    QString m_path;
+    QString m_name;
+};
+
+class FakeKWinScripting : public QObject {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.kwin.Scripting")
+public:
+    explicit FakeKWinScripting(const QDBusConnection& conn) : m_conn(conn) {}
+    ~FakeKWinScripting() override {
+        for (int i = 0; i < m_scripts.size(); ++i) {
+            m_conn.unregisterObject(QStringLiteral("/Scripting/Script%1").arg(i));
+        }
+        qDeleteAll(m_scripts);
+    }
+    QStringList executed;   // contents of the scripts KWin actually evaluated
+    int unreadable = 0;     // runs that found the script file missing
+    int unloads = 0;
+public slots:
+    Q_SCRIPTABLE int loadScript(const QString& filePath, const QString& pluginName) {
+        for (FakeKWinScript* sc : std::as_const(m_scripts)) {
+            if (!sc->unloaded && sc->pluginName() == pluginName) return -1;
+        }
+        const int id = static_cast<int>(m_scripts.size());
+        auto* sc = new FakeKWinScript(this, filePath, pluginName);
+        m_scripts.append(sc);
+        m_conn.registerObject(QStringLiteral("/Scripting/Script%1").arg(id), sc, QDBusConnection::ExportScriptableSlots);
+        return id;
+    }
+    Q_SCRIPTABLE bool unloadScript(const QString& pluginName) {
+        ++unloads;
+        for (FakeKWinScript* sc : std::as_const(m_scripts)) {
+            if (!sc->unloaded && sc->pluginName() == pluginName) {
+                sc->unloaded = true;
+                return true;
+            }
+        }
+        return false;
+    }
+private:
+    QDBusConnection m_conn;
+    QList<FakeKWinScript*> m_scripts;
+};
+
+void FakeKWinScript::run() {
+    setDelayedReply(true);
+    const QDBusMessage msg = message();
+    QDBusConnection conn = connection();
+    QPointer<FakeKWinScript> self(this);
+    // KWin reads the file on a worker thread; model the latency so the order is deterministic.
+    QTimer::singleShot(30, this, [self, msg, conn]() mutable {
+        if (!self || self->unloaded) return; // unloaded while loading: never evaluated, never answered
+        QFile f(self->m_path);
+        if (!f.open(QIODevice::ReadOnly)) {
+            ++self->m_owner->unreadable;
+            conn.send(msg.createErrorReply(QStringLiteral("org.kde.kwin.Scripting.FileError"), QStringLiteral("unreadable")));
+            return;
+        }
+        self->m_owner->executed.append(QString::fromUtf8(f.readAll()));
+        conn.send(msg.createReply());
+    });
+}
+
+// Private dbus-daemon so D-Bus tests never touch the user's session bus.
+struct PrivateDBus {
+    QProcess daemon;
+    QString address;
+    PrivateDBus() {
+        daemon.start(QStringLiteral("dbus-daemon"),
+                     {QStringLiteral("--session"), QStringLiteral("--nofork"), QStringLiteral("--print-address=1")});
+        if (daemon.waitForStarted(3000) && daemon.waitForReadyRead(3000)) {
+            address = QString::fromUtf8(daemon.readLine()).trimmed();
+        }
+    }
+    ~PrivateDBus() {
+        daemon.terminate();
+        if (!daemon.waitForFinished(3000)) {
+            daemon.kill();
+            daemon.waitForFinished(3000);
+        }
+    }
+};
+
+// Runs a TuiApp on a pseudo-terminal: stdin/stdout are redirected to the pty slave and everything
+// written to the terminal is collected from the master by a reader thread. Restores fds on exit.
+struct PtyTerminal {
+    int master = -1;
+    int slave = -1;
+    int savedStdin = -1;
+    int savedStdout = -1;
+    QByteArray captured;
+    std::mutex mutex;
+    std::atomic<bool> stop{false};
+    std::thread reader;
+
+    bool open(int rows, int cols) {
+        master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        if (master < 0 || ::grantpt(master) != 0 || ::unlockpt(master) != 0) return false;
+        slave = ::open(::ptsname(master), O_RDWR | O_NOCTTY);
+        if (slave < 0) return false;
+        struct winsize ws {};
+        ws.ws_row = static_cast<unsigned short>(rows);
+        ws.ws_col = static_cast<unsigned short>(cols);
+        ::ioctl(slave, TIOCSWINSZ, &ws);
+        reader = std::thread([this]() {
+            char buf[65536];
+            while (!stop.load()) {
+                struct pollfd pfd { master, POLLIN, 0 };
+                if (::poll(&pfd, 1, 20) > 0) {
+                    const ssize_t n = ::read(master, buf, sizeof buf);
+                    if (n > 0) {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        captured.append(buf, n);
+                    }
+                }
+            }
+        });
+        std::fflush(stdout);
+        savedStdin = ::dup(STDIN_FILENO);
+        savedStdout = ::dup(STDOUT_FILENO);
+        ::dup2(slave, STDIN_FILENO);
+        ::dup2(slave, STDOUT_FILENO);
+        return true;
+    }
+    void type(const QByteArray& keys) {
+        (void)::write(master, keys.constData(), static_cast<size_t>(keys.size()));
+    }
+    QByteArray takeOutput() {
+        std::lock_guard<std::mutex> lock(mutex);
+        QByteArray out = captured;
+        captured.clear();
+        return out;
+    }
+    ~PtyTerminal() {
+        std::fflush(stdout);
+        if (savedStdin >= 0) { ::dup2(savedStdin, STDIN_FILENO); ::close(savedStdin); }
+        if (savedStdout >= 0) { ::dup2(savedStdout, STDOUT_FILENO); ::close(savedStdout); }
+        stop = true;
+        if (reader.joinable()) reader.join();
+        if (slave >= 0) ::close(slave);
+        if (master >= 0) ::close(master);
+    }
+};
 
 class TestTodoTxt : public QObject {
     Q_OBJECT
@@ -7484,6 +7656,7 @@ private slots:
             QStringLiteral("Unknown ambient mode. Available: none, white, rain, ocean, clock"),
             QStringLiteral("Double-click or press Enter to view description & comments"),
             QStringLiteral("No matching Jira transition to update status of %1; status was not changed on %2."),
+            QStringLiteral("Invalid CalDAV VTODO response"),
             QStringLiteral("Invalid number: \"%1\" (value unchanged)"),
             QStringLiteral("Mon"),
             QStringLiteral("Wed"),
@@ -7742,6 +7915,108 @@ private slots:
         for (int i = 1; i < initial.size(); ++i) {
             QVERIFY2(verifyUntouched(i), qPrintable(initial.at(i).caption));
         }
+    }
+    // KB-102: since KB-100 (177089d) executeKWinPinScript keeps the temporary script file only in
+    // the loadScript reply handler, so the file is deleted right after `run` is sent. KWin's
+    // Script::run() reads the file asynchronously and answers only after evaluating it, so it finds
+    // no file and never runs the pin script. The plugin name (`gofi_pin_<pid>_<msecs>`) is also
+    // reused by calls in the same millisecond (one mini player show calls it twice): KWin answers
+    // -1, the code runs /Scripting/Script-1 and then unloads the *first* script by that name.
+    void testKWinScriptFileStaysReadableUntilRunAndNamesAreUnique() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("kb102_fake_kwin");
+        const QString clientName = QStringLiteral("kb102_client");
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.kde.KWin");
+            FakeKWinScripting kwin(fakeConn);
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerObject(QStringLiteral("/Scripting"), &kwin, QDBusConnection::ExportScriptableSlots));
+
+            const QString title = QStringLiteral("Go for It — Mini Player");
+            const QString pinScript = DesktopIntegration::kwinPinScript(title, true);
+            const QString unpinScript = DesktopIntegration::kwinPinScript(title, false);
+
+            // 1. One script: KWin must be able to read and evaluate it.
+            DesktopIntegration::runKWinScript(pinScript, clientConn, service);
+            QTRY_VERIFY_WITH_TIMEOUT(kwin.unloads >= 1, 3000);
+            QCOMPARE(kwin.unreadable, 0);
+            QCOMPARE(kwin.executed, QStringList{pinScript});
+
+            // 2. Two scripts started in the same event-loop pass (as the mini player does on show):
+            //    both must be evaluated.
+            kwin.executed.clear();
+            DesktopIntegration::runKWinScript(pinScript, clientConn, service);
+            DesktopIntegration::runKWinScript(unpinScript, clientConn, service);
+            QTRY_VERIFY_WITH_TIMEOUT(kwin.unloads >= 3, 3000);
+            QTest::qWait(100);
+            QCOMPARE(kwin.unreadable, 0);
+            QCOMPARE(kwin.executed.size(), 2);
+            QVERIFY(kwin.executed.contains(pinScript));
+            QVERIFY(kwin.executed.contains(unpinScript));
+
+            fakeConn.unregisterObject(QStringLiteral("/Scripting"));
+            fakeConn.unregisterService(service);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+    }
+
+    // KB-103: the TUI dashboard formats project and context lines with
+    // QStringLiteral("  +%-16s [%1] %2%  (%3)"). `%-16s` is printf syntax that QString::arg ignores,
+    // so the line shows a literal "%-16s", the name where the bar belongs, the bar where the
+    // percentage belongs, the percentage instead of the time, and drops the time.
+    void testTuiDashboardProjectAndContextLinesAreFormatted() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb103_tui.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString list = ctrl.listManager()->addList(QStringLiteral("KB103"));
+        ctrl.selectListById(list);
+        const QDateTime noon = QDateTime(QDate::currentDate(), QTime(12, 0, 0), QTimeZone::systemTimeZone()).toUTC();
+        QVERIFY(DatabaseManager::instance().insertActivityLog(list, QStringLiteral("KB103"), -1, QString(),
+                QStringLiteral("Write API +backend @office"), noon.addSecs(-3700), 3600, noon.addSecs(-100), false, false) > 0);
+
+        QStringList projectLines;
+        QStringList contextLines;
+        QString screen;
+        {
+            PtyTerminal term;
+            QVERIFY(term.open(60, 140));
+            TuiApp tui(&ctrl);
+            QVERIFY(tui.start());
+            QTest::qWait(100);
+            term.takeOutput();
+            term.type("U");
+            QTest::qWait(300);
+            screen = QString::fromUtf8(term.takeOutput());
+        }
+        // Several frames may have been rendered; every frame starts with ESC[H. Keep the last one.
+        const qsizetype lastFrame = screen.lastIndexOf(QStringLiteral("\x1b[H"));
+        if (lastFrame >= 0) screen = screen.mid(lastFrame);
+        screen.remove(QRegularExpression(QStringLiteral("\x1b\\[[0-9;?]*[A-Za-z]")));
+        for (const QString& line : screen.split(QRegularExpression(QStringLiteral("[\r\n]+")))) {
+            if (line.contains(QStringLiteral("Write API"))) continue; // the TOP TASKS line
+            if (line.contains(QStringLiteral("backend"))) projectLines << line;
+            if (line.contains(QStringLiteral("office"))) contextLines << line;
+        }
+        QVERIFY2(screen.contains(QStringLiteral("Write API +backend @office")), qPrintable(screen.left(2000)));
+        QCOMPARE(projectLines.size(), 1);
+        QCOMPARE(contextLines.size(), 1);
+        for (const QString& line : {projectLines.first(), contextLines.first()}) {
+            QVERIFY2(!line.contains(QLatin1Char('%') + QStringLiteral("-16s")), qPrintable(line));
+            QVERIFY2(line.contains(QStringLiteral("+backend")) || line.contains(QStringLiteral("@office")), qPrintable(line));
+            QVERIFY2(line.contains(QStringLiteral("100.0%")), qPrintable(line));
+            QVERIFY2(line.contains(QStringLiteral("(1h 00m)")), qPrintable(line));
+            QVERIFY2(line.contains(QStringLiteral("[") + QString(20, QChar(0x2588)) + QStringLiteral("]")), qPrintable(line));
+        }
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
     }
 };
 

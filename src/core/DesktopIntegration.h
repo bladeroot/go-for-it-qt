@@ -7,6 +7,8 @@
 #include <QObject>
 #include <QSystemTrayIcon>
 
+class QDBusConnection;
+
 namespace gofi {
 
 class AppController;
@@ -26,6 +28,8 @@ public:
     [[nodiscard]] bool kwinIntegrationAvailable() const;
     void setKWinWindowProperties(QWindow* win, bool alwaysOnTop);
     // KWin script that applies the mini player keep-above state; `windowTitle` is the raw title.
+    // Loads, runs and unloads `script` through the KWin Scripting D-Bus API of `service` on `connection`.
+    static void runKWinScript(const QString& script, const QDBusConnection& connection, const QString& service);
     [[nodiscard]] static QString kwinPinScript(const QString& windowTitle, bool alwaysOnTop);
     [[nodiscard]] QMenu* trayMenu() const noexcept { return m_trayMenu; }
     [[nodiscard]] QAction* toggleMiniPlayerAction() const noexcept { return m_toggleMiniPlayerAction; }

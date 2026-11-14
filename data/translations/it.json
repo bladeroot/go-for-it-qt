@@ -293,6 +293,7 @@
   "Import": "Importa",
   "In Progress": "In corso",
   "Invalid number: \"%1\" (value unchanged)": "Numero non valido: «%1» (valore invariato)",
+  "Invalid CalDAV VTODO response": "Risposta CalDAV VTODO non valida",
   "JQL Filter (optional):": "Filtro JQL (opzionale):",
   "JetBrains YouTrack": "JetBrains YouTrack",
   "Jira (Cloud / Data Center)": "Jira (Cloud / Data Center)",
