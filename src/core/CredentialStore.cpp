@@ -166,39 +166,31 @@ QString CredentialStore::loadFromKeyring(const QString& listId) const {
     }
 
     QDBusConnection bus = activeBus();
-    auto searchForKeyringItems = [&](const QString& appName) -> QList<QDBusObjectPath> {
-        QDBusMessage searchMsg = QDBusMessage::createMethodCall(
-            m_serviceName,
-            QStringLiteral("/org/freedesktop/secrets"),
-            QStringLiteral("org.freedesktop.Secret.Service"),
-            QStringLiteral("SearchItems")
-        );
-        StringStringMap attributes;
-        attributes.insert(QStringLiteral("application"), appName);
-        attributes.insert(QStringLiteral("list_id"), listId);
-        searchMsg << QVariant::fromValue(attributes);
+    QDBusMessage searchMsg = QDBusMessage::createMethodCall(
+        m_serviceName,
+        QStringLiteral("/org/freedesktop/secrets"),
+        QStringLiteral("org.freedesktop.Secret.Service"),
+        QStringLiteral("SearchItems")
+    );
+    StringStringMap attributes;
+    attributes.insert(QStringLiteral("application"), QStringLiteral("go-for-it-qt"));
+    attributes.insert(QStringLiteral("list_id"), listId);
+    searchMsg << QVariant::fromValue(attributes);
 
-        const QDBusMessage searchReply = bus.call(searchMsg, QDBus::BlockWithGui, 1000);
-        if (searchReply.type() != QDBusMessage::ReplyMessage || searchReply.arguments().isEmpty()) {
-            return {};
-        }
+    const QDBusMessage searchReply = bus.call(searchMsg, QDBus::BlockWithGui, 1000);
+    if (searchReply.type() != QDBusMessage::ReplyMessage || searchReply.arguments().isEmpty()) {
+        return {};
+    }
 
-        QList<QDBusObjectPath> unlocked;
-        const QVariant unlockedVar = searchReply.arguments().at(0);
-        if (unlockedVar.canConvert<QList<QDBusObjectPath>>()) {
-            unlocked = unlockedVar.value<QList<QDBusObjectPath>>();
-        } else if (unlockedVar.canConvert<QDBusArgument>()) {
-            const QDBusArgument arg = unlockedVar.value<QDBusArgument>();
-            arg >> unlocked;
-        } else {
-            unlocked = qdbus_cast<QList<QDBusObjectPath>>(unlockedVar);
-        }
-        return unlocked;
-    };
-
-    QList<QDBusObjectPath> unlocked = searchForKeyringItems(QStringLiteral("go-for-it-qt"));
-    if (unlocked.isEmpty()) {
-        unlocked = searchForKeyringItems(QStringLiteral("go-for-it"));
+    QList<QDBusObjectPath> unlocked;
+    const QVariant unlockedVar = searchReply.arguments().at(0);
+    if (unlockedVar.canConvert<QList<QDBusObjectPath>>()) {
+        unlocked = unlockedVar.value<QList<QDBusObjectPath>>();
+    } else if (unlockedVar.canConvert<QDBusArgument>()) {
+        const QDBusArgument arg = unlockedVar.value<QDBusArgument>();
+        arg >> unlocked;
+    } else {
+        unlocked = qdbus_cast<QList<QDBusObjectPath>>(unlockedVar);
     }
     if (unlocked.isEmpty()) {
         return {};
@@ -234,43 +226,41 @@ bool CredentialStore::deleteFromKeyring(const QString& listId) {
         return false;
     }
     QDBusConnection bus = activeBus();
-    for (const QString& appName : {QStringLiteral("go-for-it-qt"), QStringLiteral("go-for-it")}) {
-        QDBusMessage searchMsg = QDBusMessage::createMethodCall(
+    QDBusMessage searchMsg = QDBusMessage::createMethodCall(
+        m_serviceName,
+        QStringLiteral("/org/freedesktop/secrets"),
+        QStringLiteral("org.freedesktop.Secret.Service"),
+        QStringLiteral("SearchItems")
+    );
+
+    StringStringMap attributes;
+    attributes.insert(QStringLiteral("application"), QStringLiteral("go-for-it-qt"));
+    attributes.insert(QStringLiteral("list_id"), listId);
+    searchMsg << QVariant::fromValue(attributes);
+
+    const QDBusMessage searchReply = bus.call(searchMsg, QDBus::BlockWithGui, 1000);
+    if (searchReply.type() != QDBusMessage::ReplyMessage || searchReply.arguments().isEmpty()) {
+        return false;
+    }
+
+    QList<QDBusObjectPath> unlocked;
+    const QVariant unlockedVar = searchReply.arguments().at(0);
+    if (unlockedVar.canConvert<QList<QDBusObjectPath>>()) {
+        unlocked = unlockedVar.value<QList<QDBusObjectPath>>();
+    } else if (unlockedVar.canConvert<QDBusArgument>()) {
+        const QDBusArgument arg = unlockedVar.value<QDBusArgument>();
+        arg >> unlocked;
+    } else {
+        unlocked = qdbus_cast<QList<QDBusObjectPath>>(unlockedVar);
+    }
+    for (const auto& item : unlocked) {
+        QDBusMessage delMsg = QDBusMessage::createMethodCall(
             m_serviceName,
-            QStringLiteral("/org/freedesktop/secrets"),
-            QStringLiteral("org.freedesktop.Secret.Service"),
-            QStringLiteral("SearchItems")
+            item.path(),
+            QStringLiteral("org.freedesktop.Secret.Item"),
+            QStringLiteral("Delete")
         );
-
-        StringStringMap attributes;
-        attributes.insert(QStringLiteral("application"), appName);
-        attributes.insert(QStringLiteral("list_id"), listId);
-        searchMsg << QVariant::fromValue(attributes);
-
-        const QDBusMessage searchReply = bus.call(searchMsg, QDBus::BlockWithGui, 1000);
-        if (searchReply.type() != QDBusMessage::ReplyMessage || searchReply.arguments().isEmpty()) {
-            continue;
-        }
-
-        QList<QDBusObjectPath> unlocked;
-        const QVariant unlockedVar = searchReply.arguments().at(0);
-        if (unlockedVar.canConvert<QList<QDBusObjectPath>>()) {
-            unlocked = unlockedVar.value<QList<QDBusObjectPath>>();
-        } else if (unlockedVar.canConvert<QDBusArgument>()) {
-            const QDBusArgument arg = unlockedVar.value<QDBusArgument>();
-            arg >> unlocked;
-        } else {
-            unlocked = qdbus_cast<QList<QDBusObjectPath>>(unlockedVar);
-        }
-        for (const auto& item : unlocked) {
-            QDBusMessage delMsg = QDBusMessage::createMethodCall(
-                m_serviceName,
-                item.path(),
-                QStringLiteral("org.freedesktop.Secret.Item"),
-                QStringLiteral("Delete")
-            );
-            bus.call(delMsg, QDBus::BlockWithGui, 1000);
-        }
+        bus.call(delMsg, QDBus::BlockWithGui, 1000);
     }
     return true;
 }
