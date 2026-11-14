@@ -70,6 +70,7 @@ private:
     bool writeFallbackJson(const QJsonObject& root);
 
     QString defaultFallbackFilePath() const;
+    QString currentDbScope() const;
     QDBusConnection activeBus() const;
 
     QString m_fallbackPath;

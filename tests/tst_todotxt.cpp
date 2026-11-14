@@ -3,6 +3,7 @@
 #include "core/AnalyticsService.h"
 #include "core/AppController.h"
 #include "core/CredentialStore.h"
+#include <QSet>
 #include "core/DesktopIntegration.h"
 #include "core/IssueTrackerService.h"
 #include "core/NotificationService.h"
@@ -255,6 +256,8 @@ public:
     };
 
     QMap<QString, ItemData> items;
+    QSet<QString> lockedPaths;
+    int unlockCalls = 0;
     int nextId = 0;
 
     QString introspect(const QString&) const override { return {}; }
@@ -276,13 +279,16 @@ public:
             ItemData data;
             data.path = itemPath;
             if (!msg.arguments().isEmpty()) {
-                const QVariantMap props = msg.arguments().at(0).toMap();
-                const QVariant attrVar = props.value(QStringLiteral("org.freedesktop.Secret.Item.Attributes"));
-                if (attrVar.canConvert<StringStringMap>()) {
-                    data.attributes = attrVar.value<StringStringMap>();
-                } else if (attrVar.canConvert<QDBusArgument>()) {
+                const QVariantMap props = qdbus_cast<QVariantMap>(msg.arguments().at(0));
+                QVariant attrVar = props.value(QStringLiteral("org.freedesktop.Secret.Item.Attributes"));
+                if (attrVar.userType() == qMetaTypeId<QDBusVariant>()) {
+                    attrVar = attrVar.value<QDBusVariant>().variant();
+                }
+                if (attrVar.userType() == qMetaTypeId<QDBusArgument>()) {
                     const QDBusArgument arg = attrVar.value<QDBusArgument>();
                     arg >> data.attributes;
+                } else {
+                    data.attributes = attrVar.value<StringStringMap>();
                 }
             }
             if (msg.arguments().size() > 1) {
@@ -307,17 +313,18 @@ public:
             StringStringMap searchAttrs;
             if (!msg.arguments().isEmpty()) {
                 const QVariant aVar = msg.arguments().at(0);
-                if (aVar.canConvert<StringStringMap>()) {
-                    searchAttrs = aVar.value<StringStringMap>();
-                } else if (aVar.canConvert<QDBusArgument>()) {
+                if (aVar.userType() == qMetaTypeId<QDBusArgument>()) {
                     const QDBusArgument arg = aVar.value<QDBusArgument>();
                     arg >> searchAttrs;
+                } else {
+                    searchAttrs = aVar.value<StringStringMap>();
                 }
             }
             QList<QDBusObjectPath> unlocked;
+            QList<QDBusObjectPath> locked;
             for (auto it = items.cbegin(); it != items.cend(); ++it) {
-                bool matches = true;
-                if (!it.value().attributes.isEmpty() && !searchAttrs.isEmpty()) {
+                bool matches = !searchAttrs.isEmpty();
+                if (matches) {
                     for (auto a = searchAttrs.cbegin(); a != searchAttrs.cend(); ++a) {
                         if (it.value().attributes.value(a.key()) != a.value()) {
                             matches = false;
@@ -326,17 +333,45 @@ public:
                     }
                 }
                 if (matches) {
-                    unlocked.append(QDBusObjectPath(it.value().path));
+                    if (lockedPaths.contains(it.value().path)) {
+                        locked.append(QDBusObjectPath(it.value().path));
+                    } else {
+                        unlocked.append(QDBusObjectPath(it.value().path));
+                    }
                 }
             }
             QDBusMessage reply = msg.createReply();
             reply << QVariant::fromValue(unlocked)
-                  << QVariant::fromValue(QList<QDBusObjectPath>());
+                  << QVariant::fromValue(locked);
+            conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("Unlock")) {
+            ++unlockCalls;
+            QList<QDBusObjectPath> requested;
+            if (!msg.arguments().isEmpty()) {
+                const QVariant v = msg.arguments().at(0);
+                if (v.canConvert<QDBusArgument>()) {
+                    v.value<QDBusArgument>() >> requested;
+                } else {
+                    requested = qdbus_cast<QList<QDBusObjectPath>>(v);
+                }
+            }
+            for (const auto& p : requested) {
+                lockedPaths.remove(p.path());
+            }
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(requested)
+                  << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")));
             conn.send(reply);
             return true;
         }
         if (member == QStringLiteral("GetSecret")) {
             const QString path = msg.path();
+            if (lockedPaths.contains(path)) {
+                conn.send(msg.createErrorReply(QStringLiteral("org.freedesktop.Secret.Error.IsLocked"), QStringLiteral("locked")));
+                return true;
+            }
             ItemData data = items.value(path);
             gofi::SecretServiceSecret sec;
             if (!msg.arguments().isEmpty()) {
@@ -8326,6 +8361,134 @@ private slots:
         QDBusConnection::disconnectFromBus(clientName);
         gofi::CredentialStore::instance().setFallbackFilePath(QString());
         QFile::remove(credsPath);
+    }
+
+    void testCredentialStoreDoesNotUseSessionKeyringInTestMode() {
+        // Tests must never read or write the user's real keyring (KWallet / GNOME Keyring) on the session bus.
+        auto& store = gofi::CredentialStore::instance();
+        store.resetDBusConnection();
+        QVERIFY2(!store.isKeyringAvailable(),
+                 "CredentialStore reports the session-bus Secret Service as available in test mode");
+    }
+
+    void testCredentialStoreUnlocksLockedKeyringItems() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_locked_fake");
+        const QString clientName = QStringLiteral("cs_locked_client");
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("cs_locked_fallback.json"));
+        QFile::remove(credsPath);
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.freedesktop.secrets");
+            FakeSecretService fakeSecrets;
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+
+            auto& store = gofi::CredentialStore::instance();
+            store.setInMemoryMode(false);
+            store.setFallbackFilePath(credsPath);
+            store.setDBusConnection(clientConn, service);
+
+            // A token stored in an earlier session; the collection is locked now (e.g. wallet not opened yet).
+            QVERIFY(store.storeToken(QStringLiteral("cs_locked_list"), QStringLiteral("pat_locked_secret")));
+            QCOMPARE(fakeSecrets.items.size(), 1);
+            fakeSecrets.lockedPaths.insert(fakeSecrets.items.firstKey());
+
+            const QString loaded = store.loadToken(QStringLiteral("cs_locked_list"));
+            const int unlockCalls = fakeSecrets.unlockCalls;
+
+            store.resetDBusConnection();
+            fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+            fakeConn.unregisterService(service);
+
+            QCOMPARE(unlockCalls, 1);
+            QCOMPARE(loaded, QStringLiteral("pat_locked_secret"));
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+        gofi::CredentialStore::instance().setFallbackFilePath(QString());
+        QFile::remove(credsPath);
+    }
+
+    void testRemovingListInDatabaseCopyKeepsOriginalToken() {
+        // A copy of the database (`--db` experiment, imported backup, relocated copy) has the same list ids.
+        // Removing a list there must not delete the original database's token, neither in the keyring nor in
+        // the per-directory credentials.json fallback.
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_copy_fake");
+        const QString clientName = QStringLiteral("cs_copy_client");
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_copy_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString originalDb = dir.filePath(QStringLiteral("original.db"));
+        const QString copyDb = dir.filePath(QStringLiteral("copy.db"));
+        const QString listId = QStringLiteral("cs_shared_list");
+
+        auto run = [&](bool withKeyring, const QString& token) -> QString {
+            QFile::remove(originalDb);
+            QFile::remove(copyDb);
+            QFile::remove(dir.filePath(QStringLiteral("credentials.json")));
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            const QString service = QStringLiteral("org.freedesktop.secrets");
+            FakeSecretService fakeSecrets;
+            if (withKeyring) {
+                fakeConn.registerService(service);
+                fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath);
+            }
+            auto& store = gofi::CredentialStore::instance();
+            store.setDBusConnection(clientConn, service);
+
+            auto& db = DatabaseManager::instance();
+            QString loaded = QStringLiteral("<not loaded>");
+            if (db.initialize(originalDb)) {
+                gofi::TodoListEntry entry;
+                entry.id = listId;
+                entry.name = QStringLiteral("Tracker");
+                entry.provider = QStringLiteral("GitHub");
+                entry.jiraUrl = QStringLiteral("https://example.invalid");
+                entry.apiToken = token;
+                db.saveList(entry, 0);
+                db.close();
+                QFile::copy(originalDb, copyDb);
+
+                if (db.initialize(copyDb)) {
+                    db.removeList(listId);
+                    db.close();
+                }
+                if (db.initialize(originalDb)) {
+                    loaded.clear();
+                    for (const auto& e : db.loadLists()) {
+                        if (e.id == listId) {
+                            loaded = e.apiToken;
+                        }
+                    }
+                    db.close();
+                }
+            }
+            store.resetDBusConnection();
+            store.setFallbackFilePath(QString());
+            if (withKeyring) {
+                fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+                fakeConn.unregisterService(service);
+            }
+            QDBusConnection::disconnectFromBus(fakeName);
+            QDBusConnection::disconnectFromBus(clientName);
+            return loaded;
+        };
+
+        const QString keyringToken = run(true, QStringLiteral("pat_keyring_original"));
+        const QString fileToken = run(false, QStringLiteral("pat_file_original"));
+        QCOMPARE(keyringToken, QStringLiteral("pat_keyring_original"));
+        QCOMPARE(fileToken, QStringLiteral("pat_file_original"));
     }
 };
 

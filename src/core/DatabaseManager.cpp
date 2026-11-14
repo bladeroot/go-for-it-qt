@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QFile>
@@ -453,9 +454,11 @@ bool DatabaseManager::relocateDatabase(const QString& newDbPath, bool copyExisti
 
     QFileInfo(cleanTarget).dir().mkpath(QStringLiteral("."));
     const QString oldPath = m_dbPath;
+    QVector<TodoListEntry> existingEntries;
 
     if (copyExisting && !oldPath.isEmpty() && QFile::exists(oldPath)) {
         if (isOpen()) {
+            existingEntries = loadLists();
             QSqlQuery checkpointQ(db());
             checkpointQ.exec(QStringLiteral("PRAGMA wal_checkpoint(FULL);"));
         }
@@ -486,20 +489,122 @@ bool DatabaseManager::relocateDatabase(const QString& newDbPath, bool copyExisti
             }
             QFile::remove(tempTarget);
         }
-
-        const QString oldCreds = QFileInfo(oldPath).dir().filePath(QStringLiteral("credentials.json"));
-        const QString newCreds = QFileInfo(cleanTarget).dir().filePath(QStringLiteral("credentials.json"));
-        if (QFile::exists(oldCreds) && oldCreds != newCreds) {
-            if (QFile::exists(newCreds)) QFile::remove(newCreds);
-            if (QFile::copy(oldCreds, newCreds)) {
-                QFile::setPermissions(newCreds, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-                QFile::remove(oldCreds);
-            }
-        }
     }
 
     if (!initialize(cleanTarget)) {
         return false;
+    }
+
+    if (copyExisting && !oldPath.isEmpty()) {
+        const QString oldCreds = QFileInfo(oldPath).dir().filePath(QStringLiteral("credentials.json"));
+        const QString newCreds = QFileInfo(cleanTarget).dir().filePath(QStringLiteral("credentials.json"));
+
+        if (QFile::exists(oldCreds)) {
+            QFile oldF(oldCreds);
+            if (oldF.open(QIODevice::ReadOnly)) {
+                const QJsonDocument oldDoc = QJsonDocument::fromJson(oldF.readAll());
+                oldF.close();
+                if (oldDoc.isObject()) {
+                    QJsonObject oldRoot = oldDoc.object();
+                    QJsonObject oldTokens = oldRoot.value(QStringLiteral("tokens")).toObject();
+
+                    QJsonObject newRoot;
+                    QJsonObject newTokens;
+                    if (QFile::exists(newCreds)) {
+                        QFile newF(newCreds);
+                        if (newF.open(QIODevice::ReadOnly)) {
+                            const QJsonDocument newDoc = QJsonDocument::fromJson(newF.readAll());
+                            newF.close();
+                            if (newDoc.isObject()) {
+                                newRoot = newDoc.object();
+                                newTokens = newRoot.value(QStringLiteral("tokens")).toObject();
+                            }
+                        }
+                    }
+
+                    const QString oldCanonical = QFileInfo(oldPath).canonicalFilePath();
+                    const QString oldAbs = QFileInfo(oldPath).absoluteFilePath();
+                    const QString newCanonical = QFileInfo(cleanTarget).canonicalFilePath();
+                    const QString targetScope = newCanonical.isEmpty() ? cleanTarget : newCanonical;
+
+                    QVector<QString> keysToRemoveFromOld;
+                    for (auto it = oldTokens.begin(); it != oldTokens.end(); ++it) {
+                        const QString key = it.key();
+                        QString listIdPart;
+                        bool belongsToOldDb = false;
+                        if (!oldCanonical.isEmpty() && key.startsWith(oldCanonical + QStringLiteral(":"))) {
+                            listIdPart = key.mid(oldCanonical.length() + 1);
+                            belongsToOldDb = true;
+                        } else if (key.startsWith(oldAbs + QStringLiteral(":"))) {
+                            listIdPart = key.mid(oldAbs.length() + 1);
+                            belongsToOldDb = true;
+                        } else if (!key.contains(QStringLiteral(":"))) {
+                            listIdPart = key;
+                            belongsToOldDb = true;
+                        }
+
+                        if (belongsToOldDb) {
+                            const QString newKey = QStringLiteral("%1:%2").arg(targetScope, listIdPart);
+                            newTokens[newKey] = it.value();
+                            keysToRemoveFromOld.append(key);
+                        }
+                    }
+
+                    if (oldCreds == newCreds) {
+                        for (const QString& k : keysToRemoveFromOld) {
+                            oldTokens.remove(k);
+                        }
+                        for (auto it = newTokens.begin(); it != newTokens.end(); ++it) {
+                            oldTokens[it.key()] = it.value();
+                        }
+                        oldRoot[QStringLiteral("version")] = 1;
+                        oldRoot[QStringLiteral("tokens")] = oldTokens;
+
+                        QSaveFile saveFile(oldCreds);
+                        if (saveFile.open(QIODevice::WriteOnly)) {
+                            QFile::setPermissions(saveFile.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                            saveFile.write(QJsonDocument(oldRoot).toJson(QJsonDocument::Indented));
+                            saveFile.commit();
+                            QFile::setPermissions(oldCreds, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                        }
+                    } else {
+                        newRoot[QStringLiteral("version")] = 1;
+                        newRoot[QStringLiteral("tokens")] = newTokens;
+
+                        QSaveFile saveNew(newCreds);
+                        if (saveNew.open(QIODevice::WriteOnly)) {
+                            QFile::setPermissions(saveNew.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                            saveNew.write(QJsonDocument(newRoot).toJson(QJsonDocument::Indented));
+                            if (saveNew.commit()) {
+                                QFile::setPermissions(newCreds, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                                for (const QString& k : keysToRemoveFromOld) {
+                                    oldTokens.remove(k);
+                                }
+                                if (oldTokens.isEmpty()) {
+                                    QFile::remove(oldCreds);
+                                } else {
+                                    oldRoot[QStringLiteral("tokens")] = oldTokens;
+                                    QSaveFile saveOld(oldCreds);
+                                    if (saveOld.open(QIODevice::WriteOnly)) {
+                                        QFile::setPermissions(saveOld.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                                        saveOld.write(QJsonDocument(oldRoot).toJson(QJsonDocument::Indented));
+                                        saveOld.commit();
+                                        QFile::setPermissions(oldCreds, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        auto& store = CredentialStore::instance();
+        for (const auto& entry : existingEntries) {
+            if (!entry.apiToken.isEmpty()) {
+                store.storeToken(entry.id, entry.apiToken);
+            }
+        }
     }
 
     QSettings boot(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("settings"));
