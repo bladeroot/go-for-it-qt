@@ -194,10 +194,6 @@ ApplicationWindow {
             Qt.quit()
         }
     }
-    Shortcut {
-        sequence: "Ctrl+M"
-        onActivated: rootWindow.toggleMiniPlayer()
-    }
 
     Connections {
         target: app.shortcuts

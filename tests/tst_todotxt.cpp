@@ -21,6 +21,7 @@
 #include <QTcpSocket>
 #include <QDesktopServices>
 #include <QNetworkProxy>
+#include <QTimeZone>
 #include <QWindow>
 #include <QtTest>
 #include "ShortcutManager.h"
@@ -131,6 +132,23 @@ inline TodoListEntry makeStatusPushEntry(const QString& provider, const QTcpServ
     entry.apiToken = QStringLiteral("token");
     entry.syncStatusToRemote = true;
     return entry;
+}
+
+// Copies the built QML module (*.qml only, without qmldir files) into dstRoot, so Main.qml can
+// be loaded by file URL with a test AppController exposed as the `app` context property.
+inline bool copyBuiltQmlTree(const QString& dstRoot) {
+    const QString srcRoot = QCoreApplication::applicationDirPath() + QStringLiteral("/GoForIt/qml");
+    QDir(dstRoot).removeRecursively();
+    QDirIterator it(srcRoot, {QStringLiteral("*.qml")}, QDir::Files, QDirIterator::Subdirectories);
+    bool copied = false;
+    while (it.hasNext()) {
+        const QString f = it.next();
+        const QString dst = dstRoot + f.mid(srcRoot.size());
+        QDir().mkpath(QFileInfo(dst).absolutePath());
+        if (!QFile::copy(f, dst)) return false;
+        copied = true;
+    }
+    return copied;
 }
 
 class TestTodoTxt : public QObject {
@@ -5258,7 +5276,7 @@ private slots:
         const QString listA = controller.listManager()->addList(QStringLiteral("KB58 List A"));
         const QString listB = controller.listManager()->addList(QStringLiteral("KB58 List B"));
         QVERIFY(!listA.isEmpty() && !listB.isEmpty());
-        const QDateTime now = QDateTime::currentDateTimeUtc();
+        const QDateTime now = QDateTime(QDate::currentDate(), QTime(12, 0, 0), QTimeZone::systemTimeZone()).toUTC();
         QVERIFY(DatabaseManager::instance().insertActivityLog(listA, QStringLiteral("KB58 List A"), -1, QString(),
                 QStringLiteral("KB58 a"), now.addSecs(-700), 600, now.addSecs(-100), false, false) > 0);
         QVERIFY(DatabaseManager::instance().insertActivityLog(listB, QStringLiteral("KB58 List B"), -1, QString(),
@@ -5621,7 +5639,7 @@ private slots:
         const QString listA = controller.listManager()->addList(QStringLiteral("KB66 List A"));
         const QString listB = controller.listManager()->addList(QStringLiteral("KB66 List B"));
         QVERIFY(!listA.isEmpty() && !listB.isEmpty());
-        const QDateTime now = QDateTime::currentDateTimeUtc();
+        const QDateTime now = QDateTime(QDate::currentDate(), QTime(12, 0, 0), QTimeZone::systemTimeZone()).toUTC();
         QVERIFY(DatabaseManager::instance().insertActivityLog(listA, QStringLiteral("KB66 List A"), -1, QString(),
                 QStringLiteral("KB66 a"), now.addSecs(-700), 600, now.addSecs(-100), false, false) > 0);
         QVERIFY(DatabaseManager::instance().insertActivityLog(listB, QStringLiteral("KB66 List B"), -1, QString(),
@@ -7155,6 +7173,275 @@ private slots:
         root.reset();
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
+    }
+
+    // KB-91: d92a8a6 added Keys.onReturnPressed handlers to TaskListPage, TaskRowDelegate and
+    // TimerView that open the task details dialog. TextInput emits accepted() on Return and then
+    // ignores the key event, so it propagates up the parent chain: pressing Return in the
+    // "Add new task" field, the inline title editor, the filter field or an editable timer
+    // SpinBox both performs the field's action and opens the details dialog.
+    void testReturnInEditorsDoesNotOpenTaskDetails() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb91.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listId = controller.listManager()->addList(QStringLiteral("KB91 List"));
+        controller.selectListById(listId);
+        while (controller.todoProxyModel()->rowCount() > 0) {
+            QVERIFY(controller.removeTask(false, 0));
+        }
+        controller.addNewTask(QStringLiteral("KB91 existing task"));
+        QVERIFY(controller.updateTaskDetails(false, 0, QStringLiteral("KB91 details")));
+        controller.setActiveTodoRow(0);
+        controller.setShowingOverview(false);
+        QVERIFY(controller.timer()->hasActiveTask());
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb91_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mainWindow = qobject_cast<QWindow*>(root.get());
+        QVERIFY(mainWindow);
+        mainWindow->show();
+        QCoreApplication::processEvents();
+
+        QObject* todoDialog = root->findChild<QObject*>(QStringLiteral("todoTaskDetailsDialog"));
+        QObject* timerDialog = root->findChild<QObject*>(QStringLiteral("timerTaskDetailsDialog"));
+        QObject* todoListView = root->findChild<QObject*>(QStringLiteral("todoListView"));
+        QObject* timerView = root->findChild<QObject*>(QStringLiteral("timerViewRoot"));
+        QVERIFY(todoDialog && timerDialog && todoListView && timerView);
+
+        const auto findByClass = [](QObject* parent, const char* className) {
+            QList<QObject*> found;
+            for (QObject* c : parent->findChildren<QObject*>()) {
+                if (QByteArray(c->metaObject()->className()).contains(className)) found << c;
+            }
+            return found;
+        };
+        QStringList opened;
+        const auto checkAndClose = [&](const QString& what) {
+            QCoreApplication::processEvents();
+            for (QObject* dlg : {todoDialog, timerDialog}) {
+                if (dlg->property("visible").toBool()) {
+                    opened << what + QStringLiteral(" -> ") + dlg->objectName();
+                    QMetaObject::invokeMethod(dlg, "close");
+                    QCoreApplication::processEvents();
+                }
+            }
+        };
+
+        // 1. "Add new task" field: Return adds the task and must do nothing else.
+        QVERIFY(QMetaObject::invokeMethod(todoListView, "focusInput"));
+        QCoreApplication::processEvents();
+        for (char ch : QByteArray("KB91 new task")) {
+            QTest::keyClick(mainWindow, ch);
+        }
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(controller.todoProxyModel()->rowCount(), 2);
+        checkAndClose(QStringLiteral("new task field"));
+
+        // 2. Inline title editor (the row's edit button): Return saves the title only.
+        QVariant delegateVar;
+        QVERIFY(QMetaObject::invokeMethod(todoListView, "delegateAt",
+                                          Q_RETURN_ARG(QVariant, delegateVar), Q_ARG(QVariant, 0)));
+        QObject* firstDelegate = delegateVar.value<QObject*>();
+        QVERIFY(firstDelegate);
+        firstDelegate->setProperty("editing", true);
+        QCoreApplication::processEvents();
+        QObject* rowEditor = nullptr;
+        for (QObject* c : findByClass(firstDelegate, "TextField")) {
+            if (c->property("visible").toBool() && c->property("placeholderText").isValid()) {
+                rowEditor = c;
+                break;
+            }
+        }
+        QVERIFY2(rowEditor, "inline title editor not found");
+        rowEditor->setProperty("text", QStringLiteral("KB91 renamed task"));
+        QVERIFY(QMetaObject::invokeMethod(rowEditor, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(firstDelegate->property("editing").toBool(), false);
+        checkAndClose(QStringLiteral("inline title editor"));
+
+        // 3. Filter field (the query still matches the tasks, so the list is not empty). The UI
+        // language may be translated, so the field is found by its text, which is bound to the
+        // proxy's filterQuery.
+        root->setProperty("showFilterBar", true);
+        QVERIFY(controller.todoProxyModel()->setProperty("filterQuery", QStringLiteral("KB91")));
+        QCoreApplication::processEvents();
+        QObject* filterField = nullptr;
+        for (QObject* c : findByClass(todoListView, "TextField")) {
+            if (c->property("text").toString() == QStringLiteral("KB91")) {
+                filterField = c;
+                break;
+            }
+        }
+        QVERIFY2(filterField, "filter field not found");
+        QVERIFY(QMetaObject::invokeMethod(filterField, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QVERIFY(controller.todoProxyModel()->rowCount() > 0);
+        checkAndClose(QStringLiteral("filter field"));
+        QVERIFY(controller.todoProxyModel()->setProperty("filterQuery", QString()));
+        root->setProperty("showFilterBar", false);
+
+        // 4. Editable minutes SpinBox in the timer view.
+        root->setProperty("currentActivityTab", 1);
+        QCoreApplication::processEvents();
+        const QList<QObject*> spins = findByClass(timerView, "SpinBox");
+        QVERIFY(spins.size() >= 2);
+        QVERIFY(spins.at(1)->property("editable").toBool());
+        QObject* spinInput = spins.at(1)->property("contentItem").value<QObject*>();
+        QVERIFY(spinInput);
+        QVERIFY(QMetaObject::invokeMethod(spinInput, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        checkAndClose(QStringLiteral("timer minutes spin box"));
+
+        QVERIFY2(opened.isEmpty(), qPrintable(opened.join(QStringLiteral(" | "))));
+
+        mainWindow->hide();
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-92: the To-Do list highlights the active task (app.activeTodoRow), but Return in the
+    // list opens the details of tasksView.currentIndex, which only follows mouse clicks. After
+    // switching the active task with Alt+Down/Up, the tray or the mini player, Return opens the
+    // details of a task that is not highlighted.
+    void testReturnInTodoListOpensHighlightedActiveTask() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb92.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listId = controller.listManager()->addList(QStringLiteral("KB92 List"));
+        controller.selectListById(listId);
+        while (controller.todoProxyModel()->rowCount() > 0) {
+            QVERIFY(controller.removeTask(false, 0));
+        }
+        controller.addNewTask(QStringLiteral("KB92 first task"));
+        controller.addNewTask(QStringLiteral("KB92 second task"));
+        QVERIFY(controller.updateTaskDetails(false, 0, QStringLiteral("KB92 details 1")));
+        QVERIFY(controller.updateTaskDetails(false, 1, QStringLiteral("KB92 details 2")));
+        controller.setActiveTodoRow(0);
+        controller.setShowingOverview(false);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb92_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mainWindow = qobject_cast<QWindow*>(root.get());
+        QVERIFY(mainWindow);
+        mainWindow->show();
+        QCoreApplication::processEvents();
+
+        QObject* todoDialog = root->findChild<QObject*>(QStringLiteral("todoTaskDetailsDialog"));
+        QObject* todoList = root->findChild<QObject*>(QStringLiteral("todoTasksView"));
+        QVERIFY(todoDialog && todoList);
+
+        // Same path as Alt+Down, the tray "next task" action and the mini player's next button.
+        controller.switchToNextTask();
+        QCOMPARE(controller.activeTodoRow(), 1);
+        QCoreApplication::processEvents();
+
+        QVERIFY(QMetaObject::invokeMethod(todoList, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+        QTest::keyClick(mainWindow, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(todoDialog->property("visible").toBool(), true);
+        QCOMPARE(todoDialog->property("taskDetails").toString(), QStringLiteral("KB92 details 2"));
+        QVERIFY(QMetaObject::invokeMethod(todoDialog, "close"));
+
+        mainWindow->hide();
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-93: Main.qml declares `Shortcut { sequence: "Ctrl+M" }` twice in the same window
+    // (64b8b82 and a0ff6ae). Qt treats the sequence as ambiguous and emits
+    // activatedAmbiguously() instead of activated(), so the documented Ctrl+M shortcut never
+    // shows or hides the mini player.
+    void testCtrlMTogglesMiniPlayer() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb93.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        controller.setShowingOverview(false);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb93_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mainWindow = qobject_cast<QWindow*>(root.get());
+        QVERIFY(mainWindow);
+        mainWindow->show();
+        mainWindow->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(mainWindow));
+
+        QWindow* mini = qobject_cast<QWindow*>(root->findChild<QObject*>(QStringLiteral("miniPlayerWindow")));
+        QVERIFY(mini);
+        QCOMPARE(mini->isVisible(), false);
+
+        QTest::keyClick(mainWindow, Qt::Key_M, Qt::ControlModifier);
+        QCoreApplication::processEvents();
+        QCOMPARE(mini->isVisible(), true);
+
+        mainWindow->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(mainWindow));
+        QTest::keyClick(mainWindow, Qt::Key_M, Qt::ControlModifier);
+        QCoreApplication::processEvents();
+        QCOMPARE(mini->isVisible(), false);
+
+        mini->hide();
+        mainWindow->hide();
+        root.reset();
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // KB-94: user-visible strings added since 2.0.1 have no key in any translation dictionary
+    // (data/translations/{uk,de,fr,es,it}.json), so they are shown in English in every language.
+    // The TUI ambient-mode error was renamed in 846dbfe (", ocean" added), which orphaned its
+    // existing translations. The heatmap row labels Mon/Wed/Fri were never translated.
+    void testStringsAddedSince201AreTranslated() {
+        const QStringList keys = {
+            QStringLiteral("Unknown ambient mode. Available: none, white, rain, ocean, clock"),
+            QStringLiteral("Double-click or press Enter to view description & comments"),
+            QStringLiteral("No matching Jira transition to update status of %1; status was not changed on %2."),
+            QStringLiteral("Invalid number: \"%1\" (value unchanged)"),
+            QStringLiteral("Mon"),
+            QStringLiteral("Wed"),
+            QStringLiteral("Fri")
+        };
+        QStringList missing;
+        // Build-tree copy of data/translations (refreshed on cmake configure).
+        const QString dir = QCoreApplication::applicationDirPath() + QStringLiteral("/data/translations/");
+        for (const QString& lang : {QStringLiteral("uk"), QStringLiteral("de"), QStringLiteral("fr"),
+                                    QStringLiteral("es"), QStringLiteral("it")}) {
+            QFile f(dir + lang + QStringLiteral(".json"));
+            QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
+            const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+            QVERIFY(!obj.isEmpty());
+            for (const QString& k : keys) {
+                if (!obj.contains(k)) missing << lang + QStringLiteral(": ") + k;
+            }
+        }
+        QVERIFY2(missing.isEmpty(), qPrintable(QString::number(missing.size()) + QStringLiteral(" missing: ")
+                                               + missing.join(QStringLiteral(" | "))));
     }
 
     // KB-90: since 96dede1 every GitLab request was sent with order_by=id. The GitLab REST API

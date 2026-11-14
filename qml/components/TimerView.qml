@@ -33,13 +33,23 @@ Item {
         return true
     }
 
+    function isEditorFocused() {
+        let item = Window.window ? Window.window.activeFocusItem : null
+        while (item) {
+            if (item.hasOwnProperty("text") && item.hasOwnProperty("cursorPosition")) return true
+            if (item.hasOwnProperty("editable") && item.editable) return true
+            item = item.parent
+        }
+        return false
+    }
+
     Keys.onReturnPressed: function(event) {
-        if (timerViewRoot.openActiveTaskDetails()) {
+        if (!timerViewRoot.isEditorFocused() && timerViewRoot.openActiveTaskDetails()) {
             event.accepted = true
         }
     }
     Keys.onEnterPressed: function(event) {
-        if (timerViewRoot.openActiveTaskDetails()) {
+        if (!timerViewRoot.isEditorFocused() && timerViewRoot.openActiveTaskDetails()) {
             event.accepted = true
         }
     }
@@ -112,6 +122,8 @@ Item {
                 value: Math.floor(app.timer.remainingSeconds / 3600)
                 textFromValue: function(value) { return value < 10 ? "0" + value : "" + value }
                 onValueModified: app.timer.setTimeHMS(hoursSpin.value, minutesSpin.value, secondsSpin.value)
+                Keys.onReturnPressed: function(event) { event.accepted = true }
+                Keys.onEnterPressed: function(event) { event.accepted = true }
             }
 
             Label {
@@ -129,6 +141,8 @@ Item {
                 value: Math.floor((app.timer.remainingSeconds / 60) % 60)
                 textFromValue: function(value) { return value < 10 ? "0" + value : "" + value }
                 onValueModified: app.timer.setTimeHMS(hoursSpin.value, minutesSpin.value, secondsSpin.value)
+                Keys.onReturnPressed: function(event) { event.accepted = true }
+                Keys.onEnterPressed: function(event) { event.accepted = true }
             }
 
             Label {
@@ -146,6 +160,8 @@ Item {
                 value: app.timer.remainingSeconds % 60
                 textFromValue: function(value) { return value < 10 ? "0" + value : "" + value }
                 onValueModified: app.timer.setTimeHMS(hoursSpin.value, minutesSpin.value, secondsSpin.value)
+                Keys.onReturnPressed: function(event) { event.accepted = true }
+                Keys.onEnterPressed: function(event) { event.accepted = true }
             }
         }
 

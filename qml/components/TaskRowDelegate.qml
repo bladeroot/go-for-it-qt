@@ -256,6 +256,14 @@ ItemDelegate {
                     app.updateTaskText(rowDelegate.isDoneList, rowDelegate.index, text)
                 }
             }
+            Keys.onReturnPressed: function(event) {
+                accepted()
+                event.accepted = true
+            }
+            Keys.onEnterPressed: function(event) {
+                accepted()
+                event.accepted = true
+            }
         }
 
         Label {

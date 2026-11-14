@@ -44,14 +44,29 @@ Item {
     }
 
     function openSelectedTaskDetails() {
-        let row = tasksView.currentIndex
-        if (row < 0 && !listRoot.isDoneList && listRoot.proxyModel && app.activeTodoRow >= 0) {
+        let row = -1
+        if (!listRoot.isDoneList && listRoot.proxyModel && app.activeTodoRow >= 0) {
             row = listRoot.proxyModel.mapFromSourceRow(app.activeTodoRow)
+        }
+        if (row < 0) {
+            row = tasksView.currentIndex
         }
         if (row < 0 && tasksView.count > 0) {
             row = 0
         }
         return listRoot.openDetailsForRow(row)
+    }
+
+    Connections {
+        target: app
+        function onActiveTodoRowChanged() {
+            if (!listRoot.isDoneList && listRoot.proxyModel && app.activeTodoRow >= 0) {
+                const proxyRow = listRoot.proxyModel.mapFromSourceRow(app.activeTodoRow)
+                if (proxyRow >= 0 && proxyRow < tasksView.count) {
+                    tasksView.currentIndex = proxyRow
+                }
+            }
+        }
     }
 
     ColumnLayout {
@@ -224,6 +239,8 @@ Item {
                             listRoot.proxyModel.filterQuery = text
                         }
                     }
+                    Keys.onReturnPressed: function(event) { event.accepted = true }
+                    Keys.onEnterPressed: function(event) { event.accepted = true }
                 }
                 ToolButton {
                     text: "✕"
@@ -243,6 +260,15 @@ Item {
             keyNavigationEnabled: true
             model: listRoot.proxyModel
             spacing: 2
+
+            onActiveFocusChanged: {
+                if (activeFocus && !listRoot.isDoneList && listRoot.proxyModel && app.activeTodoRow >= 0) {
+                    const proxyRow = listRoot.proxyModel.mapFromSourceRow(app.activeTodoRow)
+                    if (proxyRow >= 0 && proxyRow < tasksView.count) {
+                        tasksView.currentIndex = proxyRow
+                    }
+                }
+            }
 
             Keys.onReturnPressed: function(event) {
                 if (listRoot.openSelectedTaskDetails()) {
@@ -324,6 +350,14 @@ Item {
                             app.addNewTask(text)
                             text = ""
                         }
+                    }
+                    Keys.onReturnPressed: function(event) {
+                        accepted()
+                        event.accepted = true
+                    }
+                    Keys.onEnterPressed: function(event) {
+                        accepted()
+                        event.accepted = true
                     }
                 }
 

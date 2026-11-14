@@ -26,13 +26,23 @@ Item {
         return false
     }
 
+    function isEditorFocused() {
+        let item = Window.window ? Window.window.activeFocusItem : null
+        while (item) {
+            if (item.hasOwnProperty("text") && item.hasOwnProperty("cursorPosition")) return true
+            if (item.hasOwnProperty("editable") && item.editable) return true
+            item = item.parent
+        }
+        return false
+    }
+
     Keys.onReturnPressed: function(event) {
-        if (taskListPageRoot.openCurrentTaskDetails()) {
+        if (!taskListPageRoot.isEditorFocused() && taskListPageRoot.openCurrentTaskDetails()) {
             event.accepted = true
         }
     }
     Keys.onEnterPressed: function(event) {
-        if (taskListPageRoot.openCurrentTaskDetails()) {
+        if (!taskListPageRoot.isEditorFocused() && taskListPageRoot.openCurrentTaskDetails()) {
             event.accepted = true
         }
     }
