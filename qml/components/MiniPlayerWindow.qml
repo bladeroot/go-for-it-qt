@@ -23,9 +23,21 @@ Window {
         }
     }
 
+    Timer {
+        id: pinRetryTimer
+        interval: 150
+        repeat: false
+        onTriggered: {
+            if (miniPlayer.visible && typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
+                app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
+            }
+        }
+    }
+
     onVisibleChanged: {
         if (visible && typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
             app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
+            pinRetryTimer.restart()
         }
     }
 
