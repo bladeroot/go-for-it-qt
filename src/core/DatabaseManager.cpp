@@ -14,10 +14,17 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QVariant>
+#include <sys/stat.h>
 
 namespace gofi {
 
 namespace {
+
+struct UmaskGuard {
+    mode_t oldUmask;
+    explicit UmaskGuard(mode_t mask) : oldUmask(::umask(mask)) {}
+    ~UmaskGuard() { ::umask(oldUmask); }
+};
 
 QString expandUserPath(const QString& path) {
     const QString p = path.trimmed();
@@ -500,6 +507,7 @@ bool DatabaseManager::relocateDatabase(const QString& newDbPath, bool copyExisti
         const QString newCreds = QFileInfo(cleanTarget).dir().filePath(QStringLiteral("credentials.json"));
 
         if (QFile::exists(oldCreds)) {
+            UmaskGuard umaskGuard(0077);
             QFile oldF(oldCreds);
             if (oldF.open(QIODevice::ReadOnly)) {
                 const QJsonDocument oldDoc = QJsonDocument::fromJson(oldF.readAll());

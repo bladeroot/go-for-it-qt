@@ -4,6 +4,7 @@
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusObjectPath>
+#include <QDBusVariant>
 #include <QHash>
 #include <QJsonObject>
 #include <QMap>
@@ -12,6 +13,26 @@
 #include <optional>
 
 namespace gofi {
+
+class SecretPromptHelper : public QObject {
+    Q_OBJECT
+public:
+    explicit SecretPromptHelper(QObject* parent = nullptr) : QObject(parent) {}
+    bool dismissed = true;
+    QVariant result;
+    bool finished = false;
+
+public Q_SLOTS:
+    void completed(bool isDismissed, const QDBusVariant& res) {
+        dismissed = isDismissed;
+        result = res.variant();
+        finished = true;
+        Q_EMIT done();
+    }
+
+Q_SIGNALS:
+    void done();
+};
 
 // Freedesktop Secret Service secret struct: (ObjectPath, Array<Byte>, Array<Byte>, String)
 struct SecretServiceSecret {
@@ -58,6 +79,7 @@ private:
 
     // Keystore operations (Freedesktop Secret Service)
     bool openSecretServiceSession(QString& sessionPath) const;
+    QList<QDBusObjectPath> unlockObjects(const QList<QDBusObjectPath>& locked) const;
     bool storeInKeyring(const QString& listId, const QString& token);
     QString loadFromKeyring(const QString& listId) const;
     bool deleteFromKeyring(const QString& listId);

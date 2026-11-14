@@ -258,6 +258,8 @@ public:
     QMap<QString, ItemData> items;
     QSet<QString> lockedPaths;
     int unlockCalls = 0;
+    bool unlockNeedsPrompt = false;  // real KWallet / GNOME Keyring: Unlock of a locked collection returns a prompt
+    QList<QDBusObjectPath> pendingUnlock;
     int nextId = 0;
 
     QString introspect(const QString&) const override { return {}; }
@@ -357,6 +359,14 @@ public:
                     requested = qdbus_cast<QList<QDBusObjectPath>>(v);
                 }
             }
+            if (unlockNeedsPrompt) {
+                pendingUnlock = requested;
+                QDBusMessage reply = msg.createReply();
+                reply << QVariant::fromValue(QList<QDBusObjectPath>())
+                      << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/org/freedesktop/secrets/prompt/u1")));
+                conn.send(reply);
+                return true;
+            }
             for (const auto& p : requested) {
                 lockedPaths.remove(p.path());
             }
@@ -364,6 +374,17 @@ public:
             reply << QVariant::fromValue(requested)
                   << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")));
             conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("Prompt") && msg.path() == QStringLiteral("/org/freedesktop/secrets/prompt/u1")) {
+            conn.send(msg.createReply());
+            // The user entered the wallet password: unlock and report completion.
+            for (const auto& p : pendingUnlock) {
+                lockedPaths.remove(p.path());
+            }
+            QDBusMessage completed = QDBusMessage::createSignal(msg.path(), QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Completed"));
+            completed << false << QVariant::fromValue(QDBusVariant(QVariant::fromValue(pendingUnlock)));
+            conn.send(completed);
             return true;
         }
         if (member == QStringLiteral("GetSecret")) {
@@ -8489,6 +8510,215 @@ private slots:
         const QString fileToken = run(false, QStringLiteral("pat_file_original"));
         QCOMPARE(keyringToken, QStringLiteral("pat_keyring_original"));
         QCOMPARE(fileToken, QStringLiteral("pat_file_original"));
+    }
+
+    void testCredentialStoreCompletesUnlockPromptForLockedItems() {
+        // A locked KWallet / GNOME Keyring collection is unlocked through a prompt: Unlock returns no paths and a
+        // prompt object; the item becomes readable only after Prompt() completes.
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_prompt_fake");
+        const QString clientName = QStringLiteral("cs_prompt_client");
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("cs_prompt_fallback.json"));
+        QFile::remove(credsPath);
+        QString loaded;
+        int unlockCalls = 0;
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.freedesktop.secrets");
+            FakeSecretService fakeSecrets;
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+
+            auto& store = gofi::CredentialStore::instance();
+            store.setInMemoryMode(false);
+            store.setFallbackFilePath(credsPath);
+            store.setDBusConnection(clientConn, service);
+
+            QVERIFY(store.storeToken(QStringLiteral("cs_prompt_list"), QStringLiteral("pat_prompt_secret")));
+            QCOMPARE(fakeSecrets.items.size(), 1);
+            fakeSecrets.lockedPaths.insert(fakeSecrets.items.firstKey());
+            fakeSecrets.unlockNeedsPrompt = true;
+
+            loaded = store.loadToken(QStringLiteral("cs_prompt_list"));
+            unlockCalls = fakeSecrets.unlockCalls;
+
+            store.resetDBusConnection();
+            fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+            fakeConn.unregisterService(service);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+        gofi::CredentialStore::instance().setFallbackFilePath(QString());
+        QFile::remove(credsPath);
+
+        QCOMPARE(unlockCalls, 1);
+        QCOMPARE(loaded, QStringLiteral("pat_prompt_secret"));
+    }
+
+    void testClearedTokenStaysClearedDespiteUnscopedEntries() {
+        // Clearing a list's token (saveList with an empty token) must stick. Unscoped entries -- written before
+        // tokens were scoped to a database, or another database's scoped keyring item with the same list id --
+        // must not bring it back on the next load.
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_clear_fake");
+        const QString clientName = QStringLiteral("cs_clear_client");
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_clear_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString listId = QStringLiteral("cs_clear_list");
+        const QString service = QStringLiteral("org.freedesktop.secrets");
+        auto& db = DatabaseManager::instance();
+        auto& store = gofi::CredentialStore::instance();
+
+        auto makeEntry = [&](const QString& token) {
+            TodoListEntry entry;
+            entry.id = listId;
+            entry.name = QStringLiteral("Tracker");
+            entry.provider = QStringLiteral("GitHub");
+            entry.jiraUrl = QStringLiteral("https://example.invalid");
+            entry.apiToken = token;
+            return entry;
+        };
+        auto tokenIn = [&](const QString& dbPath) {
+            QString t = QStringLiteral("<not loaded>");
+            if (db.initialize(dbPath)) {
+                for (const auto& e : db.loadLists()) {
+                    if (e.id == listId) {
+                        t = e.apiToken;
+                    }
+                }
+                db.close();
+            }
+            return t;
+        };
+
+        // 1. Fallback file with an unscoped key (format written by 75db016..217dc9e), no keyring.
+        QString fileAfterClear;
+        {
+            const QString dbPath = dir.filePath(QStringLiteral("file.db"));
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            store.setDBusConnection(clientConn, service);
+            if (db.initialize(dbPath)) {
+                db.saveList(makeEntry(QString()), 0);
+                db.close();
+            }
+            {
+                QFile f(dir.filePath(QStringLiteral("credentials.json")));
+                QVERIFY(f.open(QIODevice::WriteOnly));
+                f.write(QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                    {QStringLiteral("tokens"), QJsonObject{{listId, QStringLiteral("pat_unscoped_file")}}}}).toJson());
+            }
+            QCOMPARE(tokenIn(dbPath), QStringLiteral("pat_unscoped_file"));
+            if (db.initialize(dbPath)) {
+                db.saveList(makeEntry(QString()), 0);  // user clears the token in the list settings
+                db.close();
+            }
+            fileAfterClear = tokenIn(dbPath);
+            store.resetDBusConnection();
+            store.setFallbackFilePath(QString());
+            QDBusConnection::disconnectFromBus(clientName);
+        }
+
+        // 2. Keyring: a copy of the database clears the token of the shared list id.
+        QString copyAfterClear;
+        QString originalAfterClear;
+        {
+            const QString originalDb = dir.filePath(QStringLiteral("original.db"));
+            const QString copyDb = dir.filePath(QStringLiteral("copy.db"));
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            FakeSecretService fakeSecrets;
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+            store.setDBusConnection(clientConn, service);
+            if (db.initialize(originalDb)) {
+                db.saveList(makeEntry(QStringLiteral("pat_original_keyring")), 0);
+                db.close();
+            }
+            QFile::copy(originalDb, copyDb);
+            if (db.initialize(copyDb)) {
+                db.saveList(makeEntry(QString()), 0);  // clear the token in the copy
+                db.close();
+            }
+            copyAfterClear = tokenIn(copyDb);
+            originalAfterClear = tokenIn(originalDb);
+            store.resetDBusConnection();
+            store.setFallbackFilePath(QString());
+            fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+            fakeConn.unregisterService(service);
+            QDBusConnection::disconnectFromBus(fakeName);
+            QDBusConnection::disconnectFromBus(clientName);
+        }
+
+        QCOMPARE(fileAfterClear, QString());
+        QCOMPARE(originalAfterClear, QStringLiteral("pat_original_keyring"));
+        QCOMPARE(copyAfterClear, QString());
+    }
+
+    void testUnscopedFallbackTokenLeavesFileAfterKeyringMigration() {
+        // When the keyring becomes available, a token found in credentials.json is moved into the keyring.
+        // The plaintext copy must then be gone from the file, also for an unscoped (pre-a67fbc6) key.
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_mig_fake");
+        const QString clientName = QStringLiteral("cs_mig_client");
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_mig_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString dbPath = dir.filePath(QStringLiteral("mig.db"));
+        const QString credsPath = dir.filePath(QStringLiteral("credentials.json"));
+        const QString listId = QStringLiteral("cs_mig_list");
+        const QString service = QStringLiteral("org.freedesktop.secrets");
+        auto& db = DatabaseManager::instance();
+        auto& store = gofi::CredentialStore::instance();
+
+        QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+        QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+        FakeSecretService fakeSecrets;
+        QVERIFY(fakeConn.registerService(service));
+        QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+        store.setDBusConnection(clientConn, service);
+
+        QString loaded;
+        if (db.initialize(dbPath)) {
+            TodoListEntry entry;
+            entry.id = listId;
+            entry.name = QStringLiteral("Tracker");
+            entry.provider = QStringLiteral("GitHub");
+            entry.jiraUrl = QStringLiteral("https://example.invalid");
+            db.saveList(entry, 0);
+            {
+                QFile f(credsPath);
+                if (f.open(QIODevice::WriteOnly)) {
+                    f.write(QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                        {QStringLiteral("tokens"), QJsonObject{{listId, QStringLiteral("pat_unscoped_plain")}}}}).toJson());
+                }
+            }
+            loaded = store.loadToken(listId);
+            db.close();
+        }
+        const int keyringItems = fakeSecrets.items.size();
+        store.resetDBusConnection();
+        store.setFallbackFilePath(QString());
+        fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+        fakeConn.unregisterService(service);
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+
+        QCOMPARE(loaded, QStringLiteral("pat_unscoped_plain"));
+        QCOMPARE(keyringItems, 1);
+        QFile f(credsPath);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QVERIFY2(!f.readAll().contains("pat_unscoped_plain"), "token moved to the keyring is still in plaintext in credentials.json");
     }
 };
 

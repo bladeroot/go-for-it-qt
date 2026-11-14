@@ -9,6 +9,7 @@
 #include <QDBusMetaType>
 #include <QDBusReply>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -16,8 +17,20 @@
 #include <QSaveFile>
 #include <QSqlQuery>
 #include <QStandardPaths>
+#include <QTimer>
+#include <sys/stat.h>
 
 namespace gofi {
+
+namespace {
+
+struct UmaskGuard {
+    mode_t oldUmask;
+    explicit UmaskGuard(mode_t mask) : oldUmask(::umask(mask)) {}
+    ~UmaskGuard() { ::umask(oldUmask); }
+};
+
+} // namespace
 
 static QList<QDBusObjectPath> parseObjectPathList(const QVariant& var) {
     if (var.userType() == qMetaTypeId<QDBusArgument>()) {
@@ -125,6 +138,85 @@ QString CredentialStore::defaultFallbackFilePath() const {
     return dataDir + QStringLiteral("/credentials.json");
 }
 
+QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPath>& locked) const {
+    if (locked.isEmpty()) {
+        return {};
+    }
+    QDBusConnection bus = activeBus();
+    QDBusMessage unlockMsg = QDBusMessage::createMethodCall(
+        m_serviceName,
+        QStringLiteral("/org/freedesktop/secrets"),
+        QStringLiteral("org.freedesktop.Secret.Service"),
+        QStringLiteral("Unlock")
+    );
+    unlockMsg << QVariant::fromValue(locked);
+    const QDBusMessage unlockReply = bus.call(unlockMsg, QDBus::BlockWithGui, 3000);
+    if (unlockReply.type() != QDBusMessage::ReplyMessage || unlockReply.arguments().isEmpty()) {
+        return {};
+    }
+    QList<QDBusObjectPath> unlocked = parseObjectPathList(unlockReply.arguments().at(0));
+    if (!unlocked.isEmpty()) {
+        return unlocked;
+    }
+    if (unlockReply.arguments().size() < 2) {
+        return {};
+    }
+    const QDBusObjectPath promptPath = unlockReply.arguments().at(1).value<QDBusObjectPath>();
+    if (promptPath.path().isEmpty() || promptPath.path() == QStringLiteral("/")) {
+        return {};
+    }
+
+    SecretPromptHelper helper;
+    QEventLoop loop;
+    QObject::connect(&helper, &SecretPromptHelper::done, &loop, &QEventLoop::quit);
+
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+    bus.connect(
+        m_serviceName,
+        promptPath.path(),
+        QStringLiteral("org.freedesktop.Secret.Prompt"),
+        QStringLiteral("Completed"),
+        &helper,
+        SLOT(completed(bool,QDBusVariant))
+    );
+
+    QDBusMessage promptMsg = QDBusMessage::createMethodCall(
+        m_serviceName,
+        promptPath.path(),
+        QStringLiteral("org.freedesktop.Secret.Prompt"),
+        QStringLiteral("Prompt")
+    );
+    promptMsg << QStringLiteral("");
+    bus.call(promptMsg, QDBus::BlockWithGui, 2000);
+
+    if (!helper.finished) {
+        timer.start(5000);
+        loop.exec();
+    }
+
+    bus.disconnect(
+        m_serviceName,
+        promptPath.path(),
+        QStringLiteral("org.freedesktop.Secret.Prompt"),
+        QStringLiteral("Completed"),
+        &helper,
+        SLOT(completed(bool,QDBusVariant))
+    );
+
+    if (helper.dismissed) {
+        return {};
+    }
+
+    QList<QDBusObjectPath> unlockedFromPrompt = parseObjectPathList(helper.result);
+    if (unlockedFromPrompt.isEmpty()) {
+        unlockedFromPrompt = locked;
+    }
+    return unlockedFromPrompt;
+}
+
 bool CredentialStore::openSecretServiceSession(QString& sessionPath) const {
     QDBusConnection bus = activeBus();
     if (!isKeyringAvailable()) {
@@ -226,17 +318,7 @@ QString CredentialStore::loadFromKeyring(const QString& listId) const {
         if (unlocked.isEmpty() && searchReply.arguments().size() > 1) {
             const QList<QDBusObjectPath> locked = parseObjectPathList(searchReply.arguments().at(1));
             if (!locked.isEmpty()) {
-                QDBusMessage unlockMsg = QDBusMessage::createMethodCall(
-                    m_serviceName,
-                    QStringLiteral("/org/freedesktop/secrets"),
-                    QStringLiteral("org.freedesktop.Secret.Service"),
-                    QStringLiteral("Unlock")
-                );
-                unlockMsg << QVariant::fromValue(locked);
-                const QDBusMessage unlockReply = bus.call(unlockMsg, QDBus::BlockWithGui, 3000);
-                if (unlockReply.type() == QDBusMessage::ReplyMessage && !unlockReply.arguments().isEmpty()) {
-                    unlocked = parseObjectPathList(unlockReply.arguments().at(0));
-                }
+                unlocked = unlockObjects(locked);
             }
         }
         return unlocked;
@@ -250,13 +332,6 @@ QString CredentialStore::loadFromKeyring(const QString& listId) const {
     }
 
     QList<QDBusObjectPath> unlocked = performSearch(attributes);
-    if (unlocked.isEmpty() && !dbScope.isEmpty()) {
-        StringStringMap legacyAttrs;
-        legacyAttrs.insert(QStringLiteral("application"), QStringLiteral("go-for-it-qt"));
-        legacyAttrs.insert(QStringLiteral("list_id"), listId);
-        unlocked = performSearch(legacyAttrs);
-    }
-
     if (unlocked.isEmpty()) {
         return {};
     }
@@ -316,18 +391,8 @@ bool CredentialStore::deleteFromKeyring(const QString& listId) {
     if (searchReply.arguments().size() > 1) {
         const QList<QDBusObjectPath> locked = parseObjectPathList(searchReply.arguments().at(1));
         if (!locked.isEmpty()) {
-            QDBusMessage unlockMsg = QDBusMessage::createMethodCall(
-                m_serviceName,
-                QStringLiteral("/org/freedesktop/secrets"),
-                QStringLiteral("org.freedesktop.Secret.Service"),
-                QStringLiteral("Unlock")
-            );
-            unlockMsg << QVariant::fromValue(locked);
-            const QDBusMessage unlockReply = bus.call(unlockMsg, QDBus::BlockWithGui, 3000);
-            if (unlockReply.type() == QDBusMessage::ReplyMessage && !unlockReply.arguments().isEmpty()) {
-                const QList<QDBusObjectPath> unlockedNow = parseObjectPathList(unlockReply.arguments().at(0));
-                itemsToDelete.append(unlockedNow);
-            }
+            const QList<QDBusObjectPath> unlockedNow = unlockObjects(locked);
+            itemsToDelete.append(unlockedNow);
         }
     }
 
@@ -369,6 +434,11 @@ bool CredentialStore::writeFallbackJson(const QJsonObject& root) {
     }
     QFileInfo fi(path);
     QDir dir = fi.dir();
+
+    // Ensure umask 0077 so all created files and directories have owner-only permissions (0600 / 0700)
+    // from the initial open/mkdir syscall, preventing any temporary exposure with 0644/0755
+    UmaskGuard umaskGuard(0077);
+
     if (!dir.exists()) {
         dir.mkpath(QStringLiteral("."));
         QFile::setPermissions(dir.absolutePath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
@@ -378,7 +448,6 @@ bool CredentialStore::writeFallbackJson(const QJsonObject& root) {
     if (!file.open(QIODevice::WriteOnly)) {
         return false;
     }
-    QFile::setPermissions(file.fileName(), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 
     const QJsonDocument doc(root);
     const QByteArray data = doc.toJson(QJsonDocument::Indented);
@@ -404,8 +473,12 @@ bool CredentialStore::storeInFile(const QString& listId, const QString& token) {
     QJsonObject tokens = root.value(QStringLiteral("tokens")).toObject();
     if (token.isEmpty()) {
         tokens.remove(tokenKey);
+        tokens.remove(listId);
     } else {
         tokens[tokenKey] = token;
+        if (tokenKey != listId) {
+            tokens.remove(listId);
+        }
     }
     root[QStringLiteral("tokens")] = tokens;
     return writeFallbackJson(root);
