@@ -28,7 +28,7 @@ Tests use Qt Test through CTest. Add focused private slots to `tests/tst_todotxt
 
 ## Review & Known-Bug Workflow
 
-Review the repository after every commit or relevant working-tree change; do not limit review to the latest diff. For each reproducible defect, add a regression test first and verify it. Only afterward update `knownbug.md`. Keep every unresolved issue under `Open`, repeat still-present findings in subsequent reviews, and move verified fixes to `Resolved`. Record the reviewed commit and test results. During active monitoring, check HEAD, `git status`, file diffs, and `knownbug.md` contents at least once per minute.
+Review the repository after every commit or relevant working-tree change; do not limit review to the latest diff. For each reproducible defect, add a regression test first and verify it. Only afterward update `REVIEW.md`. Keep every unresolved issue under `Open`, repeat still-present findings in subsequent reviews, and move verified fixes to `Resolved` (and record them in `FIXES.md`). Record the reviewed commit and test results. During active monitoring, check HEAD, `git status`, file diffs, and `REVIEW.md` contents at least once per minute.
 
 ## Configuration & Safety
 

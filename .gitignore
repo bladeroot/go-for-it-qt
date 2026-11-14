@@ -11,3 +11,6 @@ CMakeUserPresets.json
 *~
 *.pkg.tar.zst
 /go-for-it-qt/
+/REVIEW.md
+/knownbug.md
+

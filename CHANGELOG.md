@@ -92,7 +92,7 @@ This maintenance release resolves the review findings KB-1 – KB-87 identified 
   - Preserved Pomodoro cycle and active task state when re-selecting the current list (KB-59, KB-67).
   - Enforced strict owner-only file permissions (`0600`) on billing exports and activity logs (KB-30, KB-34).
 
-See [RESOLVEDBUGS.md](RESOLVEDBUGS.md) for the full catalog and test slot references.
+See [FIXES.md](FIXES.md) for the full catalog and test slot references.
 
 ---
 

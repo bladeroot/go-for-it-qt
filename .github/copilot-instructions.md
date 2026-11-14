@@ -35,7 +35,7 @@ directory when finished. There is no configured linter or formatter.
   Reconciliation can mark missing open tasks done: only allow it after a
   complete, error-free response (including a correctly identified empty
   response), and keep the sync's database writes transactional. Check
-  `knownbug.md` before changing sync, timer, or translation behavior.
+  `REVIEW.md` before changing sync, timer, or translation behavior.
 
 ## Repository-specific conventions
 
