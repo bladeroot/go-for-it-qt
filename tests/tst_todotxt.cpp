@@ -2,6 +2,7 @@
 #include "core/AmbientSoundService.h"
 #include "core/AnalyticsService.h"
 #include "core/AppController.h"
+#include "core/DesktopIntegration.h"
 #include "core/IssueTrackerService.h"
 #include "core/NotificationService.h"
 #include "core/Schedule.h"
@@ -28,6 +29,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlContext>
+#include <QJSEngine>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
@@ -7597,6 +7599,89 @@ private slots:
         root.reset();
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
+    }
+    // KB-97: the KWin pin script runs over every window of the KDE session. It must change only the
+    // mini player window of this process, never other applications' windows (substring captions such
+    // as "VLC Mini-Player") or this app's own main window when it is resized below 150 px.
+    void testKWinPinScriptTouchesOnlyOwnMiniPlayerWindow() {
+        const QString miniTitle = QStringLiteral("Go for It — Mini Player");
+        const qint64 ownPid = QCoreApplication::applicationPid();
+        const qint64 foreignPid = ownPid + 1;
+
+        struct FakeWindow {
+            QString caption;
+            QString resourceClass;
+            qint64 pid;
+            int height;
+            bool keepAbove;
+            bool onAllDesktops;
+            bool skipTaskbar;
+            bool skipPager;
+        };
+        const QList<FakeWindow> initial = {
+            {miniTitle, QStringLiteral("go-for-it-qt"), ownPid, 90, false, false, false, false},
+            {QStringLiteral("VLC Mini-Player"), QStringLiteral("vlc"), foreignPid, 300, false, false, false, false},
+            // a foreign window the user pinned on their own: our unpin must not clear it
+            {QStringLiteral("Spotify Mini Player"), QStringLiteral("spotify"), foreignPid, 200, true, true, false, false},
+            {QStringLiteral("Mini Player review — Mozilla Firefox"), QStringLiteral("firefox"), foreignPid, 900, false, false, false, false},
+            {QStringLiteral("Міні-плеєр — Chromium"), QStringLiteral("chromium"), foreignPid, 900, false, false, false, false},
+            {QStringLiteral("Inbox — Go for It Qt"), QStringLiteral("go-for-it-qt"), ownPid, 120, false, false, false, false},
+        };
+
+        QJSEngine engine;
+        QJSValue wins = engine.newArray(initial.size());
+        for (int i = 0; i < initial.size(); ++i) {
+            const FakeWindow& f = initial.at(i);
+            QJSValue w = engine.newObject();
+            w.setProperty(QStringLiteral("caption"), f.caption);
+            w.setProperty(QStringLiteral("resourceClass"), f.resourceClass);
+            w.setProperty(QStringLiteral("pid"), static_cast<double>(f.pid));
+            w.setProperty(QStringLiteral("height"), f.height);
+            w.setProperty(QStringLiteral("keepAbove"), f.keepAbove);
+            w.setProperty(QStringLiteral("onAllDesktops"), f.onAllDesktops);
+            w.setProperty(QStringLiteral("skipTaskbar"), f.skipTaskbar);
+            w.setProperty(QStringLiteral("skipPager"), f.skipPager);
+            wins.setProperty(static_cast<quint32>(i), w);
+        }
+        engine.globalObject().setProperty(QStringLiteral("__gofiWindows"), wins);
+        QJSValue setup = engine.evaluate(QStringLiteral(
+            "var workspace = { windowList: function() { return __gofiWindows; } };"));
+        QVERIFY2(!setup.isError(), qPrintable(setup.toString()));
+
+        auto runScript = [&](bool alwaysOnTop) -> bool {
+            const QJSValue result = engine.evaluate(DesktopIntegration::kwinPinScript(miniTitle, alwaysOnTop));
+            if (result.isError()) {
+                qWarning() << "KWin pin script failed:" << result.toString();
+                return false;
+            }
+            return true;
+        };
+        auto prop = [&](int i, const char* name) {
+            return wins.property(static_cast<quint32>(i)).property(QString::fromLatin1(name)).toBool();
+        };
+        auto verifyUntouched = [&](int i) -> bool {
+            const FakeWindow& f = initial.at(i);
+            const bool same = prop(i, "keepAbove") == f.keepAbove && prop(i, "onAllDesktops") == f.onAllDesktops
+                && prop(i, "skipTaskbar") == f.skipTaskbar && prop(i, "skipPager") == f.skipPager;
+            if (!same) {
+                qWarning() << "window changed by the pin script:" << f.caption;
+            }
+            return same;
+        };
+
+        QVERIFY(runScript(true));
+        QVERIFY(prop(0, "keepAbove"));
+        QVERIFY(prop(0, "onAllDesktops"));
+        for (int i = 1; i < initial.size(); ++i) {
+            QVERIFY2(verifyUntouched(i), qPrintable(initial.at(i).caption));
+        }
+
+        QVERIFY(runScript(false));
+        QVERIFY(!prop(0, "keepAbove"));
+        QVERIFY(!prop(0, "onAllDesktops"));
+        for (int i = 1; i < initial.size(); ++i) {
+            QVERIFY2(verifyUntouched(i), qPrintable(initial.at(i).caption));
+        }
     }
 };
 

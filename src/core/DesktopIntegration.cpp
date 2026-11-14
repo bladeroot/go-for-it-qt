@@ -313,32 +313,31 @@ bool DesktopIntegration::kwinIntegrationAvailable() const {
     return iface && iface->isServiceRegistered(QStringLiteral("org.kde.KWin"));
 }
 
-static void executeKWinPinScript(const QString& winTitle, bool alwaysOnTop) {
-    QDBusConnection bus = QDBusConnection::sessionBus();
-    if (!bus.isConnected()) return;
+QString DesktopIntegration::kwinPinScript(const QString& windowTitle, bool alwaysOnTop) {
+    QString winTitle = windowTitle;
+    winTitle.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
 
-    // Use KWin Scripting to directly mark the mini player window as keepAbove and onAllDesktops.
-    // Under Wayland xdg-shell, clients cannot set stay-on-top themselves, but KWin scripts can.
+    // Target strictly this process's own mini player window by matching both our PID and the
+    // exact window caption, so foreign windows (e.g. VLC/Spotify/browser tabs titled "Mini Player")
+    // and our own main window are never modified.
     const QString script = QStringLiteral(
         "function applyTo(w) {\n"
         "    if (!w) return;\n"
-        "    var match = false;\n"
-        "    if (w.caption && (w.caption === \"%1\" || w.caption.indexOf(\"Mini Player\") !== -1 || w.caption.indexOf(\"Міні-плеєр\") !== -1 || w.caption.indexOf(\"Mini-Player\") !== -1)) {\n"
-        "        match = true;\n"
-        "    } else if (w.resourceClass && w.resourceClass.indexOf(\"go-for-it\") !== -1 && w.height < 150) {\n"
-        "        match = true;\n"
-        "    }\n"
-        "    if (match) {\n"
-        "        w.keepAbove = %2;\n"
-        "        w.onAllDesktops = %2;\n"
-        "        w.skipTaskbar = true;\n"
-        "        w.skipPager = true;\n"
+        "    if (w.pid === %1 && w.caption === \"%2\") {\n"
+        "        w.keepAbove = %3;\n"
+        "        w.onAllDesktops = %3;\n"
         "    }\n"
         "}\n"
         "for (var i = 0; i < workspace.windowList().length; ++i) {\n"
         "    applyTo(workspace.windowList()[i]);\n"
         "}\n"
-    ).arg(winTitle, alwaysOnTop ? QStringLiteral("true") : QStringLiteral("false"));
+    ).arg(QString::number(QCoreApplication::applicationPid()), winTitle, alwaysOnTop ? QStringLiteral("true") : QStringLiteral("false"));
+    return script;
+}
+
+static void executeKWinPinScript(const QString& script) {
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) return;
 
     QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi_kwin_XXXXXX.js"));
     tempFile.setAutoRemove(true);
@@ -386,16 +385,16 @@ void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop)
         return;
     }
 
-    const QString winTitle = win->title().replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    const QString script = kwinPinScript(win->title(), alwaysOnTop);
 
     // Execute immediately in case the window is already mapped
-    executeKWinPinScript(winTitle, alwaysOnTop);
+    executeKWinPinScript(script);
 
     // When the window is first shown, the Wayland compositor maps the surface asynchronously
     // (typically takes 50-150ms). Retry after short delays so KWin catches the window.
     for (int delayMs : {80, 200, 500}) {
-        QTimer::singleShot(delayMs, [winTitle, alwaysOnTop]() {
-            executeKWinPinScript(winTitle, alwaysOnTop);
+        QTimer::singleShot(delayMs, [script]() {
+            executeKWinPinScript(script);
         });
     }
 }

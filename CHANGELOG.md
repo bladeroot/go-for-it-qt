@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Mini player: detached window as an independent top-level window and integrated KWin Scripting to keep the mini player always on top and across all workspaces under Wayland without modifying foreign application windows (KB-96, KB-97).
+- Mini player: resolved duplicate `Ctrl+M` shortcut conflict in `Main.qml` (KB-93).
+- Keyboard navigation: pressing `Enter`/`Return` inside text editors or spin boxes no longer opens task details dialog, and pressing `Enter` on the To-Do list now opens the highlighted active task (KB-91, KB-92).
+- Localization: added missing translation strings across all supported languages (uk, de, fr, es, it) and sorted dictionaries for fast binary lookup in `QJsonObject` (KB-94).
+- Tests: anchored analytics dashboard test timestamps to prevent rollover failures after local midnight (KB-95).
+
 ---
 
 ## [2.0.3] - 2026-11-13

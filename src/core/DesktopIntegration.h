@@ -25,6 +25,8 @@ public:
     void setMiniPlayerVisible(bool visible);
     [[nodiscard]] bool kwinIntegrationAvailable() const;
     void setKWinWindowProperties(QWindow* win, bool alwaysOnTop);
+    // KWin script that applies the mini player keep-above state; `windowTitle` is the raw title.
+    [[nodiscard]] static QString kwinPinScript(const QString& windowTitle, bool alwaysOnTop);
     [[nodiscard]] QMenu* trayMenu() const noexcept { return m_trayMenu; }
     [[nodiscard]] QAction* toggleMiniPlayerAction() const noexcept { return m_toggleMiniPlayerAction; }
 
