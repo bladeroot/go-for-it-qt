@@ -45,6 +45,8 @@ if(COMMAND qt_policy)
 endif()
 
 set(GOFI_CORE_SOURCES
+    src/core/CredentialStore.h
+    src/core/CredentialStore.cpp
     src/core/Schedule.h
     src/core/Schedule.cpp
     src/core/DatabaseManager.h

@@ -1,4 +1,5 @@
 #include "DatabaseManager.h"
+#include "CredentialStore.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -184,6 +185,7 @@ void DatabaseManager::close() {
     }
     m_dbPath.clear();
     m_initFailed = false;
+    CredentialStore::instance().clearInMemoryTokens();
 }
 
 bool DatabaseManager::initialize(const QString& customDbPath) {
@@ -257,6 +259,17 @@ bool DatabaseManager::initialize(const QString& customDbPath) {
         return false;
     }
     m_initFailed = false;
+
+    if (m_dbPath == QStringLiteral(":memory:")) {
+        CredentialStore::instance().setInMemoryMode(true);
+    } else {
+        CredentialStore::instance().setInMemoryMode(false);
+        CredentialStore::instance().setFallbackFilePath(
+            QFileInfo(m_dbPath).dir().filePath(QStringLiteral("credentials.json"))
+        );
+    }
+    CredentialStore::instance().migratePlaintextDatabaseTokens();
+
     return true;
 }
 
@@ -473,6 +486,16 @@ bool DatabaseManager::relocateDatabase(const QString& newDbPath, bool copyExisti
             }
             QFile::remove(tempTarget);
         }
+
+        const QString oldCreds = QFileInfo(oldPath).dir().filePath(QStringLiteral("credentials.json"));
+        const QString newCreds = QFileInfo(cleanTarget).dir().filePath(QStringLiteral("credentials.json"));
+        if (QFile::exists(oldCreds) && oldCreds != newCreds) {
+            if (QFile::exists(newCreds)) QFile::remove(newCreds);
+            if (QFile::copy(oldCreds, newCreds)) {
+                QFile::setPermissions(newCreds, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                QFile::remove(oldCreds);
+            }
+        }
     }
 
     if (!initialize(cleanTarget)) {
@@ -496,7 +519,7 @@ bool DatabaseManager::exportDatabaseBackup(const QString& destinationFilePath) c
 
     if (isOpen()) {
         QSqlQuery checkpointQ(db());
-        checkpointQ.exec(QStringLiteral("PRAGMA wal_checkpoint(FULL);"));
+        checkpointQ.exec(QStringLiteral("PRAGMA wal_checkpoint(TRUNCATE);"));
     }
 
     const QString tempDest = destInfo.dir().filePath(
@@ -548,7 +571,7 @@ bool DatabaseManager::importDatabaseBackup(const QString& sourceFilePath) {
 
     if (isOpen()) {
         QSqlQuery checkpointQ(db());
-        checkpointQ.exec(QStringLiteral("PRAGMA wal_checkpoint(FULL);"));
+        checkpointQ.exec(QStringLiteral("PRAGMA wal_checkpoint(TRUNCATE);"));
     }
 
     if (QSqlDatabase::contains(m_connectionName)) {
@@ -669,7 +692,14 @@ QVector<TodoListEntry> DatabaseManager::loadLists() const {
         e.jiraUrl = q.value(7).toString();
         e.jiraUser = q.value(8).toString();
         e.jiraJql = q.value(9).toString();
-        e.apiToken = q.value(10).toString();
+        e.apiToken = CredentialStore::instance().loadToken(e.id);
+        if (e.apiToken.isEmpty()) {
+            const QString legacyToken = q.value(10).toString();
+            if (!legacyToken.isEmpty()) {
+                e.apiToken = legacyToken;
+                CredentialStore::instance().storeToken(e.id, legacyToken);
+            }
+        }
         e.autoWorklog = q.value(11).toInt() != 0;
         e.statusMapping = deserializeStatusMapping(q.value(12).toString());
         e.priorityMapping = deserializePriorityMapping(q.value(13).toString());
@@ -681,6 +711,13 @@ QVector<TodoListEntry> DatabaseManager::loadLists() const {
 }
 
 bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
+    if (!entry.id.isEmpty()) {
+        if (entry.apiToken.isEmpty()) {
+            CredentialStore::instance().deleteToken(entry.id);
+        } else {
+            CredentialStore::instance().storeToken(entry.id, entry.apiToken);
+        }
+    }
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "INSERT INTO lists (id, name, provider, sort_order, activity_log_path, "
@@ -715,7 +752,7 @@ bool DatabaseManager::saveList(const TodoListEntry& entry, int sortOrder) {
     q.bindValue(QStringLiteral(":jira_url"), nonNullString(entry.jiraUrl));
     q.bindValue(QStringLiteral(":jira_user"), nonNullString(entry.jiraUser));
     q.bindValue(QStringLiteral(":jira_jql"), nonNullString(entry.jiraJql));
-    q.bindValue(QStringLiteral(":api_token"), nonNullString(entry.apiToken));
+    q.bindValue(QStringLiteral(":api_token"), QStringLiteral(""));
     q.bindValue(QStringLiteral(":auto_worklog"), entry.autoWorklog ? 1 : 0);
     q.bindValue(QStringLiteral(":status_mapping"), nonNullString(serializeStatusMapping(entry.statusMapping)));
     q.bindValue(QStringLiteral(":priority_mapping"), nonNullString(serializePriorityMapping(entry.priorityMapping)));
@@ -742,6 +779,7 @@ bool DatabaseManager::removeList(const QString& listId, bool* notFound) {
         }
         return false;
     }
+    CredentialStore::instance().deleteToken(listId);
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM lists WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), listId);

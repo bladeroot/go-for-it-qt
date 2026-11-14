@@ -2,6 +2,7 @@
 #include "core/AmbientSoundService.h"
 #include "core/AnalyticsService.h"
 #include "core/AppController.h"
+#include "core/CredentialStore.h"
 #include "core/DesktopIntegration.h"
 #include "core/IssueTrackerService.h"
 #include "core/NotificationService.h"
@@ -16,6 +17,7 @@
 #include <QDBusConnection>
 #include <QDBusContext>
 #include <QDBusMessage>
+#include <QDBusVirtualObject>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -243,6 +245,121 @@ void FakeKWinScript::run() {
         conn.send(msg.createReply());
     });
 }
+
+class FakeSecretService : public QDBusVirtualObject {
+public:
+    struct ItemData {
+        QString path;
+        StringStringMap attributes;
+        QByteArray secretValue;
+    };
+
+    QMap<QString, ItemData> items;
+    int nextId = 0;
+
+    QString introspect(const QString&) const override { return {}; }
+
+    bool handleMessage(const QDBusMessage& msg, const QDBusConnection& conn) override {
+        if (msg.type() != QDBusMessage::MethodCallMessage) {
+            return false;
+        }
+        const QString member = msg.member();
+        if (member == QStringLiteral("OpenSession")) {
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(QDBusVariant(QString()))
+                  << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/org/freedesktop/secrets/session/fake")));
+            conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("CreateItem")) {
+            const QString itemPath = QStringLiteral("/org/freedesktop/secrets/item/%1").arg(++nextId);
+            ItemData data;
+            data.path = itemPath;
+            if (!msg.arguments().isEmpty()) {
+                const QVariantMap props = msg.arguments().at(0).toMap();
+                const QVariant attrVar = props.value(QStringLiteral("org.freedesktop.Secret.Item.Attributes"));
+                if (attrVar.canConvert<StringStringMap>()) {
+                    data.attributes = attrVar.value<StringStringMap>();
+                } else if (attrVar.canConvert<QDBusArgument>()) {
+                    const QDBusArgument arg = attrVar.value<QDBusArgument>();
+                    arg >> data.attributes;
+                }
+            }
+            if (msg.arguments().size() > 1) {
+                const QVariant secVar = msg.arguments().at(1);
+                if (secVar.canConvert<gofi::SecretServiceSecret>()) {
+                    data.secretValue = secVar.value<gofi::SecretServiceSecret>().value;
+                } else if (secVar.canConvert<QDBusArgument>()) {
+                    gofi::SecretServiceSecret sec;
+                    const QDBusArgument arg = secVar.value<QDBusArgument>();
+                    arg >> sec;
+                    data.secretValue = sec.value;
+                }
+            }
+            items.insert(itemPath, data);
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(QDBusObjectPath(itemPath))
+                  << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")));
+            conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("SearchItems")) {
+            StringStringMap searchAttrs;
+            if (!msg.arguments().isEmpty()) {
+                const QVariant aVar = msg.arguments().at(0);
+                if (aVar.canConvert<StringStringMap>()) {
+                    searchAttrs = aVar.value<StringStringMap>();
+                } else if (aVar.canConvert<QDBusArgument>()) {
+                    const QDBusArgument arg = aVar.value<QDBusArgument>();
+                    arg >> searchAttrs;
+                }
+            }
+            QList<QDBusObjectPath> unlocked;
+            for (auto it = items.cbegin(); it != items.cend(); ++it) {
+                bool matches = true;
+                if (!it.value().attributes.isEmpty() && !searchAttrs.isEmpty()) {
+                    for (auto a = searchAttrs.cbegin(); a != searchAttrs.cend(); ++a) {
+                        if (it.value().attributes.value(a.key()) != a.value()) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                }
+                if (matches) {
+                    unlocked.append(QDBusObjectPath(it.value().path));
+                }
+            }
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(unlocked)
+                  << QVariant::fromValue(QList<QDBusObjectPath>());
+            conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("GetSecret")) {
+            const QString path = msg.path();
+            ItemData data = items.value(path);
+            gofi::SecretServiceSecret sec;
+            if (!msg.arguments().isEmpty()) {
+                sec.session = msg.arguments().at(0).value<QDBusObjectPath>();
+            }
+            sec.value = data.secretValue;
+            sec.contentType = QStringLiteral("text/plain");
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(sec);
+            conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("Delete")) {
+            const QString path = msg.path();
+            items.remove(path);
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")));
+            conn.send(reply);
+            return true;
+        }
+        return false;
+    }
+};
 
 // Private dbus-daemon so D-Bus tests never touch the user's session bus.
 struct PrivateDBus {
@@ -8017,6 +8134,198 @@ private slots:
         }
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
+    }
+
+    void testCredentialStoreFallbackFileOperationsAndPermissions() {
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("test_creds.json"));
+        QFile::remove(credsPath);
+
+        auto& store = gofi::CredentialStore::instance();
+        store.setInMemoryMode(false);
+        store.setFallbackFilePath(credsPath);
+
+        // Store tokens
+        QVERIFY(store.storeToken(QStringLiteral("list_gh"), QStringLiteral("ghp_test123456789")));
+        QVERIFY(store.storeToken(QStringLiteral("list_jira"), QStringLiteral("jira_secret_token")));
+
+        // Verify file exists
+        QVERIFY(QFile::exists(credsPath));
+
+        // Verify strict 0600 file permissions (read/write owner only, no group or other access)
+        const QFile::Permissions perms = QFile::permissions(credsPath);
+        QVERIFY(perms & QFileDevice::ReadOwner);
+        QVERIFY(perms & QFileDevice::WriteOwner);
+        QVERIFY(!(perms & QFileDevice::ReadGroup));
+        QVERIFY(!(perms & QFileDevice::WriteGroup));
+        QVERIFY(!(perms & QFileDevice::ReadOther));
+        QVERIFY(!(perms & QFileDevice::WriteOther));
+
+        // Load tokens
+        QCOMPARE(store.loadToken(QStringLiteral("list_gh")), QStringLiteral("ghp_test123456789"));
+        QCOMPARE(store.loadToken(QStringLiteral("list_jira")), QStringLiteral("jira_secret_token"));
+
+        // Verify JSON document structure
+        {
+            QFile f(credsPath);
+            QVERIFY(f.open(QIODevice::ReadOnly));
+            const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            f.close();
+            QVERIFY(doc.isObject());
+            QCOMPARE(doc.object().value(QStringLiteral("version")).toInt(), 1);
+            const QJsonObject tokens = doc.object().value(QStringLiteral("tokens")).toObject();
+            QCOMPARE(tokens.value(QStringLiteral("list_gh")).toString(), QStringLiteral("ghp_test123456789"));
+            QCOMPARE(tokens.value(QStringLiteral("list_jira")).toString(), QStringLiteral("jira_secret_token"));
+        }
+
+        // Update token
+        QVERIFY(store.storeToken(QStringLiteral("list_gh"), QStringLiteral("ghp_updated987654321")));
+        QCOMPARE(store.loadToken(QStringLiteral("list_gh")), QStringLiteral("ghp_updated987654321"));
+
+        // Delete token
+        QVERIFY(store.deleteToken(QStringLiteral("list_jira")));
+        QVERIFY(store.loadToken(QStringLiteral("list_jira")).isEmpty());
+        QCOMPARE(store.loadToken(QStringLiteral("list_gh")), QStringLiteral("ghp_updated987654321"));
+
+        QVERIFY(store.deleteToken(QStringLiteral("list_gh")));
+        QVERIFY(store.loadToken(QStringLiteral("list_gh")).isEmpty());
+
+        store.setFallbackFilePath(QString());
+        QFile::remove(credsPath);
+    }
+
+    void testDatabasePlaintextTokenMigrationAndStorageSafety() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("legacy_token_migration.db"));
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("credentials.json"));
+        const QString backupPath = m_testSandbox.filePath(QStringLiteral("token_safety_backup.db"));
+        QFile::remove(dbPath);
+        QFile::remove(credsPath);
+        QFile::remove(backupPath);
+
+        // Step 1: Pre-populate database with an unmigrated row having plaintext api_token
+        {
+            QSqlDatabase rawDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("legacy_pop"));
+            rawDb.setDatabaseName(dbPath);
+            QVERIFY(rawDb.open());
+            QSqlQuery q(rawDb);
+            QVERIFY(q.exec(QStringLiteral("CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, activity_log_path TEXT NOT NULL DEFAULT '', add_creation_dates INTEGER NOT NULL DEFAULT 1, reminder_time INTEGER NOT NULL DEFAULT -1, custom_schedule TEXT NOT NULL DEFAULT '', jira_url TEXT NOT NULL DEFAULT '', jira_user TEXT NOT NULL DEFAULT '', jira_jql TEXT NOT NULL DEFAULT '', api_token TEXT NOT NULL DEFAULT '', auto_worklog INTEGER NOT NULL DEFAULT 1, status_mapping TEXT NOT NULL DEFAULT '', priority_mapping TEXT NOT NULL DEFAULT '', sync_status_to_remote INTEGER NOT NULL DEFAULT 0);")));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO lists (id, name, provider, api_token) VALUES ('legacy_list_1', 'Jira Work', 'Jira', 'super-secret-pat-12345');")));
+            rawDb.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("legacy_pop"));
+
+        // Step 2: Initialize AppController / DatabaseManager on this database.
+        // It should automatically migrate the plaintext token into CredentialStore and clear it from SQLite.
+        {
+            AppController ctrl(QString(), dbPath);
+            QCOMPARE(ctrl.listManager()->rowCount(), 1);
+            QCOMPARE(ctrl.listManager()->getListConfig(QStringLiteral("legacy_list_1")).value(QStringLiteral("apiToken")).toString(), QStringLiteral("super-secret-pat-12345"));
+
+            // Verify raw SQLite row now has EMPTY api_token!
+            {
+                const QSqlDatabase conn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+                QSqlQuery checkQ(conn);
+                QVERIFY(checkQ.exec(QStringLiteral("SELECT api_token FROM lists WHERE id = 'legacy_list_1'")));
+                QVERIFY(checkQ.next());
+                QCOMPARE(checkQ.value(0).toString(), QString());
+            }
+
+            // Save an updated configuration with a new token
+            QVariantMap cfg = ctrl.listManager()->getListConfig(QStringLiteral("legacy_list_1"));
+            cfg[QStringLiteral("apiToken")] = QStringLiteral("rotated-secret-67890");
+            ctrl.listManager()->saveListConfig(cfg);
+
+            // Verify it is updated in model
+            QCOMPARE(ctrl.listManager()->getListConfig(QStringLiteral("legacy_list_1")).value(QStringLiteral("apiToken")).toString(), QStringLiteral("rotated-secret-67890"));
+
+            // Verify raw SQLite row STILL has EMPTY api_token!
+            {
+                const QSqlDatabase conn = QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn"));
+                QSqlQuery checkQ(conn);
+                QVERIFY(checkQ.exec(QStringLiteral("SELECT api_token FROM lists WHERE id = 'legacy_list_1'")));
+                QVERIFY(checkQ.next());
+                QCOMPARE(checkQ.value(0).toString(), QString());
+            }
+
+            // Step 3: Export backup and verify the exported database has NO plain-text credentials
+            QVERIFY(DatabaseManager::instance().exportDatabaseBackup(backupPath));
+        }
+        DatabaseManager::instance().close();
+
+        // Check exported backup database directly
+        {
+            QSqlDatabase backupDb = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("check_backup"));
+            backupDb.setDatabaseName(backupPath);
+            QVERIFY(backupDb.open());
+            QSqlQuery backupQ(backupDb);
+            QVERIFY(backupQ.exec(QStringLiteral("SELECT api_token FROM lists WHERE id = 'legacy_list_1'")));
+            QVERIFY(backupQ.next());
+            QCOMPARE(backupQ.value(0).toString(), QString());
+            backupDb.close();
+        }
+        QSqlDatabase::removeDatabase(QStringLiteral("check_backup"));
+
+        // Check credentials fallback file exists and has 0600 permissions
+        QVERIFY(QFile::exists(credsPath));
+        const QFile::Permissions perms = QFile::permissions(credsPath);
+        QVERIFY(perms & QFileDevice::ReadOwner);
+        QVERIFY(perms & QFileDevice::WriteOwner);
+        QVERIFY(!(perms & QFileDevice::ReadOther));
+
+        QFile::remove(dbPath);
+        QFile::remove(credsPath);
+        QFile::remove(backupPath);
+        gofi::CredentialStore::instance().setFallbackFilePath(QString());
+    }
+
+    void testCredentialStoreKeyringAndMockSecretService() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_fake_secrets");
+        const QString clientName = QStringLiteral("cs_client");
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("cs_keyring_fallback.json"));
+        QFile::remove(credsPath);
+
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+
+            const QString service = QStringLiteral("org.freedesktop.secrets");
+            FakeSecretService fakeSecrets;
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+
+            auto& store = gofi::CredentialStore::instance();
+            store.setInMemoryMode(false);
+            store.setFallbackFilePath(credsPath);
+            store.setDBusConnection(clientConn, service);
+
+            // 1. Verify Keyring is reported as available
+            QVERIFY(store.isKeyringAvailable());
+
+            // 2. Store token into Keyring
+            QVERIFY(store.storeToken(QStringLiteral("cs_keyring_list"), QStringLiteral("pat_secret_abc123")));
+            QCOMPARE(fakeSecrets.items.size(), 1);
+
+            // 3. Token is retrieved from Keyring
+            QCOMPARE(store.loadToken(QStringLiteral("cs_keyring_list")), QStringLiteral("pat_secret_abc123"));
+
+            // 4. Delete token from Keyring
+            QVERIFY(store.deleteToken(QStringLiteral("cs_keyring_list")));
+            QCOMPARE(fakeSecrets.items.size(), 0);
+            QVERIFY(store.loadToken(QStringLiteral("cs_keyring_list")).isEmpty());
+
+            store.resetDBusConnection();
+            fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+            fakeConn.unregisterService(service);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+        gofi::CredentialStore::instance().setFallbackFilePath(QString());
+        QFile::remove(credsPath);
     }
 };
 

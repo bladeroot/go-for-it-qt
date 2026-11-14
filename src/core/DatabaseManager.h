@@ -120,6 +120,8 @@ public:
                                                            const QDateTime& endUtc = {},
                                                            const QString& listId = {}) const;
 
+    friend class CredentialStore;
+
 private:
     DatabaseManager() = default;
     ~DatabaseManager();
