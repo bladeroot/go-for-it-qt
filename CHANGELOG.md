@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Remote credentials: moved issue tracker tokens (Jira, GitHub, GitLab, Redmine, Todoist, CalDAV) out of SQLite database into Freedesktop Secret Service (`org.freedesktop.secrets`) with a dedicated `0600`-permission fallback file (`credentials.json`), automatically migrating existing database tokens and ensuring database backups contain no plaintext secrets (KB-105).
+- Remote credentials: hardened keyring token isolation in test mode, completed prompt-based wallet unlock flow with database-wide batch unlocking, scoped tokens by database path, enforced atomic 0600 file permissions via umask 0077, and prioritized newer fallback file tokens over stale keyring entries (KB-106..114).
 
 ### Fixed
 - Mini player: detached window as an independent top-level window and integrated KWin Scripting to keep the mini player always on top and across all workspaces under Wayland without modifying foreign application windows (KB-96, KB-97).

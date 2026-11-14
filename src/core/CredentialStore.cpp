@@ -577,19 +577,22 @@ QString CredentialStore::loadToken(const QString& listId) {
         return m_inMemoryTokens.value(listId);
     }
 
-    if (isKeyringAvailable()) {
-        const QString keyringToken = loadFromKeyring(listId);
-        if (!keyringToken.isEmpty()) {
-            return keyringToken;
-        }
-    }
-
+    // Prefer the fallback file: a token only exists in credentials.json if a previous
+    // keyring write failed (e.g. wallet was locked or offline) or from manual/migration edits.
+    // If a fallback token exists, it is newer than any stale item remaining in the keyring.
     const QString fileToken = loadFromFile(listId);
     if (!fileToken.isEmpty()) {
         if (isKeyringAvailable() && storeInKeyring(listId, fileToken)) {
             deleteFromFile(listId);
         }
         return fileToken;
+    }
+
+    if (isKeyringAvailable()) {
+        const QString keyringToken = loadFromKeyring(listId);
+        if (!keyringToken.isEmpty()) {
+            return keyringToken;
+        }
     }
 
     return {};

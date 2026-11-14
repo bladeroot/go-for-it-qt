@@ -260,6 +260,8 @@ public:
     int unlockCalls = 0;
     bool unlockNeedsPrompt = false;  // real KWallet / GNOME Keyring: Unlock of a locked collection returns a prompt
     int promptDelayMs = 0;           // time the user needs to type the wallet password
+    bool promptDismisses = false;    // the user closes the wallet password dialog
+    bool createNeedsPrompt = false;  // CreateItem into a locked collection answers with a prompt
     QList<QDBusObjectPath> pendingUnlock;
     int nextId = 0;
 
@@ -274,6 +276,13 @@ public:
             QDBusMessage reply = msg.createReply();
             reply << QVariant::fromValue(QDBusVariant(QString()))
                   << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/org/freedesktop/secrets/session/fake")));
+            conn.send(reply);
+            return true;
+        }
+        if (member == QStringLiteral("CreateItem") && createNeedsPrompt) {
+            QDBusMessage reply = msg.createReply();
+            reply << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")))
+                  << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/org/freedesktop/secrets/prompt/c1")));
             conn.send(reply);
             return true;
         }
@@ -383,6 +392,12 @@ public:
             const QString promptPath = msg.path();
             QDBusConnection c = conn;
             auto complete = [this, c, promptPath]() mutable {
+                if (promptDismisses) {
+                    QDBusMessage dismissed = QDBusMessage::createSignal(promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Completed"));
+                    dismissed << true << QVariant::fromValue(QDBusVariant(QVariant::fromValue(QList<QDBusObjectPath>())));
+                    c.send(dismissed);
+                    return;
+                }
                 for (const auto& p : pendingUnlock) {
                     lockedPaths.remove(p.path());
                 }
@@ -8776,6 +8791,70 @@ private slots:
         QFile::remove(credsPath);
 
         QCOMPARE(loaded, QStringLiteral("pat_slow_secret"));
+    }
+
+    void testTokenChangedWhileKeyringLockedWinsAfterUnlock() {
+        // The user dismisses the wallet password dialog, sees an empty token and enters a new one (it goes to
+        // the fallback file because the locked collection refuses CreateItem). In a later session the wallet is
+        // unlocked: the new token must be used, not the stale one still stored in the keyring.
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_rotate_fake");
+        const QString clientName = QStringLiteral("cs_rotate_client");
+        const QString credsPath = m_testSandbox.filePath(QStringLiteral("cs_rotate_fallback.json"));
+        const QString listId = QStringLiteral("cs_rotate_list");
+        QFile::remove(credsPath);
+        QString lockedLoad;
+        bool storedWhileLocked = false;
+        QString afterUnlock;
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.freedesktop.secrets");
+            FakeSecretService fakeSecrets;
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+
+            auto& store = gofi::CredentialStore::instance();
+            store.setInMemoryMode(false);
+            store.setFallbackFilePath(credsPath);
+            store.setDBusConnection(clientConn, service);
+
+            QVERIFY(store.storeToken(listId, QStringLiteral("pat_old_revoked")));
+            QCOMPARE(fakeSecrets.items.size(), 1);
+
+            // Session 1: wallet locked, the user dismisses the dialog and enters a new token.
+            fakeSecrets.lockedPaths.insert(fakeSecrets.items.firstKey());
+            fakeSecrets.unlockNeedsPrompt = true;
+            fakeSecrets.promptDismisses = true;
+            fakeSecrets.createNeedsPrompt = true;
+            lockedLoad = store.loadToken(listId);
+            storedWhileLocked = store.storeToken(listId, QStringLiteral("pat_new_current"));
+
+            // Session 2: the wallet is open.
+            store.resetPromptState();
+            fakeSecrets.lockedPaths.clear();
+            fakeSecrets.unlockNeedsPrompt = false;
+            fakeSecrets.promptDismisses = false;
+            fakeSecrets.createNeedsPrompt = false;
+            afterUnlock = store.loadToken(listId);
+
+            store.resetDBusConnection();
+            fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+            fakeConn.unregisterService(service);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+        gofi::CredentialStore::instance().setFallbackFilePath(QString());
+        QFile::remove(credsPath);
+
+        QCOMPARE(lockedLoad, QString());
+        QVERIFY(storedWhileLocked);
+        QCOMPARE(afterUnlock, QStringLiteral("pat_new_current"));
     }
 };
 
