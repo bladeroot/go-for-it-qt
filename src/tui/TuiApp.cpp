@@ -1,4 +1,5 @@
 #include "TuiApp.h"
+#include "tui/TuiExternalEditor.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -1173,51 +1174,32 @@ void TuiApp::editTaskDetailsInVim() {
     const QModelIndex idx = proxy->index(m_selectedRow, 0);
     const QString currentDetails = proxy->data(idx, TaskStoreModel::DetailsRole).toString();
 
-    QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi-task-details-XXXXXX.md"));
-    tempFile.setAutoRemove(false);
-    if (!tempFile.open()) {
-        m_statusMessage = tr("Failed to create temporary Markdown file.");
-        return;
-    }
-    tempFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    tempFile.write(currentDetails.toUtf8());
-    tempFile.flush();
-    const QString tmpPath = tempFile.fileName();
-    tempFile.close();
-
-    QString editor = qEnvironmentVariable("VISUAL").trimmed();
-    if (editor.isEmpty()) editor = qEnvironmentVariable("EDITOR").trimmed();
-    if (editor.isEmpty()) {
-        for (const QString& cand : {QStringLiteral("nvim"), QStringLiteral("vim"), QStringLiteral("vi"), QStringLiteral("nano")}) {
-            if (!QStandardPaths::findExecutable(cand).isEmpty()) {
-                editor = cand;
-                break;
+    bool noEditor = false;
+    auto result = TuiExternalEditor::editContent(
+        currentDetails,
+        QStringLiteral("gofi-task-details-XXXXXX.md"),
+        [this](bool paused) {
+            if (paused) {
+                if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
+                disableRawMode();
+            } else {
+                enableRawMode();
+                updateTerminalSize();
+                if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
             }
-        }
-    }
+        },
+        &noEditor
+    );
 
-    if (editor.isEmpty()) {
-        // Fallback to inline prompt if no terminal editor is installed
+    if (noEditor) {
         m_inputBuffer = currentDetails.isEmpty() ? QString() : currentDetails;
         m_inputCursor = static_cast<int>(m_inputBuffer.size());
         m_mode = Mode::EditDetails;
-        QFile::remove(tmpPath);
         return;
     }
 
-    if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
-    disableRawMode();
-
-    const int rc = QProcess::execute(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), editor + QStringLiteral(" \"") + tmpPath + QStringLiteral("\"")});
-
-    enableRawMode();
-    updateTerminalSize();
-    if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
-
-    QFile in(tmpPath);
-    if (rc == 0 && in.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const QString updatedMd = QString::fromUtf8(in.readAll());
-        in.close();
+    if (result.has_value()) {
+        const QString updatedMd = *result;
         m_app->updateTaskDetails(isClosedTab(), m_selectedRow, updatedMd);
         if (m_mode == Mode::MarkdownView) {
             openTaskMarkdownView();
@@ -1226,7 +1208,6 @@ void TuiApp::editTaskDetailsInVim() {
     } else {
         m_statusMessage = tr("Markdown edit canceled.");
     }
-    QFile::remove(tmpPath);
 }
 
 
@@ -1235,45 +1216,31 @@ void TuiApp::addTaskCommentInVim() {
     if (proxy->rowCount() <= 0 || m_selectedRow >= proxy->rowCount()) {
         return;
     }
-    QTemporaryFile tempFile(QDir::tempPath() + QStringLiteral("/gofi-task-comment-XXXXXX.md"));
-    tempFile.setAutoRemove(false);
-    if (!tempFile.open()) {
-        m_statusMessage = tr("Failed to create temporary comment file.");
-        return;
-    }
-    tempFile.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    const QString tmpPath = tempFile.fileName();
-    tempFile.close();
 
-    QString editor = qEnvironmentVariable("VISUAL").trimmed();
-    if (editor.isEmpty()) editor = qEnvironmentVariable("EDITOR").trimmed();
-    if (editor.isEmpty()) {
-        for (const QString& cand : {QStringLiteral("nvim"), QStringLiteral("vim"), QStringLiteral("vi"), QStringLiteral("nano")}) {
-            if (!QStandardPaths::findExecutable(cand).isEmpty()) {
-                editor = cand;
-                break;
+    bool noEditor = false;
+    auto result = TuiExternalEditor::editContent(
+        QString(),
+        QStringLiteral("gofi-task-comment-XXXXXX.md"),
+        [this](bool paused) {
+            if (paused) {
+                if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
+                disableRawMode();
+            } else {
+                enableRawMode();
+                updateTerminalSize();
+                if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
             }
-        }
-    }
-    if (editor.isEmpty()) {
+        },
+        &noEditor
+    );
+
+    if (noEditor) {
         m_statusMessage = tr("Use :comment <text> to post a comment.");
-        QFile::remove(tmpPath);
         return;
     }
 
-    if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
-    disableRawMode();
-
-    const int rc = QProcess::execute(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), editor + QStringLiteral(" \"") + tmpPath + QStringLiteral("\"")});
-
-    enableRawMode();
-    updateTerminalSize();
-    if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
-
-    QFile in(tmpPath);
-    if (rc == 0 && in.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const QString commentMd = QString::fromUtf8(in.readAll()).trimmed();
-        in.close();
+    if (result.has_value()) {
+        const QString commentMd = result->trimmed();
         if (!commentMd.isEmpty()) {
             if (m_app->addTaskComment(isClosedTab(), m_selectedRow, commentMd)) {
                 if (m_mode == Mode::MarkdownView) {
@@ -1287,7 +1254,6 @@ void TuiApp::addTaskCommentInVim() {
             m_statusMessage = tr("Empty comment ignored.");
         }
     }
-    QFile::remove(tmpPath);
 }
 
 void TuiApp::openTaskMarkdownView() {
