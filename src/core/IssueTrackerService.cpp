@@ -162,58 +162,7 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
     tempEntry.apiToken = apiToken;
 
     if (provider == QStringLiteral("Jira")) {
-        QUrl url(baseUrl + QStringLiteral("/rest/api/2/priority"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, tempEntry, false);
-
-        QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, tempEntry, baseUrl, existingMapping]() {
-            reply->deleteLater();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QByteArray seraphReason = reply->rawHeader("X-Seraph-Loginreason");
-            const bool seraphAuthFailed = seraphReason.contains("AUTHENTICATED_FAILED") || seraphReason.contains("AUTHENTICATION_DENIED");
-            if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
-                if (!tempEntry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
-                    // Retry with Bearer token (Jira Server/DC PAT)
-                    QNetworkRequest bearerReq(QUrl(baseUrl + QStringLiteral("/rest/api/2/priority")));
-                    applyAuthHeader(bearerReq, tempEntry, true);
-                    QNetworkReply* retryReply = m_nam.get(bearerReq);
-                    connect(retryReply, &QNetworkReply::finished, this, [this, retryReply, existingMapping, seraphAuthFailed]() {
-                        retryReply->deleteLater();
-                        const QByteArray retrySeraph = retryReply->rawHeader("X-Seraph-Loginreason");
-                        const bool retrySeraphFailed = retrySeraph.contains("AUTHENTICATED_FAILED") || retrySeraph.contains("AUTHENTICATION_DENIED");
-                        if (retryReply->error() != QNetworkReply::NoError || retrySeraphFailed) {
-                            if (seraphAuthFailed || retrySeraphFailed) {
-                                emit remotePrioritiesError(tr("Jira authentication failed: please check your Jira Email (e.g. corporate email) and API Token."));
-                            } else {
-                                emit remotePrioritiesError(tr("Failed to load Jira priorities: %1").arg(retryReply->errorString()));
-                            }
-                            return;
-                        }
-                        const QVariantList list = parseJiraPrioritiesJson(retryReply->readAll(), existingMapping);
-                        if (!list.isEmpty()) {
-                            emit remotePrioritiesLoaded(list);
-                            return;
-                        }
-                        const int retryHttpStatus = retryReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                        emit remotePrioritiesError(tr("Failed to load Jira priorities (%1): %2").arg(retryHttpStatus).arg(retryReply->errorString()));
-                    });
-                    return;
-                }
-                if (seraphAuthFailed) {
-                    emit remotePrioritiesError(tr("Jira authentication failed: please check your Jira Email and API Token."));
-                } else {
-                    emit remotePrioritiesError(tr("Failed to load Jira priorities (%1): %2").arg(httpStatus).arg(reply->errorString()));
-                }
-                return;
-            }
-            const QVariantList list = parseJiraPrioritiesJson(reply->readAll(), existingMapping);
-            if (!list.isEmpty()) {
-                emit remotePrioritiesLoaded(list);
-                return;
-            }
-            emit remotePrioritiesError(tr("Failed to load Jira priorities (%1): %2").arg(httpStatus).arg(reply->errorString()));
-        });
+        fetchJiraPriorities(baseUrl, tempEntry, existingMapping);
     } else if (provider == QStringLiteral("Redmine")) {
         fetchRedminePriorities(baseUrl, tempEntry, existingMapping);
     } else {
@@ -259,47 +208,7 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
     tempEntry.apiToken = apiToken;
 
     if (provider == QStringLiteral("Jira")) {
-        QUrl url(baseUrl + QStringLiteral("/rest/api/2/status"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, tempEntry, false);
-
-        QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, tempEntry, baseUrl, existingMapping]() {
-            reply->deleteLater();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QByteArray seraphReason = reply->rawHeader("X-Seraph-Loginreason");
-            const bool seraphAuthFailed = seraphReason.contains("AUTHENTICATED_FAILED") || seraphReason.contains("AUTHENTICATION_DENIED");
-            if (reply->error() != QNetworkReply::NoError || seraphAuthFailed) {
-                if (!tempEntry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
-                    // Retry with Bearer token (Jira Server/DC PAT)
-                    QNetworkRequest bearerReq(QUrl(baseUrl + QStringLiteral("/rest/api/2/status")));
-                    applyAuthHeader(bearerReq, tempEntry, true);
-                    QNetworkReply* retryReply = m_nam.get(bearerReq);
-                    connect(retryReply, &QNetworkReply::finished, this, [this, retryReply, existingMapping, seraphAuthFailed]() {
-                        retryReply->deleteLater();
-                        const QByteArray retrySeraph = retryReply->rawHeader("X-Seraph-Loginreason");
-                        const bool retrySeraphFailed = retrySeraph.contains("AUTHENTICATED_FAILED") || retrySeraph.contains("AUTHENTICATION_DENIED");
-                        if (retryReply->error() != QNetworkReply::NoError || retrySeraphFailed) {
-                            if (seraphAuthFailed || retrySeraphFailed) {
-                                emit remoteStatusesError(tr("Jira authentication failed: please check your Jira Email (e.g. corporate email) and API Token."));
-                            } else {
-                                emit remoteStatusesError(tr("Failed to load Jira statuses: %1").arg(retryReply->errorString()));
-                            }
-                            return;
-                        }
-                        emit remoteStatusesLoaded(parseJiraStatusesJson(retryReply->readAll(), existingMapping));
-                    });
-                    return;
-                }
-                if (seraphAuthFailed) {
-                    emit remoteStatusesError(tr("Jira authentication failed: please check your Jira Email and API Token."));
-                } else {
-                    emit remoteStatusesError(tr("Failed to load Jira statuses (%1): %2").arg(httpStatus).arg(reply->errorString()));
-                }
-                return;
-            }
-            emit remoteStatusesLoaded(parseJiraStatusesJson(reply->readAll(), existingMapping));
-        });
+        fetchJiraStatuses(baseUrl, tempEntry, existingMapping);
     } else if (provider == QStringLiteral("YouTrack")) {
         fetchYouTrackStatuses(baseUrl, tempEntry, existingMapping);
     } else if (provider == QStringLiteral("Redmine")) {
@@ -470,54 +379,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
     }
 
     if (listEntry.provider == QStringLiteral("Jira")) {
-        const bool effectiveBearer = forceBearerAuth || (m_jiraBearerTokens.contains(listEntry.id) && m_jiraBearerTokens.value(listEntry.id) == listEntry.apiToken);
-        const quint32 loggedSeconds = qMax(60U, runtimeSeconds);
-        const QString encodedKey = QString::fromUtf8(QUrl::toPercentEncoding(issueKey));
-        QUrl url(baseUrl + QStringLiteral("/rest/api/2/issue/") + encodedKey + QStringLiteral("/worklog"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry, effectiveBearer);
-
-        QJsonObject payload;
-        payload[QStringLiteral("timeSpentSeconds")] = static_cast<qint64>(loggedSeconds);
-        payload[QStringLiteral("started")] = startTimeUtc.toUTC().toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss.000'+0000'"));
-        payload[QStringLiteral("comment")] = QStringLiteral("Logged via Go for It Qt Pomodoro timer");
-
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, loggedSeconds, effectiveBearer]() {
-            reply->deleteLater();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
-            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
-
-            if (reply->error() != QNetworkReply::NoError || authErr) {
-                if (effectiveBearer) {
-                    m_jiraBearerTokens.remove(listEntry.id);
-                }
-                if (!effectiveBearer && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
-                    postWorklog(listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, true);
-                    return;
-                }
-                const QString errMsg = tr("Failed to post worklog to Jira (%1): %2")
-                    .arg(httpStatus)
-                    .arg(reply->errorString());
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
-                return;
-            }
-
-            if (effectiveBearer) {
-                m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
-            }
-
-            if (DatabaseManager::instance().isOpen() && !DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
-                const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
-                setStatusMessage(dbErr);
-                emit syncFailed(listEntry.id, dbErr);
-            } else {
-                setStatusMessage(tr("Logged %1m to Jira issue %2").arg(loggedSeconds / 60U).arg(issueKey));
-                emit worklogPosted(issueKey, loggedSeconds);
-            }
-        });
+        postJiraWorklog(listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, forceBearerAuth, baseUrl);
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         postYouTrackWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, startTimeUtc, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
@@ -547,47 +409,7 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
     if (baseUrl.isEmpty()) return;
 
     if (listEntry.provider == QStringLiteral("Jira")) {
-        const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
-        const bool useV3 = isCloud && !useV2Fallback;
-        const QString apiVer = useV3 ? QStringLiteral("3") : QStringLiteral("2");
-        QUrl url(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed());
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry, forceBearerAuth);
-
-        QJsonObject fieldsObj;
-        if (useV3) {
-            fieldsObj[QStringLiteral("description")] = markdownToJiraAdf(markdownDetails);
-        } else {
-            fieldsObj[QStringLiteral("description")] = markdownDetails;
-        }
-        QJsonObject payload{{QStringLiteral("fields"), fieldsObj}};
-
-        QNetworkReply* reply = m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, markdownDetails, forceBearerAuth, useV3, useV2Fallback]() {
-            reply->deleteLater();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
-            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
-            if (reply->error() != QNetworkReply::NoError || authErr) {
-                if (forceBearerAuth) {
-                    m_jiraBearerTokens.remove(listEntry.id);
-                }
-                if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
-                    updateIssueDescription(listEntry, issueKey, markdownDetails, true, useV2Fallback);
-                    return;
-                }
-                if (useV3 && !useV2Fallback && (httpStatus == 400 || httpStatus == 404)) {
-                    updateIssueDescription(listEntry, issueKey, markdownDetails, forceBearerAuth, true);
-                    return;
-                }
-                setStatusMessage(tr("Failed to update description on Jira (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            if (forceBearerAuth) {
-                m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
-            }
-            setStatusMessage(tr("Updated description on Jira issue %1.").arg(issueKey));
-        });
+        updateJiraDescription(listEntry, issueKey, markdownDetails, forceBearerAuth, useV2Fallback, baseUrl);
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         updateYouTrackDescription(listEntry, issueKey, markdownDetails, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
@@ -646,96 +468,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
         updateRedmineStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
     } else if (listEntry.provider == QStringLiteral("Jira")) {
-        const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
-        const QString apiVer = isCloud ? QStringLiteral("3") : QStringLiteral("2");
-        const QUrl transUrl(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed() + QStringLiteral("/transitions"));
-        QNetworkRequest req(transUrl);
-        applyAuthHeader(req, listEntry, forceBearerAuth);
-
-        QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, done, localStatus, transUrl, forceBearerAuth]() {
-            reply->deleteLater();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
-            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
-            auto fail = [this, &listEntry](const QString& errMsg) {
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
-            };
-            if (reply->error() != QNetworkReply::NoError || authErr) {
-                if (forceBearerAuth) {
-                    m_jiraBearerTokens.remove(listEntry.id);
-                }
-                if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
-                    updateIssueStatusRemote(listEntry, issueKey, done, localStatus, true);
-                    return;
-                }
-                fail(tr("Failed to update status for %1 on %2 (%3): %4")
-                         .arg(issueKey, listEntry.provider).arg(httpStatus).arg(reply->errorString()));
-                return;
-            }
-
-            // Reopening goes to the "To Do" category (or "In Progress" when the local status is
-            // in_progress); completing goes to the "done" category. Category matches win over
-            // name matches, and there is deliberately no fallback to another category.
-            const QString wantedCategory = done ? QStringLiteral("done")
-                : (localStatus == QStringLiteral("in_progress") ? QStringLiteral("indeterminate") : QStringLiteral("new"));
-            const QStringList toNames = done
-                ? QStringList{QStringLiteral("done"), QStringLiteral("closed"), QStringLiteral("resolved")}
-                : (wantedCategory == QStringLiteral("indeterminate")
-                       ? QStringList{QStringLiteral("in progress")}
-                       : QStringList{QStringLiteral("to do"), QStringLiteral("open"), QStringLiteral("reopened"), QStringLiteral("backlog")});
-
-            const QJsonArray transitions = QJsonDocument::fromJson(reply->readAll()).object()
-                                               .value(QStringLiteral("transitions")).toArray();
-            QString selectedTransitionId;
-            for (const QJsonValue& val : transitions) {
-                const QJsonObject toObj = val.toObject().value(QStringLiteral("to")).toObject();
-                const QString catKey = toObj.value(QStringLiteral("statusCategory")).toObject()
-                                           .value(QStringLiteral("key")).toString().toLower();
-                if (catKey == wantedCategory) {
-                    selectedTransitionId = val.toObject().value(QStringLiteral("id")).toString();
-                    break;
-                }
-            }
-            if (selectedTransitionId.isEmpty()) {
-                for (const QJsonValue& val : transitions) {
-                    const QString toName = val.toObject().value(QStringLiteral("to")).toObject()
-                                               .value(QStringLiteral("name")).toString().toLower();
-                    if (toNames.contains(toName)) {
-                        selectedTransitionId = val.toObject().value(QStringLiteral("id")).toString();
-                        break;
-                    }
-                }
-            }
-            if (selectedTransitionId.isEmpty()) {
-                fail(tr("No matching Jira transition to update status of %1; status was not changed on %2.")
-                         .arg(issueKey, listEntry.provider));
-                return;
-            }
-
-            QNetworkRequest postReq(transUrl);
-            applyAuthHeader(postReq, listEntry, forceBearerAuth);
-            postReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-            const QJsonObject payload{{QStringLiteral("transition"), QJsonObject{{QStringLiteral("id"), selectedTransitionId}}}};
-            QNetworkReply* postReply = m_nam.post(postReq, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-            connect(postReply, &QNetworkReply::finished, this, [this, postReply, listEntry, issueKey, done, forceBearerAuth]() {
-                postReply->deleteLater();
-                const int status = postReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                if (postReply->error() != QNetworkReply::NoError || (status >= 400 && status < 600)) {
-                    const QString errMsg = tr("Failed to update status for %1 on %2 (%3): %4")
-                        .arg(issueKey, listEntry.provider).arg(status).arg(postReply->errorString());
-                    setStatusMessage(errMsg);
-                    emit syncFailed(listEntry.id, errMsg);
-                    return;
-                }
-                if (forceBearerAuth) {
-                    m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
-                }
-                setStatusMessage(done ? tr("Updated %1 on %2: closed").arg(issueKey, listEntry.provider)
-                                      : tr("Updated %1 on %2: open").arg(issueKey, listEntry.provider));
-            });
-        });
+        updateJiraStatusRemote(listEntry, issueKey, done, localStatus, forceBearerAuth, baseUrl);
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         updateYouTrackStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
@@ -755,46 +488,7 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
     if (baseUrl.isEmpty()) return;
 
     if (listEntry.provider == QStringLiteral("Jira")) {
-        const bool isCloud = baseUrl.contains(QStringLiteral(".atlassian.net"), Qt::CaseInsensitive);
-        const bool useV3 = isCloud && !useV2Fallback;
-        const QString apiVer = useV3 ? QStringLiteral("3") : QStringLiteral("2");
-        QUrl url(baseUrl + QStringLiteral("/rest/api/") + apiVer + QStringLiteral("/issue/") + issueKey.trimmed() + QStringLiteral("/comment"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry, forceBearerAuth);
-
-        QJsonObject payload;
-        if (useV3) {
-            payload[QStringLiteral("body")] = markdownToJiraAdf(markdownComment);
-        } else {
-            payload[QStringLiteral("body")] = markdownComment;
-        }
-
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, issueKey, markdownComment, forceBearerAuth, useV3, useV2Fallback]() {
-            reply->deleteLater();
-            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QByteArray seraph = reply->rawHeader("X-Seraph-Loginreason");
-            const bool authErr = (httpStatus == 401 || httpStatus == 403 || seraph.contains("AUTHENTICATED_FAILED"));
-            if (reply->error() != QNetworkReply::NoError || authErr) {
-                if (forceBearerAuth) {
-                    m_jiraBearerTokens.remove(listEntry.id);
-                }
-                if (!forceBearerAuth && !listEntry.jiraUser.trimmed().isEmpty() && authErr) {
-                    postIssueComment(listEntry, issueKey, markdownComment, true, useV2Fallback);
-                    return;
-                }
-                if (useV3 && !useV2Fallback && (httpStatus == 400 || httpStatus == 404)) {
-                    postIssueComment(listEntry, issueKey, markdownComment, forceBearerAuth, true);
-                    return;
-                }
-                setStatusMessage(tr("Failed to post comment to Jira (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            if (forceBearerAuth) {
-                m_jiraBearerTokens[listEntry.id] = listEntry.apiToken;
-            }
-            setStatusMessage(tr("Posted comment to Jira issue %1.").arg(issueKey));
-        });
+        postJiraComment(listEntry, issueKey, markdownComment, forceBearerAuth, useV2Fallback, baseUrl);
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
         postYouTrackComment(listEntry, issueKey, markdownComment, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
@@ -816,11 +510,8 @@ QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
     const QString provider = listEntry.provider.trimmed();
 
     if (provider == QStringLiteral("Jira")) {
-        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
-        const QString key = issueKey.trimmed();
-        if (!baseUrl.isEmpty() && !key.isEmpty()) {
-            return QUrl(baseUrl + QStringLiteral("/browse/") + key);
-        }
+        const QUrl url = buildJiraBrowserUrl(listEntry, issueKey);
+        if (!url.isEmpty()) return url;
     } else if (provider == QStringLiteral("YouTrack")) {
         const QUrl url = buildYouTrackBrowserUrl(listEntry, issueKey);
         if (!url.isEmpty()) return url;

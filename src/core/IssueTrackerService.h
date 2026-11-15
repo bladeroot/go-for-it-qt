@@ -197,6 +197,15 @@ private:
     void postYouTrackComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
     static QUrl buildYouTrackBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
 
+    // Jira actions
+    void fetchJiraPriorities(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping);
+    void fetchJiraStatuses(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping);
+    void postJiraWorklog(const TodoListEntry& listEntry, qint64 taskId, qint64 activityLogId, const QString& issueKey, const QDateTime& startTimeUtc, quint32 runtimeSeconds, bool forceBearerAuth, const QString& baseUrl);
+    void updateJiraDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails, bool forceBearerAuth, bool useV2Fallback, const QString& baseUrl);
+    void updateJiraStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const QString& localStatus, bool forceBearerAuth, const QString& baseUrl);
+    void postJiraComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, bool forceBearerAuth, bool useV2Fallback, const QString& baseUrl);
+    static QUrl buildJiraBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 
