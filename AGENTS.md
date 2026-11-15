@@ -24,7 +24,7 @@ Use four-space indentation, same-line braces, `PascalCase` classes, and `camelCa
 
 ## Testing Guidelines
 
-Tests use Qt Test through CTest. Add focused private slots to `tests/tst_todotxt.cpp`, named `testBehaviorOrFeature`. Exercise persistence, rollback, model state, parsing, and signal side effects with deterministic data. Run one slot as `$build_dir/tst_todotxt testBehaviorOrFeature`, then always run the full suite.
+Tests use Qt Test through CTest. Add focused private slots to the appropriate suite (`tests/tst_core.cpp`, `tests/tst_trackers.cpp`, `tests/tst_tui.cpp`, `tests/tst_qml.cpp`, `tests/tst_credentials.cpp`), named `testBehaviorOrFeature`. Exercise persistence, rollback, model state, parsing, and signal side effects with deterministic data. Run one slot as `$build_dir/tst_core testBehaviorOrFeature` (or the respective suite binary), then always run the full suite.
 
 ## Review & Known-Bug Workflow
 

@@ -158,17 +158,17 @@ target_link_libraries(go-for-it-tui PRIVATE
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/data DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 if(BUILD_TESTING)
-    add_executable(tst_todotxt
+    add_executable(tst_core
         tests/TestSupport.h
         tests/TestSupport.cpp
-        tests/tst_todotxt.cpp
+        tests/tst_core.cpp
     )
-    target_link_libraries(tst_todotxt PRIVATE
+    target_link_libraries(tst_core PRIVATE
         gofi_core
         Qt6::Test
     )
-    add_test(NAME tst_todotxt COMMAND tst_todotxt)
-    set_tests_properties(tst_todotxt PROPERTIES
+    add_test(NAME tst_core COMMAND tst_core)
+    set_tests_properties(tst_core PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )
 

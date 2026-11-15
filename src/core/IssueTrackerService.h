@@ -11,7 +11,7 @@
 #include <QVector>
 #include <functional>
 
-class TestTodoTxt;
+class TestCore;
 class TestTrackers;
 
 namespace gofi {
@@ -217,7 +217,7 @@ private:
     QHash<QString, QString> m_jiraBearerTokens;
     std::function<bool(const QString& listId, const QString& jiraKey)> m_activeTaskChecker;
 
-    friend class ::TestTodoTxt;
+    friend class ::TestCore;
     friend class ::TestTrackers;
 };
 

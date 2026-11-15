@@ -53,7 +53,7 @@
 
 using namespace gofi;
 
-class TestTodoTxt : public QObject {
+class TestCore : public QObject {
     Q_OBJECT
 
 private:
@@ -3241,5 +3241,5 @@ private slots:
 
 };
 
-QTEST_MAIN(TestTodoTxt)
-#include "tst_todotxt.moc"
+QTEST_MAIN(TestCore)
+#include "tst_core.moc"
