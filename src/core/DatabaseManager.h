@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ActivityRepository.h"
+#include "DatabaseBackup.h"
+#include "DatabaseSchema.h"
 #include "ListRepository.h"
 #include "Schedule.h"
 #include "TaskRepository.h"
@@ -25,6 +27,10 @@ public:
     bool commitTransaction();
     bool rollbackTransaction();
     [[nodiscard]] QString databasePath() const { return m_dbPath; }
+
+    // Database Backup & Relocation (delegated to DatabaseBackup)
+    [[nodiscard]] DatabaseBackup& backup() { return m_backup; }
+    [[nodiscard]] const DatabaseBackup& backup() const { return m_backup; }
     bool relocateDatabase(const QString& newDbPath, bool copyExisting = true);
     bool exportDatabaseBackup(const QString& destinationFilePath) const;
     bool importDatabaseBackup(const QString& sourceFilePath);
@@ -103,6 +109,7 @@ public:
     friend class TaskRepository;
     friend class ListRepository;
     friend class ActivityRepository;
+    friend class DatabaseBackup;
 
 private:
     DatabaseManager();
@@ -118,6 +125,7 @@ private:
     ListRepository m_listRepo;
     TaskRepository m_taskRepo;
     ActivityRepository m_activityRepo;
+    DatabaseBackup m_backup;
 };
 
 } // namespace gofi
