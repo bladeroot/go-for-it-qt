@@ -1,4 +1,6 @@
 #include "trackers/TrackerCommon.h"
+#include "DatabaseManager.h"
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -337,6 +339,194 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
 
         processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
     });
+}
+
+void IssueTrackerService::fetchRedminePriorities(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping) {
+    QUrl url(baseUrl + QStringLiteral("/enumerations/issue_priorities.json"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, tempEntry);
+
+    QNetworkReply* reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, existingMapping]() {
+        reply->deleteLater();
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() == QNetworkReply::NoError) {
+            const QVariantList list = parseRedminePrioritiesJson(reply->readAll(), existingMapping);
+            if (!list.isEmpty()) {
+                emit remotePrioritiesLoaded(list);
+                return;
+            }
+        }
+        emit remotePrioritiesError(tr("Failed to load Redmine priorities (%1): %2").arg(httpStatus).arg(reply->errorString()));
+    });
+}
+
+void IssueTrackerService::fetchRedmineStatuses(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping) {
+    QUrl url(baseUrl + QStringLiteral("/issue_statuses.json"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, tempEntry, false);
+    QNetworkReply* reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, existingMapping]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit remoteStatusesError(tr("Failed to load Redmine statuses: %1").arg(reply->errorString()));
+            return;
+        }
+        emit remoteStatusesLoaded(parseRedmineStatusesJson(reply->readAll(), existingMapping));
+    });
+}
+
+void IssueTrackerService::postRedmineWorklog(const TodoListEntry& listEntry,
+                                             qint64 activityLogId,
+                                             const QString& issueKey,
+                                             quint32 runtimeSeconds,
+                                             const QDateTime& startTimeUtc,
+                                             const QString& baseUrl) {
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        numStr = issueKey.split(QLatin1Char('#')).last();
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    const double hours = qMax(0.01, static_cast<double>(runtimeSeconds) / 3600.0);
+    QUrl url(baseUrl + QStringLiteral("/time_entries.json"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject timeEntryObj{
+        {QStringLiteral("issue_id"), numStr.toInt()},
+        {QStringLiteral("hours"), hours},
+        {QStringLiteral("spent_on"), startTimeUtc.toUTC().toString(QStringLiteral("yyyy-MM-dd"))},
+        {QStringLiteral("comments"), QStringLiteral("Logged via Go for It Qt Pomodoro timer")}
+    };
+    QJsonObject payload{{QStringLiteral("time_entry"), timeEntryObj}};
+
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, runtimeSeconds]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                setStatusMessage(dbErr);
+                emit syncFailed(listEntry.id, dbErr);
+            } else {
+                setStatusMessage(tr("Logged %1m to Redmine %2").arg(runtimeSeconds / 60U).arg(issueKey));
+                emit worklogPosted(issueKey, runtimeSeconds);
+            }
+        } else {
+            const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString errMsg = tr("Failed to post worklog to Redmine (%1): %2")
+                .arg(statusCode)
+                .arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(listEntry.id, errMsg);
+        }
+    });
+}
+
+void IssueTrackerService::updateRedmineDescription(const TodoListEntry& listEntry,
+                                                   const QString& issueKey,
+                                                   const QString& markdownDetails,
+                                                   const QString& baseUrl) {
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        numStr = issueKey.split(QLatin1Char('#')).last();
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    QUrl url(baseUrl + QStringLiteral("/issues/") + numStr + QStringLiteral(".json"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{
+        {QStringLiteral("issue"), QJsonObject{{QStringLiteral("description"), markdownDetails}}}
+    };
+    QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setStatusMessage(tr("Failed to update description on Redmine (%1): %2").arg(issueKey, reply->errorString()));
+            return;
+        }
+        setStatusMessage(tr("Updated description on Redmine issue %1.").arg(issueKey));
+    });
+}
+
+void IssueTrackerService::updateRedmineStatusRemote(const TodoListEntry& listEntry,
+                                                    const QString& issueKey,
+                                                    bool done,
+                                                    const QString& baseUrl,
+                                                    const std::function<void(QNetworkReply*)>& handleReply) {
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) numStr = issueKey.split(QLatin1Char('#')).last();
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    QUrl url(baseUrl + QStringLiteral("/issues/") + numStr + QStringLiteral(".json"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    const int statusId = resolveRedmineStatusId(listEntry.statusMapping, done);
+
+    QJsonObject payload{
+        {QStringLiteral("issue"), QJsonObject{{QStringLiteral("status_id"), statusId}}}
+    };
+    QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    handleReply(reply);
+}
+
+void IssueTrackerService::postRedmineComment(const TodoListEntry& listEntry,
+                                             const QString& issueKey,
+                                             const QString& markdownComment,
+                                             const QString& baseUrl) {
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        numStr = issueKey.split(QLatin1Char('#')).last();
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    QUrl url(baseUrl + QStringLiteral("/issues/") + numStr + QStringLiteral(".json"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{
+        {QStringLiteral("issue"), QJsonObject{{QStringLiteral("notes"), markdownComment}}}
+    };
+    QNetworkReply* reply = m_nam.sendCustomRequest(req, "PUT", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setStatusMessage(tr("Failed to post comment to Redmine (%1): %2").arg(issueKey, reply->errorString()));
+            return;
+        }
+        setStatusMessage(tr("Posted comment to Redmine issue %1.").arg(issueKey));
+    });
+}
+
+QUrl IssueTrackerService::buildRedmineBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey) {
+    const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+    QString numStr;
+    for (const QChar& c : issueKey) {
+        if (c.isDigit()) numStr.append(c);
+    }
+    if (!baseUrl.isEmpty() && !numStr.isEmpty()) {
+        return QUrl(baseUrl + QStringLiteral("/issues/") + numStr);
+    }
+    if (!baseUrl.isEmpty()) {
+        return QUrl(baseUrl);
+    }
+    return QUrl();
 }
 
 } // namespace gofi

@@ -180,6 +180,15 @@ private:
     void postNextcloudComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment);
     static QUrl buildNextcloudBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
 
+    // Redmine actions
+    void fetchRedminePriorities(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping);
+    void fetchRedmineStatuses(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping);
+    void postRedmineWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds, const QDateTime& startTimeUtc, const QString& baseUrl);
+    void updateRedmineDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails, const QString& baseUrl);
+    void updateRedmineStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const QString& baseUrl, const std::function<void(QNetworkReply*)>& handleReply);
+    void postRedmineComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
+    static QUrl buildRedmineBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 
