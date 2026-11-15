@@ -2,7 +2,7 @@
 #include "tui/TuiApp.h"
 #include <QCommandLineOption>
 #include <QCommandLineParser>
-#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QLoggingCategory>
 #include <QTextStream>
 
@@ -11,6 +11,10 @@
 #endif
 
 int main(int argc, char* argv[]) {
+    // Force offscreen QPA platform plugin so that QTextDocument and QPdfWriter
+    // can initialize font metrics and render PDFs without requiring an X11 or Wayland display.
+    qputenv("QT_QPA_PLATFORM", "offscreen");
+
     if (qEnvironmentVariableIsEmpty("QT_FFMPEG_DECODING_HW_DEVICE_TYPES")) {
         qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", ",");
     }
@@ -20,10 +24,10 @@ int main(int argc, char* argv[]) {
         "qt.qpa.services.warning=false"
     ));
 
-    QCoreApplication app(argc, argv);
-    QCoreApplication::setApplicationName(QStringLiteral("go-for-it-qt"));
-    QCoreApplication::setApplicationVersion(QStringLiteral(GOFI_VERSION));
-    QCoreApplication::setOrganizationName(QStringLiteral("go-for-it-qt"));
+    QGuiApplication app(argc, argv);
+    QGuiApplication::setApplicationName(QStringLiteral("go-for-it-qt"));
+    QGuiApplication::setApplicationVersion(QStringLiteral(GOFI_VERSION));
+    QGuiApplication::setOrganizationName(QStringLiteral("go-for-it-qt"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Go for It Qt — Terminal UI (TUI) with Vim keybindings"));

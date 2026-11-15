@@ -1067,6 +1067,8 @@ private slots:
                                              .arg(exitInfo, QString::fromUtf8(screen.right(400)))));
         QCOMPARE(proc.exitStatus(), QProcess::NormalExit);
         QVERIFY2(!screen.contains("QFontDatabase"), screen.right(400).constData());
+        QVERIFY2(QFile::exists(pdfPath), "PDF file must be successfully exported by :export-pdf in TUI");
+        QVERIFY2(QFileInfo(pdfPath).size() > 0, "Exported PDF must not be empty");
         QFile::remove(pdfPath);
     }
 
