@@ -95,6 +95,10 @@ set(GOFI_CORE_SOURCES
     src/todotxt/TaskFilterProxyModel.cpp
     src/todotxt/TaskManager.h
     src/todotxt/TaskManager.cpp
+    src/tui/TuiUtils.h
+    src/tui/TuiUtils.cpp
+    src/tui/TuiMarkdownView.h
+    src/tui/TuiMarkdownView.cpp
     src/tui/TuiApp.h
     src/tui/TuiApp.cpp
 )

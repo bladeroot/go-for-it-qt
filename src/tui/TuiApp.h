@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/AppController.h"
+#include "tui/TuiMarkdownView.h"
 #include <QObject>
 #include <QSet>
 #include <QSocketNotifier>
@@ -104,9 +105,7 @@ private:
     QString m_inputBuffer;
     int m_inputCursor = 0;
     QString m_statusMessage;
-    QString m_markdownTitle;
-    QString m_markdownContent;
-    int m_markdownScroll = 0;
+    TuiMarkdownView m_markdownView;
     int m_dashboardPeriod = 0; // 0:Day, 1:Week, 2:Month, 3:All
     int m_dashboardScroll = 0;
 };
