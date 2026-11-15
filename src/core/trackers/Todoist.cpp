@@ -1,4 +1,5 @@
 #include "trackers/TrackerCommon.h"
+#include "DatabaseManager.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -107,6 +108,115 @@ void IssueTrackerService::fetchTodoistTasks(const TodoListEntry& entry) {
         const bool explicitZero = !hasError && items.isEmpty();
         processSyncedItems(entry, items, QStringLiteral("Todoist"), false, hasError, explicitZero);
     });
+}
+
+void IssueTrackerService::postTodoistWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds) {
+    QString tdTaskId = issueKey;
+    if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
+    if (tdTaskId.isEmpty()) return;
+
+    const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+    QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{
+        {QStringLiteral("task_id"), tdTaskId},
+        {QStringLiteral("content"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
+    };
+
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                setStatusMessage(dbErr);
+                emit syncFailed(listEntry.id, dbErr);
+            } else {
+                setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
+                emit worklogPosted(issueKey, minutes * 60U);
+            }
+        } else {
+            const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString errMsg = tr("Failed to post worklog to Todoist (%1): %2")
+                .arg(statusCode)
+                .arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(listEntry.id, errMsg);
+        }
+    });
+}
+
+void IssueTrackerService::updateTodoistDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails) {
+    QString taskId = issueKey;
+    if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
+    if (taskId.isEmpty()) return;
+
+    QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + taskId);
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{
+        {QStringLiteral("description"), markdownDetails}
+    };
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setStatusMessage(tr("Failed to update description on Todoist (%1): %2").arg(issueKey, reply->errorString()));
+            return;
+        }
+        setStatusMessage(tr("Updated description on Todoist task %1.").arg(issueKey));
+    });
+}
+
+void IssueTrackerService::updateTodoistStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const std::function<void(QNetworkReply*)>& handleReply) {
+    QString tdTaskId = issueKey;
+    if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
+    if (tdTaskId.isEmpty()) return;
+
+    const QString action = done ? QStringLiteral("close") : QStringLiteral("reopen");
+    QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + tdTaskId + QLatin1Char('/') + action);
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+    QNetworkReply* reply = m_nam.post(req, QByteArray());
+    handleReply(reply);
+}
+
+void IssueTrackerService::postTodoistComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment) {
+    QString taskId = issueKey;
+    if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
+    if (taskId.isEmpty()) return;
+
+    QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{
+        {QStringLiteral("task_id"), taskId},
+        {QStringLiteral("content"), markdownComment}
+    };
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setStatusMessage(tr("Failed to post comment to Todoist (%1): %2").arg(issueKey, reply->errorString()));
+            return;
+        }
+        setStatusMessage(tr("Posted comment to Todoist task %1.").arg(issueKey));
+    });
+}
+
+QUrl IssueTrackerService::buildTodoistBrowserUrl(const TodoListEntry& /*listEntry*/, const QString& issueKey) {
+    QString numStr;
+    for (const QChar& c : issueKey) {
+        if (c.isDigit()) numStr.append(c);
+    }
+    if (!numStr.isEmpty()) {
+        return QUrl(QStringLiteral("https://todoist.com/app/task/") + numStr);
+    }
+    return QUrl(QStringLiteral("https://todoist.com/app/today"));
 }
 
 } // namespace gofi

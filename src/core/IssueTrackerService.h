@@ -166,6 +166,13 @@ private:
     void postGitLabComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
     static QUrl buildGitLabBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
 
+    // Todoist actions
+    void postTodoistWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds);
+    void updateTodoistDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails);
+    void updateTodoistStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const std::function<void(QNetworkReply*)>& handleReply);
+    void postTodoistComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment);
+    static QUrl buildTodoistBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 

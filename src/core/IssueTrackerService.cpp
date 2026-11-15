@@ -658,41 +658,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             }
         });
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        QString tdTaskId = issueKey;
-        if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
-        if (tdTaskId.isEmpty()) return;
-
-        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
-        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{
-            {QStringLiteral("task_id"), tdTaskId},
-            {QStringLiteral("content"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
-        };
-
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
-            reply->deleteLater();
-            if (reply->error() == QNetworkReply::NoError) {
-                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
-                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
-                    setStatusMessage(dbErr);
-                    emit syncFailed(listEntry.id, dbErr);
-                } else {
-                    setStatusMessage(tr("Logged %1m to Todoist task %2").arg(minutes).arg(issueKey));
-                    emit worklogPosted(issueKey, minutes * 60U);
-                }
-            } else {
-                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                const QString errMsg = tr("Failed to post worklog to Todoist (%1): %2")
-                    .arg(statusCode)
-                    .arg(reply->errorString());
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
-            }
-        });
+        postTodoistWorklog(listEntry, activityLogId, issueKey, runtimeSeconds);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
         QString uid = issueKey;
         if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
@@ -854,26 +820,7 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             setStatusMessage(tr("Updated description on Redmine issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        QString taskId = issueKey;
-        if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
-        if (taskId.isEmpty()) return;
-
-        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + taskId);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{
-            {QStringLiteral("description"), markdownDetails}
-        };
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                setStatusMessage(tr("Failed to update description on Todoist (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            setStatusMessage(tr("Updated description on Todoist task %1.").arg(issueKey));
-        });
+        updateTodoistDescription(listEntry, issueKey, markdownDetails);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
         QString uid = issueKey;
         if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
@@ -972,16 +919,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
         updateGitLabStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        QString tdTaskId = issueKey;
-        if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
-        if (tdTaskId.isEmpty()) return;
-
-        const QString action = done ? QStringLiteral("close") : QStringLiteral("reopen");
-        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/tasks/") + tdTaskId + QLatin1Char('/') + action);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-        QNetworkReply* reply = m_nam.post(req, QByteArray());
-        handleReply(reply);
+        updateTodoistStatusRemote(listEntry, issueKey, done, handleReply);
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
         QString numStr;
         if (issueKey.contains(QLatin1Char('#'))) numStr = issueKey.split(QLatin1Char('#')).last();
@@ -1309,27 +1247,7 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             setStatusMessage(tr("Posted comment to Redmine issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        QString taskId = issueKey;
-        if (taskId.startsWith(QStringLiteral("TD#"))) taskId = taskId.mid(3);
-        if (taskId.isEmpty()) return;
-
-        QUrl url(QStringLiteral("https://api.todoist.com/rest/v2/comments"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{
-            {QStringLiteral("task_id"), taskId},
-            {QStringLiteral("content"), markdownComment}
-        };
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                setStatusMessage(tr("Failed to post comment to Todoist (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            setStatusMessage(tr("Posted comment to Todoist task %1.").arg(issueKey));
-        });
+        postTodoistComment(listEntry, issueKey, markdownComment);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
         QString uid = issueKey;
         if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
@@ -1416,14 +1334,7 @@ QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
             return QUrl(baseUrl);
         }
     } else if (provider == QStringLiteral("Todoist")) {
-        QString numStr;
-        for (const QChar& c : issueKey) {
-            if (c.isDigit()) numStr.append(c);
-        }
-        if (!numStr.isEmpty()) {
-            return QUrl(QStringLiteral("https://todoist.com/app/task/") + numStr);
-        }
-        return QUrl(QStringLiteral("https://todoist.com/app/today"));
+        return buildTodoistBrowserUrl(listEntry, issueKey);
     } else if (provider == QStringLiteral("Nextcloud")) {
         const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
         if (!baseUrl.isEmpty()) {
