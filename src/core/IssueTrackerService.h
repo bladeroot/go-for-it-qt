@@ -12,6 +12,7 @@
 #include <functional>
 
 class TestTodoTxt;
+class TestTrackers;
 
 namespace gofi {
 
@@ -217,6 +218,7 @@ private:
     std::function<bool(const QString& listId, const QString& jiraKey)> m_activeTaskChecker;
 
     friend class ::TestTodoTxt;
+    friend class ::TestTrackers;
 };
 
 } // namespace gofi

@@ -213,6 +213,20 @@ if(BUILD_TESTING)
     set_tests_properties(tst_qml PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )
+
+    add_executable(tst_trackers
+        tests/TestSupport.h
+        tests/TestSupport.cpp
+        tests/tst_trackers.cpp
+    )
+    target_link_libraries(tst_trackers PRIVATE
+        gofi_core
+        Qt6::Test
+    )
+    add_test(NAME tst_trackers COMMAND tst_trackers)
+    set_tests_properties(tst_trackers PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    )
 endif()
 
 # ==============================================================================
