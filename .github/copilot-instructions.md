@@ -11,15 +11,16 @@ cmake --build "$build_dir" -j2
 QT_QPA_PLATFORM=offscreen ctest --test-dir "$build_dir" --output-on-failure
 ```
 
-All Qt tests are slots in `tst_todotxt`. Run one slot with
-`QT_QPA_PLATFORM=offscreen "$build_dir/tst_todotxt" testDueDatesAndSmartFilters`;
-list slots with `"$build_dir/tst_todotxt" -functions`. Remove the temporary build
+Qt tests live in five binaries (`tst_core`, `tst_trackers`, `tst_tui`, `tst_qml`,
+`tst_credentials`). Run one slot with
+`QT_QPA_PLATFORM=offscreen "$build_dir/tst_core" testDueDatesAndSmartFilters`;
+list slots with `"$build_dir/tst_core" -functions`. Remove the temporary build
 directory when finished. There is no configured linter or formatter.
 
 ## Architecture
 
 - `gofi_core` is the shared static library for `go-for-it-qt`, `go-for-it-tui`,
-  and `tst_todotxt`. `AppController` is the composition root: QML receives it as
+  and the `tst_*` test binaries. `AppController` is the composition root: QML receives it as
   the `app` context object, and the TUI uses the same controller. Put behavior
   shared by both interfaces in the controller or its services, not in QML or
   `TuiApp`.

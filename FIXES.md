@@ -2,7 +2,7 @@
 
 This document maintains a comprehensive, structured record of defects, edge cases, and architectural regressions identified and resolved in **Go for It Qt** (`go-for-it-qt`, `go-for-it-tui`).
 
-All entries are validated by regression tests in [tests/tst_todotxt.cpp](tests/tst_todotxt.cpp).
+All entries are validated by regression tests in the `tests/tst_*.cpp` suites (`tst_core`, `tst_trackers`, `tst_tui`, `tst_qml`, `tst_credentials`; before the split they all lived in `tests/tst_todotxt.cpp`).
 
 ---
 
