@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI: activity heatmap on dashboard view now dynamically reflects the exact date range and wraps into week-aligned rows, preventing truncation of recent days on standard 80-column terminals (KB-115).
 - Billing reports: project names containing angle brackets or special characters are now HTML-escaped, preventing them from being stripped in generated PDF documents (KB-116).
 - Task comments: TaskDetailsDialog and TUI now verify database write results when posting comments, preventing unpersisted comments from falsely displaying as saved (KB-117).
+- CI: install `poppler-utils` so the PDF report test can run, and make the KB-116/KB-117 regression tests actually detect their defects (KB-118..120).
 - Mini player: detached window as an independent top-level window and integrated KWin Scripting to keep the mini player always on top and across all workspaces under Wayland without modifying foreign application windows (KB-96, KB-97).
 - Mini player: resolved duplicate `Ctrl+M` shortcut conflict in `Main.qml` (KB-93).
 - Keyboard navigation: pressing `Enter`/`Return` inside text editors or spin boxes no longer opens task details dialog, and pressing `Enter` on the To-Do list now opens the highlighted active task (KB-91, KB-92).

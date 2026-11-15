@@ -8877,6 +8877,44 @@ private slots:
         QCOMPARE(afterUnlock, QStringLiteral("pat_new_current"));
     }
 
+    // KB-120: the TUI half of testPostCommentDoesNotDisplayCommentWhenDbSaveFails ran on an empty list and
+    // looked for a string the TUI never printed. This exercises a real DB write failure on an existing task.
+    void testTuiCommentReportsDbFailureForExistingTask() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb120_tui_dbfail.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString list = ctrl.listManager()->addList(QStringLiteral("KB120"));
+        ctrl.selectListById(list);
+        ctrl.addNewTask(QStringLiteral("Commented task"));
+        QVERIFY(ctrl.todoProxyModel()->rowCount() >= 1);
+
+        QSqlQuery trig(QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn")));
+        QVERIFY(trig.exec(QStringLiteral(
+            "CREATE TRIGGER kb120_fail BEFORE UPDATE ON tasks "
+            "BEGIN SELECT RAISE(ABORT, 'Simulated comment save failure'); END;")));
+
+        QString screen;
+        {
+            PtyTerminal term;
+            QVERIFY(term.open(30, 100));
+            TuiApp tui(&ctrl);
+            QVERIFY(tui.start());
+            QTest::qWait(100);
+            term.takeOutput();
+            term.type(":comment Unsaved Comment\r");
+            QTest::qWait(300);
+            screen = QString::fromUtf8(term.takeOutput());
+        }
+        screen.remove(QRegularExpression(QStringLiteral("\x1b\\[[0-9;?]*[A-Za-z]")));
+        const QString okMsg = QCoreApplication::translate("TuiApp", "Comment added & queued for Jira/YouTrack sync.");
+        const QString failMsg = QCoreApplication::translate("TuiApp", "Failed to save comment to database.");
+        QVERIFY2(!screen.contains(okMsg.left(20)), qPrintable(screen));
+        QVERIFY2(screen.contains(failMsg.left(20)), qPrintable(screen));
+
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
     // KB-115: TUI dashboard "── 28-DAY ACTIVITY HEATMAP ──" hardcoded 28 days even though
     // getActivityHeatmap returns 28..34 days (Monday-aligned since KB-99), and on an 80-column
     // terminal (2 + 3*days cols = 86..104 cols) truncateVisible cut off the rightmost cells,
@@ -8961,12 +8999,17 @@ private slots:
 
         // In QPdfWriter output, text strings from QTextDocument appear in the rendered document.
         // If "+Security<Core>" was not HTML-escaped, "<Core>" is parsed as an HTML tag and omitted entirely.
+        const QString pdftotext = QStandardPaths::findExecutable(QStringLiteral("pdftotext"));
+        QVERIFY2(!pdftotext.isEmpty(), "pdftotext (poppler-utils) is required to inspect the generated PDF");
         QProcess pdfProc;
-        pdfProc.start(QStringLiteral("pdftotext"), {pdfPath, QStringLiteral("-")});
-        QVERIFY(pdfProc.waitForFinished(3000));
+        pdfProc.start(pdftotext, {pdfPath, QStringLiteral("-")});
+        QVERIFY(pdfProc.waitForFinished(10000));
+        QCOMPARE(pdfProc.exitCode(), 0);
         const QString pdfText = QString::fromUtf8(pdfProc.readAllStandardOutput());
         QFile::remove(pdfPath);
-        QVERIFY2(pdfText.contains(QStringLiteral("Security<Core>")),
+        // KB-119: the task description row ("Refactor kernel +Security<Core>") is escaped independently,
+        // so the project-distribution row must contribute the second occurrence.
+        QVERIFY2(pdfText.count(QStringLiteral("+Security<Core>")) == 2,
                  qPrintable(QStringLiteral("Project name with angle brackets was stripped from the generated PDF: %1").arg(pdfText)));
 
         DatabaseManager::instance().close();
@@ -8982,22 +9025,10 @@ private slots:
         const QString list = ctrl.listManager()->addList(QStringLiteral("KB117"));
         ctrl.selectListById(list);
 
-        // 1. TUI verification: posting a comment when row is invalid or DB write fails must not report success
-        QString tuiScreen;
-        {
-            PtyTerminal term;
-            QVERIFY(term.open(30, 80));
-            TuiApp tui(&ctrl);
-            QVERIFY(tui.start());
-            QTest::qWait(100);
-            term.takeOutput();
-            term.type(":comment Unsaved Comment\r");
-            QTest::qWait(200);
-            tuiScreen = QString::fromUtf8(term.takeOutput());
-        }
-        QVERIFY2(!tuiScreen.contains(QStringLiteral("Comment posted")), qPrintable(tuiScreen));
+        // The TUI path is covered by testTuiCommentReportsDbFailureForExistingTask (KB-120): a new list gets
+        // default tasks, so a TUI ":comment" here would legitimately succeed.
 
-        // 2. QML verification: TaskDetailsDialog must not append comment or clear text area on failure
+        // QML verification: TaskDetailsDialog must not append comment or clear text area on failure
         QQmlEngine engine;
         engine.rootContext()->setContextProperty(QStringLiteral("app"), &ctrl);
         const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb117_qml"));
