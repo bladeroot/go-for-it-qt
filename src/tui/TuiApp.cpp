@@ -58,6 +58,7 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
     , m_dashboardView(controller)
     , m_commandHandler(this)
     , m_settingsView(controller)
+    , m_listManagerView(controller)
 {
     connect(m_app, &AppController::currentListChanged, this, [this]() {
         m_selectedRow = 0;
@@ -761,13 +762,7 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             }
         } else if (prevMode == Mode::EditListField) {
             m_mode = Mode::ListEdit;
-            if (m_listEditRow == 0) m_editingListCfg[QStringLiteral("name")] = text;
-            else if (m_listEditRow == 2) m_editingListCfg[QStringLiteral("jiraUrl")] = text;
-            else if (m_listEditRow == 3) m_editingListCfg[QStringLiteral("jiraUser")] = text;
-            else if (m_listEditRow == 4) {
-                if (!text.isEmpty()) m_editingListCfg[QStringLiteral("apiToken")] = text;
-            }
-            else if (m_listEditRow == 5) m_editingListCfg[QStringLiteral("jiraJql")] = text;
+            m_listManagerView.applyFieldEdit(text);
         }
         return;
     }
@@ -859,172 +854,36 @@ void TuiApp::handleStatusPickerKey(const QByteArray& seq) {
 }
 
 void TuiApp::openListPicker() {
-    m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
-    m_selectedListIds.clear();
-    if (m_app->isMultiListView()) {
-        const QStringList active = m_app->activeListIds();
-        for (const QString& id : active) {
-            m_selectedListIds.insert(id);
-        }
-    }
+    m_listManagerView.openPicker();
     m_mode = Mode::ListPicker;
 }
 
 void TuiApp::handleListPickerKey(const QByteArray& seq) {
-    const int nLists = m_app->listManager()->rowCount();
-    if (seq == "\033" || seq == "q" || seq == "L") {
+    QString msg;
+    const ListPickerKeyResult res = m_listManagerView.handlePickerKey(seq, msg);
+    if (!msg.isEmpty()) {
+        m_statusMessage = msg;
+    }
+    if (res == ListPickerKeyResult::Close || res == ListPickerKeyResult::Applied) {
         m_mode = Mode::Normal;
-        return;
-    }
-    if (seq == "j" || seq == "\033[B") {
-        if (nLists > 0) m_listPickerRow = qMin(nLists - 1, m_listPickerRow + 1);
-        return;
-    }
-    if (seq == "k" || seq == "\033[A") {
-        if (nLists > 0) m_listPickerRow = qMax(0, m_listPickerRow - 1);
-        return;
-    }
-    // Toggle multi-selection checkbox with Space
-    if (seq == " ") {
-        if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-            const QString id = m_app->listManager()->entry(m_listPickerRow).id;
-            if (m_selectedListIds.contains(id)) {
-                m_selectedListIds.remove(id);
-            } else {
-                m_selectedListIds.insert(id);
-            }
-        }
-        return;
-    }
-    // Quick filter: All Lists
-    if (seq == "*" || seq == "A") {
-        m_mode = Mode::Normal;
-        m_app->showAllLists();
-        m_statusMessage = tr("Switched to All Lists (%1 lists).").arg(nLists);
-        return;
-    }
-    // Quick filter: All Local SQLite lists
-    if (seq == "l") {
-        m_mode = Mode::Normal;
-        m_app->showProviderLists(QStringLiteral("SQLite"));
-        m_statusMessage = tr("Switched to Local lists view.");
-        return;
-    }
-    // Quick filter: All Remote Trackers
-    if (seq == "t" || seq == "T") {
-        QStringList trackerIds;
-        for (int i = 0; i < nLists; ++i) {
-            const auto entry = m_app->listManager()->entry(i);
-            if (entry.provider != QStringLiteral("SQLite")) {
-                trackerIds.append(entry.id);
-            }
-        }
-        if (!trackerIds.isEmpty()) {
-            m_mode = Mode::Normal;
-            m_app->setMultiListFilter(trackerIds, tr("All Trackers (%1)").arg(trackerIds.size()));
-            m_statusMessage = tr("Switched to All Trackers view (%1 lists).").arg(trackerIds.size());
-            return;
-        }
-    }
-    // Add list: a, o, n, +
-    if (seq == "a" || seq == "o" || seq == "n" || seq == "+") {
-        m_editingListCfg = m_app->listManager()->getListConfig(QString());
-        m_editingListCfg[QStringLiteral("name")] = QStringLiteral("New List");
-        m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
-        m_listEditRow = 0;
+    } else if (res == ListPickerKeyResult::EditList) {
         m_mode = Mode::ListEdit;
-        return;
-    }
-    // Edit list: e, i
-    if ((seq == "e" || seq == "i") && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-        const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
-        m_editingListCfg = m_app->listManager()->getListConfig(entry.id);
-        m_listEditRow = 0;
-        m_mode = Mode::ListEdit;
-        return;
-    }
-    // Delete list: d
-    if (seq == "d" && nLists > 1 && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-        const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
-        m_selectedListIds.remove(entry.id);
-        m_app->listManager()->removeListById(entry.id);
-        m_listPickerRow = qBound(0, m_listPickerRow, m_app->listManager()->rowCount() - 1);
-        m_statusMessage = tr("Removed list '%1'.").arg(entry.name);
-        return;
-    }
-    // Apply selection: Enter
-    if (seq == "\r" || seq == "\n") {
-        m_mode = Mode::Normal;
-        if (m_selectedListIds.size() > 1) {
-            QStringList ids = m_selectedListIds.values();
-            m_app->setMultiListFilter(ids, tr("Selected Lists (%1)").arg(ids.size()));
-            m_statusMessage = tr("Showing %1 selected lists.").arg(ids.size());
-        } else if (m_selectedListIds.size() == 1) {
-            const QString selId = *m_selectedListIds.begin();
-            m_app->selectListById(selId);
-            m_statusMessage = tr("Switched to list '%1'.").arg(m_app->currentListName());
-        } else if (m_listPickerRow >= 0 && m_listPickerRow < nLists) {
-            const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
-            m_app->selectListById(entry.id);
-            m_statusMessage = tr("Switched to list '%1' (%2).").arg(entry.name, entry.provider);
-        }
     }
 }
 
 void TuiApp::handleListEditKey(const QByteArray& seq) {
-    if (seq == "\033" || seq == "q") {
+    QString editInitial;
+    QString msg;
+    const ListEditKeyResult res = m_listManagerView.handleEditKey(seq, editInitial, msg);
+    if (!msg.isEmpty()) {
+        m_statusMessage = msg;
+    }
+    if (res == ListEditKeyResult::BackToPicker) {
         m_mode = Mode::ListPicker;
-        return;
-    }
-    if (seq == "j" || seq == "\033[B") {
-        m_listEditRow = qMin(8, m_listEditRow + 1);
-        return;
-    }
-    if (seq == "k" || seq == "\033[A") {
-        m_listEditRow = qMax(0, m_listEditRow - 1);
-        return;
-    }
-    if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i" || seq == "h" || seq == "l") {
-        if (m_listEditRow == 1) {
-            // Cycle provider: SQLite -> Jira -> YouTrack -> GitHub -> GitLab -> Redmine -> Todoist -> Nextcloud
-            const QString cur = m_editingListCfg.value(QStringLiteral("provider")).toString();
-            if (cur == QStringLiteral("SQLite")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Jira");
-            else if (cur == QStringLiteral("Jira")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("YouTrack");
-            else if (cur == QStringLiteral("YouTrack")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("GitHub");
-            else if (cur == QStringLiteral("GitHub")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("GitLab");
-            else if (cur == QStringLiteral("GitLab")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Redmine");
-            else if (cur == QStringLiteral("Redmine")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Todoist");
-            else if (cur == QStringLiteral("Todoist")) m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("Nextcloud");
-            else m_editingListCfg[QStringLiteral("provider")] = QStringLiteral("SQLite");
-            return;
-        }
-        if (m_listEditRow == 6) {
-            m_editingListCfg[QStringLiteral("autoWorklog")] = !m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool();
-            return;
-        }
-        if (m_listEditRow == 7) {
-            m_editingListCfg[QStringLiteral("syncStatusToRemote")] = !m_editingListCfg.value(QStringLiteral("syncStatusToRemote"), false).toBool();
-            return;
-        }
-        if (m_listEditRow == 8) {
-            // Save & Activate List
-            const QVariantMap check = m_app->listManager()->validateAndCheckConflicts(m_editingListCfg);
-            if (!check.value(QStringLiteral("valid")).toBool()) {
-                m_statusMessage = check.value(QStringLiteral("error")).toString();
-                return;
-            }
-            const QString savedId = m_app->listManager()->saveListConfig(m_editingListCfg, QStringLiteral("keep"));
-            m_app->selectListById(savedId);
-            m_mode = Mode::Normal;
-            m_statusMessage = tr("Saved and activated list '%1'.").arg(m_editingListCfg.value(QStringLiteral("name")).toString());
-            return;
-        }
-        // Text fields (0, 2, 3, 4, 5)
-        if (m_listEditRow == 0) m_inputBuffer = m_editingListCfg.value(QStringLiteral("name")).toString();
-        else if (m_listEditRow == 2) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraUrl")).toString();
-        else if (m_listEditRow == 3) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraUser")).toString();
-        else if (m_listEditRow == 4) m_inputBuffer.clear();
-        else if (m_listEditRow == 5) m_inputBuffer = m_editingListCfg.value(QStringLiteral("jiraJql")).toString();
+    } else if (res == ListEditKeyResult::SavedAndActivated) {
+        m_mode = Mode::Normal;
+    } else if (res == ListEditKeyResult::EditField) {
+        m_inputBuffer = editInitial;
         m_inputCursor = static_cast<int>(m_inputBuffer.size());
         m_mode = Mode::EditListField;
     }
@@ -1616,66 +1475,9 @@ void TuiApp::render() {
     } else if (m_mode == Mode::Settings || m_mode == Mode::EditSettingValue) {
         out += m_settingsView.render(bodyRows, m_cols);
     } else if (m_mode == Mode::ListEdit || m_mode == Mode::EditListField) {
-        out += FG_CYAN + ESC_BOLD + tr("  ✎ EDIT LIST CONFIGURATION (j/k move, Enter/Space edit, q/Esc cancel):") + ESC_RESET + QStringLiteral("\033[K\r\n");
-        const QString prov = m_editingListCfg.value(QStringLiteral("provider")).toString();
-        const QString tokenRaw = m_editingListCfg.value(QStringLiteral("apiToken")).toString();
-        const QString tokenMasked = tokenRaw.isEmpty() ? tr("(empty)") : (tokenRaw.left(4) + QStringLiteral("••••••••"));
-        const QStringList editItems = {
-            tr("1. List Name                    : %1").arg(m_editingListCfg.value(QStringLiteral("name")).toString()),
-            tr("2. Provider (Enter to cycle)    : [%1] (SQLite / Jira / YouTrack / GitHub / GitLab)").arg(prov),
-            tr("3. Server URL                   : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUrl")).toString()),
-            tr("4. Jira Email / Username        : %1").arg(m_editingListCfg.value(QStringLiteral("jiraUser")).toString()),
-            tr("5. API Token / Permanent Token  : %1").arg(tokenMasked),
-            tr("6. JQL / Search Query           : %1").arg(m_editingListCfg.value(QStringLiteral("jiraJql")).toString()),
-            tr("7. Auto-log Pomodoro Worklog    : %1").arg(m_editingListCfg.value(QStringLiteral("autoWorklog"), true).toBool() ? tr("[ON]") : tr("[OFF]")),
-            tr("8. Sync Status Back to Tracker  : %1").arg(m_editingListCfg.value(QStringLiteral("syncStatusToRemote"), false).toBool() ? tr("[ON]") : tr("[OFF]")),
-            tr("9. >>> [ SAVE & ACTIVATE LIST ] <<<")
-        };
-        for (int r = 1; r < bodyRows; ++r) {
-            const int idx = r - 1;
-            if (idx < editItems.size()) {
-                const bool isSel = (idx == m_listEditRow);
-                const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
-                out += (isSel ? (BG_SELECTED + (idx == 8 ? FG_GREEN : FG_WHITE) + ESC_BOLD) : (idx == 8 ? FG_GREEN : FG_WHITE))
-                    + padRight(prefix + editItems.at(idx), m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
-            } else {
-                out += QStringLiteral("\033[K\r\n");
-            }
-        }
+        out += m_listManagerView.renderEdit(bodyRows, m_cols);
     } else if (m_mode == Mode::ListPicker) {
-        out += FG_CYAN + ESC_BOLD + tr("  📋 LISTS (Space:toggle [x], Enter:apply, *:All, l:Local, t:Trackers, a/o:Add, e:Edit, d:Del, Esc:back):") + ESC_RESET + QStringLiteral("\033[K\r\n");
-        const int nLists = m_app->listManager()->rowCount();
-        for (int r = 1; r < bodyRows; ++r) {
-            const int idx = r - 1;
-            if (idx < nLists) {
-                const TodoListEntry e = m_app->listManager()->entry(idx);
-                const bool isSel = (idx == m_listPickerRow);
-                const bool isChecked = m_selectedListIds.contains(e.id);
-                const QString cursor = isSel ? QStringLiteral(" > ") : QStringLiteral("   ");
-                const QString check = isChecked ? (FG_GREEN + QStringLiteral("[x]") + ESC_RESET) : (FG_GRAY + QStringLiteral("[ ]") + ESC_RESET);
-
-                QString provColor = FG_WHITE;
-                if (e.provider == QStringLiteral("GitHub")) provColor = FG_PURPLE;
-                else if (e.provider == QStringLiteral("GitLab")) provColor = FG_ORANGE;
-                else if (e.provider == QStringLiteral("Jira")) provColor = FG_CYAN;
-                else if (e.provider == QStringLiteral("YouTrack")) provColor = FG_YELLOW;
-                else if (e.provider == QStringLiteral("Redmine")) provColor = FG_RED;
-                else if (e.provider == QStringLiteral("Todoist")) provColor = FG_ORANGE;
-                else if (e.provider == QStringLiteral("Nextcloud")) provColor = FG_CYAN;
-                else if (e.provider == QStringLiteral("SQLite")) provColor = FG_GREEN;
-
-                const QString provBadge = provColor + QStringLiteral("[%1]").arg(padRight(e.provider, 8)) + ESC_RESET;
-                const bool isCur = (e.id == m_app->currentListId() && !m_app->isMultiListView());
-                const QString activeTag = isCur ? (FG_CYAN + tr(" (active)") + ESC_RESET) : QString();
-
-                const QString line = QStringLiteral("%1 %2 %3 %4 %5")
-                    .arg(cursor, check, provBadge, sanitizeTerminalText(e.name), activeTag);
-                out += (isSel ? (BG_SELECTED + FG_WHITE + ESC_BOLD) : FG_WHITE)
-                    + padRight(line, m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
-            } else {
-                out += QStringLiteral("\033[K\r\n");
-            }
-        }
+        out += m_listManagerView.renderPicker(bodyRows, m_cols);
     } else if (m_mode == Mode::Dashboard) {
         out += m_dashboardView.render(bodyRows, m_cols);
     } else {
@@ -1938,7 +1740,7 @@ void TuiApp::render() {
         out += FG_ORANGE + ESC_BOLD + QStringLiteral(":") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
     } else if (m_mode == Mode::EditSettingValue || m_mode == Mode::EditListField) {
         QString displayInput = m_inputBuffer;
-        if (m_mode == Mode::EditListField && m_listEditRow == 4) {
+        if (m_mode == Mode::EditListField && m_listManagerView.isEditingPasswordField()) {
             displayInput = QString(m_inputBuffer.size(), QChar(0x2022));
         }
         out += FG_YELLOW + ESC_BOLD + tr("Enter value: ") + ESC_RESET + displayInput + QStringLiteral("█\033[K");
