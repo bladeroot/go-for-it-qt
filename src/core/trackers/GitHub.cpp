@@ -1,4 +1,5 @@
 #include "trackers/TrackerCommon.h"
+#include "DatabaseManager.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -297,6 +298,273 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
 
         processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
     });
+}
+
+void IssueTrackerService::postGitHubWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds, const QString& baseUrl) {
+    const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
+    QString repo;
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        const QStringList parts = issueKey.split(QLatin1Char('#'));
+        if (parts.size() >= 3) {
+            repo = parts.at(1);
+            numStr = parts.at(2);
+        } else if (parts.size() == 2) {
+            numStr = parts.at(1);
+        }
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    if (repo.isEmpty()) {
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) {
+            repo = m.captured(1);
+        } else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) {
+            repo = jql;
+        }
+    }
+    if (repo.isEmpty()) {
+        static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto um = urlRepoRe.match(baseUrl);
+        if (um.hasMatch()) repo = um.captured(1);
+    }
+    if (repo.isEmpty()) return;
+
+    const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
+    QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr + QStringLiteral("/comments"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{
+        {QStringLiteral("body"), QStringLiteral("⏱️ Logged %1m via Go for It Qt Pomodoro timer").arg(minutes)}
+    };
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
+        reply->deleteLater();
+        if (reply->error() == QNetworkReply::NoError) {
+            if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
+                const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
+                setStatusMessage(dbErr);
+                emit syncFailed(listEntry.id, dbErr);
+            } else {
+                setStatusMessage(tr("Logged %1m to GitHub issue %2").arg(minutes).arg(issueKey));
+                emit worklogPosted(issueKey, minutes * 60U);
+            }
+        } else {
+            const QString errMsg = tr("Failed to post worklog to GitHub (%1): %2")
+                .arg(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt())
+                .arg(reply->errorString());
+            setStatusMessage(errMsg);
+            emit syncFailed(listEntry.id, errMsg);
+        }
+    });
+}
+
+void IssueTrackerService::updateGitHubDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails, const QString& baseUrl) {
+    QString repo;
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        const QStringList parts = issueKey.split(QLatin1Char('#'));
+        if (parts.size() >= 3) {
+            repo = parts.at(1);
+            numStr = parts.at(2);
+        } else if (parts.size() == 2) {
+            numStr = parts.at(1);
+        }
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    if (repo.isEmpty()) {
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) repo = m.captured(1);
+        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+    }
+    if (repo.isEmpty()) {
+        static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto um = urlRepoRe.match(baseUrl);
+        if (um.hasMatch()) repo = um.captured(1);
+    }
+    if (repo.isEmpty()) return;
+
+    const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
+    QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr);
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{{QStringLiteral("body"), markdownDetails}};
+    QNetworkReply* reply = m_nam.sendCustomRequest(req, "PATCH", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setStatusMessage(tr("Failed to update description on GitHub (%1): %2").arg(issueKey, reply->errorString()));
+            return;
+        }
+        setStatusMessage(tr("Updated description on GitHub issue %1.").arg(issueKey));
+    });
+}
+
+void IssueTrackerService::updateGitHubStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const QString& baseUrl, const std::function<void(QNetworkReply*)>& handleReply) {
+    // Never send status closure/reopening for Pull Requests (e.g. from reviews)
+    if (issueKey.startsWith(QStringLiteral("PR#"), Qt::CaseInsensitive) ||
+        issueKey.contains(QStringLiteral("#PR#"), Qt::CaseInsensitive)) {
+        return;
+    }
+
+    QString repo;
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        const QStringList parts = issueKey.split(QLatin1Char('#'));
+        if (parts.size() >= 3) { repo = parts.at(1); numStr = parts.at(2); }
+        else if (parts.size() == 2) { numStr = parts.at(1); }
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+    if (repo.isEmpty()) {
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) repo = m.captured(1);
+        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+    }
+    if (repo.isEmpty()) {
+        static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto um = urlRepoRe.match(baseUrl);
+        if (um.hasMatch()) repo = um.captured(1);
+    }
+    if (repo.isEmpty()) return;
+
+    const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
+    QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr);
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{{QStringLiteral("state"), done ? QStringLiteral("closed") : QStringLiteral("open")}};
+    QNetworkReply* reply = m_nam.sendCustomRequest(req, "PATCH", QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    handleReply(reply);
+}
+
+void IssueTrackerService::postGitHubComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl) {
+    QString repo;
+    QString numStr;
+    if (issueKey.contains(QLatin1Char('#'))) {
+        const QStringList parts = issueKey.split(QLatin1Char('#'));
+        if (parts.size() >= 3) {
+            repo = parts.at(1);
+            numStr = parts.at(2);
+        } else if (parts.size() == 2) {
+            numStr = parts.at(1);
+        }
+    }
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) if (c.isDigit()) numStr.append(c);
+    }
+    if (numStr.isEmpty()) return;
+
+    if (repo.isEmpty()) {
+        const QString jql = listEntry.jiraJql.trimmed();
+        static const QRegularExpression repoRe(QStringLiteral("repo:([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto m = repoRe.match(jql);
+        if (m.hasMatch()) repo = m.captured(1);
+        else if (jql.contains(QLatin1Char('/')) && !jql.contains(QLatin1Char(' '))) repo = jql;
+    }
+    if (repo.isEmpty()) {
+        static const QRegularExpression urlRepoRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
+        const auto um = urlRepoRe.match(baseUrl);
+        if (um.hasMatch()) repo = um.captured(1);
+    }
+    if (repo.isEmpty()) return;
+
+    const QString apiUrl = gitHubApiBaseUrl(listEntry.jiraUrl);
+    QUrl url(apiUrl + QStringLiteral("/repos/") + repo + QStringLiteral("/issues/") + numStr + QStringLiteral("/comments"));
+    QNetworkRequest req(url);
+    applyAuthHeader(req, listEntry);
+
+    QJsonObject payload{{QStringLiteral("body"), markdownComment}};
+    QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            setStatusMessage(tr("Failed to post comment to GitHub (%1): %2").arg(issueKey, reply->errorString()));
+            return;
+        }
+        setStatusMessage(tr("Posted comment to GitHub issue %1.").arg(issueKey));
+    });
+}
+
+QUrl IssueTrackerService::buildGitHubBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey) {
+    QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
+    if (baseUrl.isEmpty() || baseUrl.contains(QStringLiteral("api.github.com"))) {
+        baseUrl = QStringLiteral("https://github.com");
+    } else if (baseUrl.endsWith(QStringLiteral("/api/v3"), Qt::CaseInsensitive)) {
+        baseUrl.chop(7);
+    }
+
+    const bool isPr = issueKey.startsWith(QStringLiteral("PR#"), Qt::CaseInsensitive)
+                   || issueKey.startsWith(QStringLiteral("PR!"), Qt::CaseInsensitive);
+    QString owner;
+    QString repo;
+    QString numStr;
+
+    if (issueKey.contains(QLatin1Char('#'))) {
+        const QStringList parts = issueKey.split(QLatin1Char('#'));
+        if (parts.size() >= 3) {
+            const QString repoPart = parts.at(1);
+            const int slashIdx = repoPart.indexOf(QLatin1Char('/'));
+            if (slashIdx > 0) {
+                owner = repoPart.left(slashIdx);
+                repo = repoPart.mid(slashIdx + 1);
+            }
+            numStr = parts.at(2);
+        } else if (parts.size() == 2) {
+            if (parts.at(0).contains(QLatin1Char('/'))) {
+                const int slashIdx = parts.at(0).indexOf(QLatin1Char('/'));
+                owner = parts.at(0).left(slashIdx);
+                repo = parts.at(0).mid(slashIdx + 1);
+            }
+            numStr = parts.at(1);
+        }
+    }
+
+    if (owner.isEmpty() || repo.isEmpty()) {
+        QString spec = listEntry.jiraJql.trimmed();
+        if (spec.startsWith(QStringLiteral("repo:"), Qt::CaseInsensitive)) {
+            spec = spec.mid(5).trimmed();
+        }
+        const int slashIdx = spec.indexOf(QLatin1Char('/'));
+        if (slashIdx > 0) {
+            owner = spec.left(slashIdx);
+            repo = spec.mid(slashIdx + 1);
+            const int sp = repo.indexOf(QLatin1Char(' '));
+            if (sp > 0) repo = repo.left(sp);
+        }
+    }
+
+    if (numStr.isEmpty()) {
+        for (const QChar& c : issueKey) {
+            if (c.isDigit()) numStr.append(c);
+        }
+    }
+
+    if (!owner.isEmpty() && !repo.isEmpty() && !numStr.isEmpty()) {
+        const QString itemType = isPr ? QStringLiteral("pull") : QStringLiteral("issues");
+        return QUrl(QStringLiteral("%1/%2/%3/%4/%5").arg(baseUrl, owner, repo, itemType, numStr));
+    }
+    if (!baseUrl.isEmpty() && !listEntry.jiraUrl.trimmed().isEmpty()) {
+        return QUrl(baseUrl);
+    }
+    return {};
 }
 
 } // namespace gofi

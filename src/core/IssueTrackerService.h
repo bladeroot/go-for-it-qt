@@ -152,6 +152,13 @@ private:
     void fetchGitLabStreamPage(const TodoListEntry& entry, const std::shared_ptr<GitLabCombinedSyncState>& combinedState, const QString& baseUrl, const QString& path, bool isMr, int page);
     void fetchRedminePage(const TodoListEntry& entry, const std::shared_ptr<RedmineSyncState>& state, const QString& baseUrl, const QString& queryStr);
 
+    // GitHub actions
+    void postGitHubWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds, const QString& baseUrl);
+    void updateGitHubDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails, const QString& baseUrl);
+    void updateGitHubStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const QString& baseUrl, const std::function<void(QNetworkReply*)>& handleReply);
+    void postGitHubComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
+    static QUrl buildGitHubBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 
