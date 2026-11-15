@@ -1,3 +1,4 @@
+#include "trackers/GitHubProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QJsonArray>
@@ -565,6 +566,70 @@ QUrl IssueTrackerService::buildGitHubBrowserUrl(const TodoListEntry& listEntry, 
         return QUrl(baseUrl);
     }
     return {};
+}
+
+void GitHubProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchGitHubIssues(entry);
+}
+
+void GitHubProvider::postWorklog(const TodoListEntry& entry,
+                                 qint64,
+                                 qint64 activityLogId,
+                                 const QString& issueKey,
+                                 const QDateTime&,
+                                 quint32 runtimeSeconds,
+                                 bool,
+                                 const QString& baseUrl) {
+    service()->postGitHubWorklog(entry, activityLogId, issueKey, runtimeSeconds, baseUrl);
+}
+
+void GitHubProvider::updateDescription(const TodoListEntry& entry,
+                                       const QString& issueKey,
+                                       const QString& markdownDetails,
+                                       bool,
+                                       bool,
+                                       const QString& baseUrl) {
+    service()->updateGitHubDescription(entry, issueKey, markdownDetails, baseUrl);
+}
+
+void GitHubProvider::updateStatusRemote(const TodoListEntry& entry,
+                                        const QString& issueKey,
+                                        bool done,
+                                        const QString&,
+                                        bool,
+                                        const QString& baseUrl,
+                                        const StatusReplyHandler& handleReply,
+                                        const StatusErrorHandler&) {
+    service()->updateGitHubStatusRemote(entry, issueKey, done, baseUrl, handleReply);
+}
+
+void GitHubProvider::postComment(const TodoListEntry& entry,
+                                 const QString& issueKey,
+                                 const QString& markdownComment,
+                                 bool,
+                                 bool,
+                                 const QString& baseUrl) {
+    service()->postGitHubComment(entry, issueKey, markdownComment, baseUrl);
+}
+
+void GitHubProvider::fetchRemoteStatuses(const QString&,
+                                         const TodoListEntry&,
+                                         const QVariantMap& existingMapping) {
+    emit service()->remoteStatusesLoaded(IssueTrackerService::parseGitHubStatuses(existingMapping));
+}
+
+void GitHubProvider::fetchRemotePriorities(const QString&,
+                                           const TodoListEntry&,
+                                           const QVariantMap& existingMapping) {
+    emit service()->remotePrioritiesLoaded(defaultPriorities(existingMapping));
+}
+
+QVariantList GitHubProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl GitHubProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildGitHubBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi

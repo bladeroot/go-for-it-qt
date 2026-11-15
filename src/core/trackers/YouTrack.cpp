@@ -1,3 +1,4 @@
+#include "trackers/YouTrackProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
@@ -433,6 +434,70 @@ QUrl IssueTrackerService::buildYouTrackBrowserUrl(const TodoListEntry& listEntry
         return QUrl(baseUrl + QStringLiteral("/issue/") + key);
     }
     return QUrl();
+}
+
+void YouTrackProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchYouTrackIssues(entry);
+}
+
+void YouTrackProvider::postWorklog(const TodoListEntry& entry,
+                                   qint64,
+                                   qint64 activityLogId,
+                                   const QString& issueKey,
+                                   const QDateTime& startTimeUtc,
+                                   quint32 runtimeSeconds,
+                                   bool,
+                                   const QString& baseUrl) {
+    service()->postYouTrackWorklog(entry, activityLogId, issueKey, runtimeSeconds, startTimeUtc, baseUrl);
+}
+
+void YouTrackProvider::updateDescription(const TodoListEntry& entry,
+                                         const QString& issueKey,
+                                         const QString& markdownDetails,
+                                         bool,
+                                         bool,
+                                         const QString& baseUrl) {
+    service()->updateYouTrackDescription(entry, issueKey, markdownDetails, baseUrl);
+}
+
+void YouTrackProvider::updateStatusRemote(const TodoListEntry& entry,
+                                          const QString& issueKey,
+                                          bool done,
+                                          const QString&,
+                                          bool,
+                                          const QString& baseUrl,
+                                          const StatusReplyHandler& handleReply,
+                                          const StatusErrorHandler&) {
+    service()->updateYouTrackStatusRemote(entry, issueKey, done, baseUrl, handleReply);
+}
+
+void YouTrackProvider::postComment(const TodoListEntry& entry,
+                                   const QString& issueKey,
+                                   const QString& markdownComment,
+                                   bool,
+                                   bool,
+                                   const QString& baseUrl) {
+    service()->postYouTrackComment(entry, issueKey, markdownComment, baseUrl);
+}
+
+void YouTrackProvider::fetchRemoteStatuses(const QString& baseUrl,
+                                           const TodoListEntry& tempEntry,
+                                           const QVariantMap& existingMapping) {
+    service()->fetchYouTrackStatuses(baseUrl, tempEntry, existingMapping);
+}
+
+void YouTrackProvider::fetchRemotePriorities(const QString&,
+                                             const TodoListEntry&,
+                                             const QVariantMap& existingMapping) {
+    emit service()->remotePrioritiesLoaded(defaultPriorities(existingMapping));
+}
+
+QVariantList YouTrackProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl YouTrackProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildYouTrackBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi

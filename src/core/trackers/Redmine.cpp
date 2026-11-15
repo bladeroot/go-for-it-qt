@@ -1,3 +1,4 @@
+#include "trackers/RedmineProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
@@ -527,6 +528,70 @@ QUrl IssueTrackerService::buildRedmineBrowserUrl(const TodoListEntry& listEntry,
         return QUrl(baseUrl);
     }
     return QUrl();
+}
+
+void RedmineProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchRedmineIssues(entry);
+}
+
+void RedmineProvider::postWorklog(const TodoListEntry& entry,
+                                  qint64,
+                                  qint64 activityLogId,
+                                  const QString& issueKey,
+                                  const QDateTime& startTimeUtc,
+                                  quint32 runtimeSeconds,
+                                  bool,
+                                  const QString& baseUrl) {
+    service()->postRedmineWorklog(entry, activityLogId, issueKey, runtimeSeconds, startTimeUtc, baseUrl);
+}
+
+void RedmineProvider::updateDescription(const TodoListEntry& entry,
+                                        const QString& issueKey,
+                                        const QString& markdownDetails,
+                                        bool,
+                                        bool,
+                                        const QString& baseUrl) {
+    service()->updateRedmineDescription(entry, issueKey, markdownDetails, baseUrl);
+}
+
+void RedmineProvider::updateStatusRemote(const TodoListEntry& entry,
+                                         const QString& issueKey,
+                                         bool done,
+                                         const QString&,
+                                         bool,
+                                         const QString& baseUrl,
+                                         const StatusReplyHandler& handleReply,
+                                         const StatusErrorHandler&) {
+    service()->updateRedmineStatusRemote(entry, issueKey, done, baseUrl, handleReply);
+}
+
+void RedmineProvider::postComment(const TodoListEntry& entry,
+                                  const QString& issueKey,
+                                  const QString& markdownComment,
+                                  bool,
+                                  bool,
+                                  const QString& baseUrl) {
+    service()->postRedmineComment(entry, issueKey, markdownComment, baseUrl);
+}
+
+void RedmineProvider::fetchRemoteStatuses(const QString& baseUrl,
+                                          const TodoListEntry& tempEntry,
+                                          const QVariantMap& existingMapping) {
+    service()->fetchRedmineStatuses(baseUrl, tempEntry, existingMapping);
+}
+
+void RedmineProvider::fetchRemotePriorities(const QString& baseUrl,
+                                            const TodoListEntry& tempEntry,
+                                            const QVariantMap& existingMapping) {
+    service()->fetchRedminePriorities(baseUrl, tempEntry, existingMapping);
+}
+
+QVariantList RedmineProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl RedmineProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildRedmineBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi

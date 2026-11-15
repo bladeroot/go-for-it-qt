@@ -1,3 +1,4 @@
+#include "trackers/NextcloudProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
@@ -609,6 +610,70 @@ QUrl IssueTrackerService::buildNextcloudBrowserUrl(const TodoListEntry& listEntr
         return QUrl(baseUrl + QStringLiteral("/apps/tasks/"));
     }
     return QUrl();
+}
+
+void NextcloudProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchNextcloudTasks(entry);
+}
+
+void NextcloudProvider::postWorklog(const TodoListEntry& entry,
+                                    qint64,
+                                    qint64 activityLogId,
+                                    const QString& issueKey,
+                                    const QDateTime&,
+                                    quint32 runtimeSeconds,
+                                    bool,
+                                    const QString&) {
+    service()->postNextcloudWorklog(entry, activityLogId, issueKey, runtimeSeconds);
+}
+
+void NextcloudProvider::updateDescription(const TodoListEntry& entry,
+                                          const QString& issueKey,
+                                          const QString& markdownDetails,
+                                          bool,
+                                          bool,
+                                          const QString&) {
+    service()->updateNextcloudDescription(entry, issueKey, markdownDetails);
+}
+
+void NextcloudProvider::updateStatusRemote(const TodoListEntry& entry,
+                                           const QString& issueKey,
+                                           bool done,
+                                           const QString&,
+                                           bool,
+                                           const QString&,
+                                           const StatusReplyHandler& handleReply,
+                                           const StatusErrorHandler& failWithError) {
+    service()->updateNextcloudStatusRemote(entry, issueKey, done, handleReply, failWithError);
+}
+
+void NextcloudProvider::postComment(const TodoListEntry& entry,
+                                    const QString& issueKey,
+                                    const QString& markdownComment,
+                                    bool,
+                                    bool,
+                                    const QString&) {
+    service()->postNextcloudComment(entry, issueKey, markdownComment);
+}
+
+void NextcloudProvider::fetchRemoteStatuses(const QString&,
+                                            const TodoListEntry&,
+                                            const QVariantMap& existingMapping) {
+    emit service()->remoteStatusesLoaded(IssueTrackerService::parseNextcloudStatuses(existingMapping));
+}
+
+void NextcloudProvider::fetchRemotePriorities(const QString&,
+                                              const TodoListEntry&,
+                                              const QVariantMap& existingMapping) {
+    emit service()->remotePrioritiesLoaded(defaultPriorities(existingMapping));
+}
+
+QVariantList NextcloudProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl NextcloudProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildNextcloudBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi

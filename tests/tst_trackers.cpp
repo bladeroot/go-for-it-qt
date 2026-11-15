@@ -6,6 +6,14 @@
 #include "core/CredentialStore.h"
 #include "core/DesktopIntegration.h"
 #include "core/IssueTrackerService.h"
+#include "trackers/IssueTrackerProvider.h"
+#include "trackers/GitHubProvider.h"
+#include "trackers/GitLabProvider.h"
+#include "trackers/JiraProvider.h"
+#include "trackers/NextcloudProvider.h"
+#include "trackers/RedmineProvider.h"
+#include "trackers/TodoistProvider.h"
+#include "trackers/YouTrackProvider.h"
 #include "core/NotificationService.h"
 #include "core/Schedule.h"
 #include "core/ShortcutManager.h"
@@ -109,6 +117,30 @@ private slots:
         QVERIFY(m_testSandbox.init());
         QSettings probe(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("go-for-it-qt"), QStringLiteral("go-for-it"));
         QVERIFY(probe.fileName().startsWith(m_testSandbox.path()));
+    }
+
+    void testIssueTrackerProvidersPolymorphicInterface() {
+        IssueTrackerService svc;
+        const QStringList expectedProviders = {
+            QStringLiteral("Jira"),
+            QStringLiteral("GitHub"),
+            QStringLiteral("GitLab"),
+            QStringLiteral("Redmine"),
+            QStringLiteral("YouTrack"),
+            QStringLiteral("Todoist"),
+            QStringLiteral("Nextcloud")
+        };
+
+        for (const QString& name : expectedProviders) {
+            IssueTrackerProvider* provider = svc.providerFor(name);
+            QVERIFY2(provider != nullptr, qPrintable(QStringLiteral("Missing provider: ") + name));
+            QCOMPARE(provider->name(), name);
+            const QVariantList priorities = provider->defaultPriorities({});
+            QVERIFY2(!priorities.isEmpty(), qPrintable(QStringLiteral("Empty default priorities for: ") + name));
+        }
+
+        QVERIFY(svc.providerFor(QStringLiteral("UnknownProvider")) == nullptr);
+        QVERIFY(svc.providerFor(QString()) == nullptr);
     }
 
     void cleanupTestCase() {

@@ -1,5 +1,12 @@
 #include "IssueTrackerService.h"
 #include "trackers/TrackerCommon.h"
+#include "trackers/GitHubProvider.h"
+#include "trackers/GitLabProvider.h"
+#include "trackers/JiraProvider.h"
+#include "trackers/NextcloudProvider.h"
+#include "trackers/RedmineProvider.h"
+#include "trackers/TodoistProvider.h"
+#include "trackers/YouTrackProvider.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -17,6 +24,22 @@ namespace gofi {
 IssueTrackerService::IssueTrackerService(QObject* parent)
     : QObject(parent)
 {
+    initProviders();
+}
+
+void IssueTrackerService::initProviders() {
+    m_providers.emplace(QStringLiteral("Jira"), std::make_unique<JiraProvider>(this));
+    m_providers.emplace(QStringLiteral("GitHub"), std::make_unique<GitHubProvider>(this));
+    m_providers.emplace(QStringLiteral("GitLab"), std::make_unique<GitLabProvider>(this));
+    m_providers.emplace(QStringLiteral("Redmine"), std::make_unique<RedmineProvider>(this));
+    m_providers.emplace(QStringLiteral("YouTrack"), std::make_unique<YouTrackProvider>(this));
+    m_providers.emplace(QStringLiteral("Todoist"), std::make_unique<TodoistProvider>(this));
+    m_providers.emplace(QStringLiteral("Nextcloud"), std::make_unique<NextcloudProvider>(this));
+}
+
+IssueTrackerProvider* IssueTrackerService::providerFor(const QString& name) const {
+    const auto it = m_providers.find(name);
+    return (it != m_providers.end()) ? it->second.get() : nullptr;
 }
 
 QString IssueTrackerService::normalizeBaseUrl(const QString& rawUrl) {
@@ -143,9 +166,13 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
                                                 const QString& apiToken,
                                                 const QVariantMap& existingMapping)
 {
+    auto* p = providerFor(provider);
+    if (!p) return;
+
     if (provider == QStringLiteral("GitHub") || provider == QStringLiteral("GitLab")
-        || provider == QStringLiteral("Todoist") || provider == QStringLiteral("Nextcloud")) {
-        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        || provider == QStringLiteral("Todoist") || provider == QStringLiteral("Nextcloud")
+        || provider == QStringLiteral("YouTrack")) {
+        emit remotePrioritiesLoaded(p->defaultPriorities(existingMapping));
         return;
     }
 
@@ -161,16 +188,8 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
     tempEntry.jiraUser = username;
     tempEntry.apiToken = apiToken;
 
-    if (provider == QStringLiteral("Jira")) {
-        fetchJiraPriorities(baseUrl, tempEntry, existingMapping);
-    } else if (provider == QStringLiteral("Redmine")) {
-        fetchRedminePriorities(baseUrl, tempEntry, existingMapping);
-    } else {
-        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
-    }
+    p->fetchRemotePriorities(baseUrl, tempEntry, existingMapping);
 }
-
-
 
 void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
                                               const QString& serverUrl,
@@ -178,20 +197,12 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
                                               const QString& apiToken,
                                               const QVariantMap& existingMapping)
 {
-    if (provider == QStringLiteral("GitHub")) {
-        emit remoteStatusesLoaded(parseGitHubStatuses(existingMapping));
-        return;
-    }
-    if (provider == QStringLiteral("GitLab")) {
-        emit remoteStatusesLoaded(parseGitLabStatuses(existingMapping));
-        return;
-    }
-    if (provider == QStringLiteral("Todoist")) {
-        emit remoteStatusesLoaded(parseTodoistStatuses(existingMapping));
-        return;
-    }
-    if (provider == QStringLiteral("Nextcloud")) {
-        emit remoteStatusesLoaded(parseNextcloudStatuses(existingMapping));
+    auto* p = providerFor(provider);
+    if (!p) return;
+
+    if (provider == QStringLiteral("GitHub") || provider == QStringLiteral("GitLab")
+        || provider == QStringLiteral("Todoist") || provider == QStringLiteral("Nextcloud")) {
+        p->fetchRemoteStatuses(QString(), TodoListEntry{}, existingMapping);
         return;
     }
 
@@ -207,30 +218,12 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
     tempEntry.jiraUser = username;
     tempEntry.apiToken = apiToken;
 
-    if (provider == QStringLiteral("Jira")) {
-        fetchJiraStatuses(baseUrl, tempEntry, existingMapping);
-    } else if (provider == QStringLiteral("YouTrack")) {
-        fetchYouTrackStatuses(baseUrl, tempEntry, existingMapping);
-    } else if (provider == QStringLiteral("Redmine")) {
-        fetchRedmineStatuses(baseUrl, tempEntry, existingMapping);
-    }
+    p->fetchRemoteStatuses(baseUrl, tempEntry, existingMapping);
 }
 
 void IssueTrackerService::syncListIssues(const TodoListEntry& listEntry) {
-    if (listEntry.provider == QStringLiteral("Jira")) {
-        fetchJiraIssues(listEntry, 0, false);
-    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        fetchYouTrackIssues(listEntry);
-    } else if (listEntry.provider == QStringLiteral("GitHub")) {
-        fetchGitHubIssues(listEntry);
-    } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        fetchGitLabIssues(listEntry);
-    } else if (listEntry.provider == QStringLiteral("Redmine")) {
-        fetchRedmineIssues(listEntry);
-    } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        fetchTodoistTasks(listEntry);
-    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        fetchNextcloudTasks(listEntry);
+    if (auto* p = providerFor(listEntry.provider)) {
+        p->syncList(listEntry);
     }
 }
 
@@ -378,20 +371,8 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
         return;
     }
 
-    if (listEntry.provider == QStringLiteral("Jira")) {
-        postJiraWorklog(listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, forceBearerAuth, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        postYouTrackWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, startTimeUtc, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("GitHub")) {
-        postGitHubWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        postGitLabWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("Redmine")) {
-        postRedmineWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, startTimeUtc, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        postTodoistWorklog(listEntry, activityLogId, issueKey, runtimeSeconds);
-    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        postNextcloudWorklog(listEntry, activityLogId, issueKey, runtimeSeconds);
+    if (auto* p = providerFor(listEntry.provider)) {
+        p->postWorklog(listEntry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, forceBearerAuth, baseUrl);
     }
 }
 
@@ -408,20 +389,8 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
     if (baseUrl.isEmpty()) return;
 
-    if (listEntry.provider == QStringLiteral("Jira")) {
-        updateJiraDescription(listEntry, issueKey, markdownDetails, forceBearerAuth, useV2Fallback, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        updateYouTrackDescription(listEntry, issueKey, markdownDetails, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("GitHub")) {
-        updateGitHubDescription(listEntry, issueKey, markdownDetails, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        updateGitLabDescription(listEntry, issueKey, markdownDetails, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("Redmine")) {
-        updateRedmineDescription(listEntry, issueKey, markdownDetails, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        updateTodoistDescription(listEntry, issueKey, markdownDetails);
-    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        updateNextcloudDescription(listEntry, issueKey, markdownDetails);
+    if (auto* p = providerFor(listEntry.provider)) {
+        p->updateDescription(listEntry, issueKey, markdownDetails, forceBearerAuth, useV2Fallback, baseUrl);
     }
 }
 
@@ -459,20 +428,8 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         });
     };
 
-    if (listEntry.provider == QStringLiteral("GitHub")) {
-        updateGitHubStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
-    } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        updateGitLabStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
-    } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        updateTodoistStatusRemote(listEntry, issueKey, done, handleReply);
-    } else if (listEntry.provider == QStringLiteral("Redmine")) {
-        updateRedmineStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
-    } else if (listEntry.provider == QStringLiteral("Jira")) {
-        updateJiraStatusRemote(listEntry, issueKey, done, localStatus, forceBearerAuth, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        updateYouTrackStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
-    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        updateNextcloudStatusRemote(listEntry, issueKey, done, handleReply, failWithError);
+    if (auto* p = providerFor(listEntry.provider)) {
+        p->updateStatusRemote(listEntry, issueKey, done, localStatus, forceBearerAuth, baseUrl, handleReply, failWithError);
     }
 }
 
@@ -487,20 +444,8 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
     const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
     if (baseUrl.isEmpty()) return;
 
-    if (listEntry.provider == QStringLiteral("Jira")) {
-        postJiraComment(listEntry, issueKey, markdownComment, forceBearerAuth, useV2Fallback, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        postYouTrackComment(listEntry, issueKey, markdownComment, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("GitHub")) {
-        postGitHubComment(listEntry, issueKey, markdownComment, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        postGitLabComment(listEntry, issueKey, markdownComment, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("Redmine")) {
-        postRedmineComment(listEntry, issueKey, markdownComment, baseUrl);
-    } else if (listEntry.provider == QStringLiteral("Todoist")) {
-        postTodoistComment(listEntry, issueKey, markdownComment);
-    } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        postNextcloudComment(listEntry, issueKey, markdownComment);
+    if (auto* p = providerFor(listEntry.provider)) {
+        p->postComment(listEntry, issueKey, markdownComment, forceBearerAuth, useV2Fallback, baseUrl);
     }
 }
 

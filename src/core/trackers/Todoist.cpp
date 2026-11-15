@@ -1,3 +1,4 @@
+#include "trackers/TodoistProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QJsonArray>
@@ -217,6 +218,70 @@ QUrl IssueTrackerService::buildTodoistBrowserUrl(const TodoListEntry& /*listEntr
         return QUrl(QStringLiteral("https://todoist.com/app/task/") + numStr);
     }
     return QUrl(QStringLiteral("https://todoist.com/app/today"));
+}
+
+void TodoistProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchTodoistTasks(entry);
+}
+
+void TodoistProvider::postWorklog(const TodoListEntry& entry,
+                                  qint64,
+                                  qint64 activityLogId,
+                                  const QString& issueKey,
+                                  const QDateTime&,
+                                  quint32 runtimeSeconds,
+                                  bool,
+                                  const QString&) {
+    service()->postTodoistWorklog(entry, activityLogId, issueKey, runtimeSeconds);
+}
+
+void TodoistProvider::updateDescription(const TodoListEntry& entry,
+                                        const QString& issueKey,
+                                        const QString& markdownDetails,
+                                        bool,
+                                        bool,
+                                        const QString&) {
+    service()->updateTodoistDescription(entry, issueKey, markdownDetails);
+}
+
+void TodoistProvider::updateStatusRemote(const TodoListEntry& entry,
+                                         const QString& issueKey,
+                                         bool done,
+                                         const QString&,
+                                         bool,
+                                         const QString&,
+                                         const StatusReplyHandler& handleReply,
+                                         const StatusErrorHandler&) {
+    service()->updateTodoistStatusRemote(entry, issueKey, done, handleReply);
+}
+
+void TodoistProvider::postComment(const TodoListEntry& entry,
+                                  const QString& issueKey,
+                                  const QString& markdownComment,
+                                  bool,
+                                  bool,
+                                  const QString&) {
+    service()->postTodoistComment(entry, issueKey, markdownComment);
+}
+
+void TodoistProvider::fetchRemoteStatuses(const QString&,
+                                          const TodoListEntry&,
+                                          const QVariantMap& existingMapping) {
+    emit service()->remoteStatusesLoaded(IssueTrackerService::parseTodoistStatuses(existingMapping));
+}
+
+void TodoistProvider::fetchRemotePriorities(const QString&,
+                                            const TodoListEntry&,
+                                            const QVariantMap& existingMapping) {
+    emit service()->remotePrioritiesLoaded(defaultPriorities(existingMapping));
+}
+
+QVariantList TodoistProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl TodoistProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildTodoistBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi

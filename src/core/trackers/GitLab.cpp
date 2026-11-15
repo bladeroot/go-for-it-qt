@@ -1,3 +1,4 @@
+#include "trackers/GitLabProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QJsonArray>
@@ -665,6 +666,70 @@ QUrl IssueTrackerService::buildGitLabBrowserUrl(const TodoListEntry& listEntry, 
         return QUrl(baseUrl);
     }
     return {};
+}
+
+void GitLabProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchGitLabIssues(entry);
+}
+
+void GitLabProvider::postWorklog(const TodoListEntry& entry,
+                                 qint64,
+                                 qint64 activityLogId,
+                                 const QString& issueKey,
+                                 const QDateTime&,
+                                 quint32 runtimeSeconds,
+                                 bool,
+                                 const QString& baseUrl) {
+    service()->postGitLabWorklog(entry, activityLogId, issueKey, runtimeSeconds, baseUrl);
+}
+
+void GitLabProvider::updateDescription(const TodoListEntry& entry,
+                                       const QString& issueKey,
+                                       const QString& markdownDetails,
+                                       bool,
+                                       bool,
+                                       const QString& baseUrl) {
+    service()->updateGitLabDescription(entry, issueKey, markdownDetails, baseUrl);
+}
+
+void GitLabProvider::updateStatusRemote(const TodoListEntry& entry,
+                                        const QString& issueKey,
+                                        bool done,
+                                        const QString&,
+                                        bool,
+                                        const QString& baseUrl,
+                                        const StatusReplyHandler& handleReply,
+                                        const StatusErrorHandler&) {
+    service()->updateGitLabStatusRemote(entry, issueKey, done, baseUrl, handleReply);
+}
+
+void GitLabProvider::postComment(const TodoListEntry& entry,
+                                 const QString& issueKey,
+                                 const QString& markdownComment,
+                                 bool,
+                                 bool,
+                                 const QString& baseUrl) {
+    service()->postGitLabComment(entry, issueKey, markdownComment, baseUrl);
+}
+
+void GitLabProvider::fetchRemoteStatuses(const QString&,
+                                         const TodoListEntry&,
+                                         const QVariantMap& existingMapping) {
+    emit service()->remoteStatusesLoaded(IssueTrackerService::parseGitLabStatuses(existingMapping));
+}
+
+void GitLabProvider::fetchRemotePriorities(const QString&,
+                                           const TodoListEntry&,
+                                           const QVariantMap& existingMapping) {
+    emit service()->remotePrioritiesLoaded(defaultPriorities(existingMapping));
+}
+
+QVariantList GitLabProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl GitLabProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildGitLabBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi

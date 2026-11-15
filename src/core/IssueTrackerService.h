@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DatabaseManager.h"
+#include "trackers/IssueTrackerProvider.h"
 #include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -10,6 +11,8 @@
 #include <QVariantMap>
 #include <QVector>
 #include <functional>
+#include <memory>
+#include <unordered_map>
 
 class TestCore;
 class TestTrackers;
@@ -35,6 +38,11 @@ class IssueTrackerService : public QObject {
 
 public:
     explicit IssueTrackerService(QObject* parent = nullptr);
+
+    [[nodiscard]] IssueTrackerProvider* providerFor(const QString& name) const;
+    [[nodiscard]] const std::unordered_map<QString, std::unique_ptr<IssueTrackerProvider>>& providers() const noexcept {
+        return m_providers;
+    }
 
     [[nodiscard]] bool isSyncing() const noexcept { return m_syncing; }
     [[nodiscard]] QString lastStatusMessage() const { return m_lastStatusMessage; }
@@ -209,6 +217,7 @@ private:
 
     void startSyncOperation();
     void endSyncOperation();
+    void initProviders();
 
     QNetworkAccessManager m_nam;
     bool m_syncing = false;
@@ -216,7 +225,16 @@ private:
     QString m_lastStatusMessage;
     QHash<QString, QString> m_jiraBearerTokens;
     std::function<bool(const QString& listId, const QString& jiraKey)> m_activeTaskChecker;
+    std::unordered_map<QString, std::unique_ptr<IssueTrackerProvider>> m_providers;
 
+    friend class IssueTrackerProvider;
+    friend class GitHubProvider;
+    friend class GitLabProvider;
+    friend class JiraProvider;
+    friend class NextcloudProvider;
+    friend class RedmineProvider;
+    friend class TodoistProvider;
+    friend class YouTrackProvider;
     friend class ::TestCore;
     friend class ::TestTrackers;
 };

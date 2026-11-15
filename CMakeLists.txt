@@ -65,6 +65,15 @@ set(GOFI_CORE_SOURCES
     src/core/IssueTrackerService.h
     src/core/IssueTrackerService.cpp
     src/core/trackers/TrackerCommon.h
+    src/core/trackers/IssueTrackerProvider.h
+    src/core/trackers/IssueTrackerProvider.cpp
+    src/core/trackers/GitHubProvider.h
+    src/core/trackers/GitLabProvider.h
+    src/core/trackers/JiraProvider.h
+    src/core/trackers/NextcloudProvider.h
+    src/core/trackers/RedmineProvider.h
+    src/core/trackers/TodoistProvider.h
+    src/core/trackers/YouTrackProvider.h
     src/core/trackers/TrackerMapping.cpp
     src/core/trackers/GitHub.cpp
     src/core/trackers/GitLab.cpp

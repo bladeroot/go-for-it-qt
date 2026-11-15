@@ -1,3 +1,4 @@
+#include "trackers/JiraProvider.h"
 #include "trackers/TrackerCommon.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
@@ -960,6 +961,70 @@ QUrl IssueTrackerService::buildJiraBrowserUrl(const TodoListEntry& listEntry, co
         return QUrl(baseUrl + QStringLiteral("/browse/") + key);
     }
     return QUrl();
+}
+
+void JiraProvider::syncList(const TodoListEntry& entry) {
+    service()->fetchJiraIssues(entry, 0, false);
+}
+
+void JiraProvider::postWorklog(const TodoListEntry& entry,
+                               qint64 taskId,
+                               qint64 activityLogId,
+                               const QString& issueKey,
+                               const QDateTime& startTimeUtc,
+                               quint32 runtimeSeconds,
+                               bool forceBearerAuth,
+                               const QString& baseUrl) {
+    service()->postJiraWorklog(entry, taskId, activityLogId, issueKey, startTimeUtc, runtimeSeconds, forceBearerAuth, baseUrl);
+}
+
+void JiraProvider::updateDescription(const TodoListEntry& entry,
+                                     const QString& issueKey,
+                                     const QString& markdownDetails,
+                                     bool forceBearerAuth,
+                                     bool useV2Fallback,
+                                     const QString& baseUrl) {
+    service()->updateJiraDescription(entry, issueKey, markdownDetails, forceBearerAuth, useV2Fallback, baseUrl);
+}
+
+void JiraProvider::updateStatusRemote(const TodoListEntry& entry,
+                                      const QString& issueKey,
+                                      bool done,
+                                      const QString& localStatus,
+                                      bool forceBearerAuth,
+                                      const QString& baseUrl,
+                                      const StatusReplyHandler&,
+                                      const StatusErrorHandler&) {
+    service()->updateJiraStatusRemote(entry, issueKey, done, localStatus, forceBearerAuth, baseUrl);
+}
+
+void JiraProvider::postComment(const TodoListEntry& entry,
+                               const QString& issueKey,
+                               const QString& markdownComment,
+                               bool forceBearerAuth,
+                               bool useV2Fallback,
+                               const QString& baseUrl) {
+    service()->postJiraComment(entry, issueKey, markdownComment, forceBearerAuth, useV2Fallback, baseUrl);
+}
+
+void JiraProvider::fetchRemoteStatuses(const QString& baseUrl,
+                                       const TodoListEntry& tempEntry,
+                                       const QVariantMap& existingMapping) {
+    service()->fetchJiraStatuses(baseUrl, tempEntry, existingMapping);
+}
+
+void JiraProvider::fetchRemotePriorities(const QString& baseUrl,
+                                         const TodoListEntry& tempEntry,
+                                         const QVariantMap& existingMapping) {
+    service()->fetchJiraPriorities(baseUrl, tempEntry, existingMapping);
+}
+
+QVariantList JiraProvider::defaultPriorities(const QVariantMap& existingMapping) const {
+    return service()->defaultPrioritiesForProvider(name(), existingMapping);
+}
+
+QUrl JiraProvider::buildBrowserUrl(const TodoListEntry& entry, const QString& issueKey) const {
+    return IssueTrackerService::buildJiraBrowserUrl(entry, issueKey);
 }
 
 } // namespace gofi
