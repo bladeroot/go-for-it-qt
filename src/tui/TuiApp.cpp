@@ -373,7 +373,8 @@ void TuiApp::editTaskDetailsInVim() {
 
 void TuiApp::addTaskCommentInVim() {
     TaskFilterProxyModel* proxy = currentProxy();
-    if (proxy->rowCount() <= 0 || selectedRow() >= proxy->rowCount()) {
+    if (proxy->rowCount() <= 0 || selectedRow() < 0 || selectedRow() >= proxy->rowCount()) {
+        m_statusMessage = tr("No task selected.");
         return;
     }
 

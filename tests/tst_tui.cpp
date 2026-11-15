@@ -921,6 +921,55 @@ private slots:
         QFile::remove(dbPath);
     }
 
+    void testTuiCommentReportsNoTaskSelectedWhenListIsEmpty() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("comment_no_task.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString list = ctrl.listManager()->addList(QStringLiteral("EmptyList"));
+        ctrl.selectListById(list);
+        while (ctrl.todoProxyModel()->rowCount() > 0) {
+            QVERIFY(ctrl.removeTask(false, 0));
+        }
+        QCOMPARE(ctrl.todoProxyModel()->rowCount(), 0);
+
+        QString screen;
+        {
+            PtyTerminal term;
+            QVERIFY(term.open(30, 100));
+            TuiApp tui(&ctrl);
+            QVERIFY(tui.start());
+            QTest::qWait(100);
+            term.takeOutput();
+            term.type(":comment Some comment\r");
+            QTest::qWait(300);
+            screen = QString::fromUtf8(term.takeOutput());
+        }
+        screen.remove(QRegularExpression(QStringLiteral("\x1b\\[[0-9;?]*[A-Za-z]")));
+        const QString expectedMsg = QCoreApplication::translate("TuiApp", "No task selected.");
+        const QString wrongMsg = QCoreApplication::translate("TuiApp", "Failed to save comment to database.");
+        QVERIFY2(!screen.contains(wrongMsg), qPrintable(screen));
+        QVERIFY2(screen.contains(expectedMsg), qPrintable(screen));
+
+        // Also verify bare :comment command without text on empty list
+        {
+            PtyTerminal term;
+            QVERIFY(term.open(30, 100));
+            TuiApp tui(&ctrl);
+            QVERIFY(tui.start());
+            QTest::qWait(100);
+            term.takeOutput();
+            term.type(":comment\r");
+            QTest::qWait(300);
+            screen = QString::fromUtf8(term.takeOutput());
+        }
+        screen.remove(QRegularExpression(QStringLiteral("\x1b\\[[0-9;?]*[A-Za-z]")));
+        QVERIFY2(!screen.contains(wrongMsg), qPrintable(screen));
+        QVERIFY2(screen.contains(expectedMsg), qPrintable(screen));
+
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
     // KB-115: TUI dashboard "── 28-DAY ACTIVITY HEATMAP ──" hardcoded 28 days even though
     // getActivityHeatmap returns 28..34 days (Monday-aligned since KB-99), and on an 80-column
     // terminal (2 + 3*days cols = 86..104 cols) truncateVisible cut off the rightmost cells,

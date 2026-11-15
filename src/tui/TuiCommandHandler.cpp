@@ -116,7 +116,7 @@ void TuiCommandHandler::execute(const QString& cmdLine) {
                     m_tui->m_statusMessage = tr("Failed to save comment to database.");
                 }
             } else {
-                m_tui->m_statusMessage = tr("Failed to save comment to database.");
+                m_tui->m_statusMessage = tr("No task selected.");
             }
         }
         return;

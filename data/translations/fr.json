@@ -376,6 +376,7 @@
   "No matching Jira transition to update status of %1; status was not changed on %2.": "Aucune transition Jira correspondante pour mettre à jour le statut de %1 ; le statut n'a pas été modifié sur %2.",
   "No project tags (+tag) recorded in this period.": "Aucun tag de projet (+tag) enregistré sur cette période.",
   "No task has been selected": "Aucune tâche sélectionnée",
+  "No task selected.": "Aucune tâche sélectionnée.",
   "No tasks in this status view.": "Aucune tâche dans cette vue de statut.",
   "No tasks tracked during this period. Run the timer to log activity!": "Aucune tâche suivie pendant cette période. Lancez le minuteur !",
   "No web URL available for selected task.": "Aucune URL web disponible pour la tâche sélectionnée.",

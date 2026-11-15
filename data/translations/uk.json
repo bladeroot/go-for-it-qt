@@ -376,6 +376,7 @@
   "No matching Jira transition to update status of %1; status was not changed on %2.": "Немає відповідного переходу Jira для оновлення статусу %1; статус не було змінено на %2.",
   "No project tags (+tag) recorded in this period.": "У цьому періоді немає тегів проєктів (+tag).",
   "No task has been selected": "Задачу не вибрано",
+  "No task selected.": "Задачу не вибрано.",
   "No tasks in this status view.": "У цій вкладці немає задач.",
   "No tasks tracked during this period. Run the timer to log activity!": "Немає врахованих задач за цей період. Запустіть таймер для обліку!",
   "No web URL available for selected task.": "Для вибраної задачі немає веб-посилання.",

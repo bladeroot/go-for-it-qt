@@ -376,6 +376,7 @@
   "No matching Jira transition to update status of %1; status was not changed on %2.": "Kein passender Jira-Übergang zum Aktualisieren des Status von %1; Status wurde auf %2 nicht geändert.",
   "No project tags (+tag) recorded in this period.": "Keine Projekt-Tags (+tag) in diesem Zeitraum erfasst.",
   "No task has been selected": "Keine Aufgabe ausgewählt",
+  "No task selected.": "Keine Aufgabe ausgewählt.",
   "No tasks in this status view.": "Keine Aufgaben in dieser Statusansicht.",
   "No tasks tracked during this period. Run the timer to log activity!": "Keine Aufgaben in diesem Zeitraum erfasst. Timer starten, um Aktivität zu protokollieren!",
   "No web URL available for selected task.": "Keine Web-URL für ausgewählte Aufgabe verfügbar.",
