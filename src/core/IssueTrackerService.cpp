@@ -660,62 +660,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
         postTodoistWorklog(listEntry, activityLogId, issueKey, runtimeSeconds);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        QString uid = issueKey;
-        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
-        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
-        if (uid.isEmpty()) return;
-
-        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
-        QString calUrl = listEntry.jiraUrl.trimmed();
-        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
-        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
-
-        QUrl url(itemUrl);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QNetworkReply* getReply = m_nam.get(req);
-        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, listEntry, activityLogId, issueKey, minutes]() {
-            getReply->deleteLater();
-            if (getReply->error() != QNetworkReply::NoError) {
-                const int statusCode = getReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                const QString errMsg = tr("Failed to post worklog to Nextcloud (%1): %2")
-                    .arg(statusCode)
-                    .arg(getReply->errorString());
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
-                return;
-            }
-            QString ics = QString::fromUtf8(getReply->readAll());
-            const QString commentLine = QStringLiteral("COMMENT:⏱️ Logged %1m via Go for It Qt Pomodoro timer\r\n").arg(minutes);
-            const int vtodoEnd = ics.indexOf(QStringLiteral("END:VTODO"));
-            if (vtodoEnd > 0) {
-                ics.insert(vtodoEnd, commentLine);
-                QNetworkRequest putReq = req;
-                putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
-                QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
-                connect(putReply, &QNetworkReply::finished, this, [this, putReply, listEntry, activityLogId, issueKey, minutes]() {
-                    putReply->deleteLater();
-                    if (putReply->error() == QNetworkReply::NoError) {
-                        if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
-                            const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
-                            setStatusMessage(dbErr);
-                            emit syncFailed(listEntry.id, dbErr);
-                        } else {
-                            setStatusMessage(tr("Logged %1m to Nextcloud task %2").arg(minutes).arg(issueKey));
-                            emit worklogPosted(issueKey, minutes * 60U);
-                        }
-                    } else {
-                        const int statusCode = putReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                        const QString errMsg = tr("Failed to post worklog to Nextcloud (%1): %2")
-                            .arg(statusCode)
-                            .arg(putReply->errorString());
-                        setStatusMessage(errMsg);
-                        emit syncFailed(listEntry.id, errMsg);
-                    }
-                });
-            }
-        });
+        postNextcloudWorklog(listEntry, activityLogId, issueKey, runtimeSeconds);
     }
 }
 
@@ -822,61 +767,7 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
         updateTodoistDescription(listEntry, issueKey, markdownDetails);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        QString uid = issueKey;
-        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
-        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
-        if (uid.isEmpty()) return;
-
-        QString calUrl = listEntry.jiraUrl.trimmed();
-        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
-        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
-
-        QUrl url(itemUrl);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QNetworkReply* getReply = m_nam.get(req);
-        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, markdownDetails]() {
-            getReply->deleteLater();
-            if (getReply->error() != QNetworkReply::NoError) return;
-            QString ics = QString::fromUtf8(getReply->readAll());
-            static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
-            const auto vtodoStartMatch = vtodoStartRe.match(ics);
-            if (!vtodoStartMatch.hasMatch()) return;
-            const int vtodoStart = vtodoStartMatch.capturedStart(1);
-            const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
-
-            static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
-            const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
-            if (!vtodoEndMatch.hasMatch()) return;
-            const int vtodoEnd = vtodoEndMatch.capturedStart(1);
-
-            int propBlockEnd = vtodoEnd;
-            static const QRegularExpression subBeginRe(QStringLiteral("\r?\n(BEGIN:[^\r\n]*)"));
-            const auto subBeginMatch = subBeginRe.match(ics, vtodoPropsStart);
-            if (subBeginMatch.hasMatch() && subBeginMatch.capturedStart(1) < propBlockEnd) {
-                propBlockEnd = subBeginMatch.capturedStart(1);
-            }
-
-            static const QRegularExpression descRe(QStringLiteral("(^|\r?\n)DESCRIPTION(?:;[^:]*)?:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*"));
-            const QString escaped = QStringLiteral("DESCRIPTION:") + escapeIcsText(markdownDetails);
-            const auto match = descRe.match(ics, vtodoStart);
-            if (match.hasMatch() && match.capturedStart() < propBlockEnd) {
-                ics.replace(match.capturedStart(), match.capturedLength(), match.captured(1) + escaped);
-            } else {
-                const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
-                ics.insert(propBlockEnd, escaped + nl);
-            }
-            QNetworkRequest putReq = req;
-            putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
-            QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
-            connect(putReply, &QNetworkReply::finished, this, [this, putReply, issueKey]() {
-                putReply->deleteLater();
-                if (putReply->error() == QNetworkReply::NoError) {
-                    setStatusMessage(tr("Updated description on Nextcloud task %1.").arg(issueKey));
-                }
-            });
-        });
+        updateNextcloudDescription(listEntry, issueKey, markdownDetails);
     }
 }
 
@@ -1067,82 +958,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
         QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
         handleReply(reply);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        QString uid = issueKey.trimmed();
-        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
-        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
-        if (uid.isEmpty()) return;
-
-        QString calUrl = listEntry.jiraUrl.trimmed();
-        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
-        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
-
-        QUrl url(itemUrl);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QNetworkReply* getReply = m_nam.get(req);
-        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, done, handleReply, failWithError]() {
-            getReply->deleteLater();
-            const int statusCode = getReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            if (getReply->error() != QNetworkReply::NoError || (statusCode >= 400 && statusCode < 600)) {
-                failWithError(statusCode, getReply->errorString());
-                return;
-            }
-            QString ics = QString::fromUtf8(getReply->readAll());
-            static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
-            const auto vtodoStartMatch = vtodoStartRe.match(ics);
-            if (!vtodoStartMatch.hasMatch()) {
-                failWithError(statusCode, tr("Invalid CalDAV VTODO response"));
-                return;
-            }
-            const int vtodoStart = vtodoStartMatch.capturedStart(1);
-            const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
-
-            static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
-            const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
-            if (!vtodoEndMatch.hasMatch()) {
-                failWithError(statusCode, tr("Invalid CalDAV VTODO response"));
-                return;
-            }
-            const int vtodoEnd = vtodoEndMatch.capturedStart(1);
-
-            int propBlockEnd = vtodoEnd;
-            static const QRegularExpression subBeginRe(QStringLiteral("\r?\n(BEGIN:[^\r\n]*)"));
-            const auto subBeginMatch = subBeginRe.match(ics, vtodoPropsStart);
-            if (subBeginMatch.hasMatch() && subBeginMatch.capturedStart(1) < propBlockEnd) {
-                propBlockEnd = subBeginMatch.capturedStart(1);
-            }
-
-            // Rewrite STATUS together with COMPLETED / PERCENT-COMPLETE inside the VTODO property
-            // block only: other CalDAV clients read all three to decide whether a task is done.
-            const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
-            const QString block = ics.mid(vtodoPropsStart, propBlockEnd - vtodoPropsStart);
-            static const QRegularExpression managedRe(QStringLiteral("^(STATUS|COMPLETED|PERCENT-COMPLETE)[;:]"),
-                                                      QRegularExpression::CaseInsensitiveOption);
-            QStringList kept;
-            bool skippingFolded = false;
-            for (const QString& line : block.split(nl)) {
-                if (!line.isEmpty() && (line.at(0) == QLatin1Char(' ') || line.at(0) == QLatin1Char('\t'))) {
-                    if (!skippingFolded) kept << line;
-                    continue;
-                }
-                skippingFolded = managedRe.match(line).hasMatch();
-                if (!skippingFolded) kept << line;
-            }
-            QStringList added{done ? QStringLiteral("STATUS:COMPLETED") : QStringLiteral("STATUS:NEEDS-ACTION")};
-            if (done) {
-                added << QStringLiteral("COMPLETED:") + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'"));
-                added << QStringLiteral("PERCENT-COMPLETE:100");
-            }
-            int insertAt = (!kept.isEmpty() && kept.last().isEmpty()) ? static_cast<int>(kept.size()) - 1 : static_cast<int>(kept.size());
-            for (const QString& prop : added) kept.insert(insertAt++, prop);
-            ics.replace(vtodoPropsStart, propBlockEnd - vtodoPropsStart, kept.join(nl));
-
-            QNetworkRequest putReq = req;
-            putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
-            QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
-            handleReply(putReply);
-        });
+        updateNextcloudStatusRemote(listEntry, issueKey, done, handleReply, failWithError);
     }
 }
 
@@ -1249,54 +1065,7 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
         postTodoistComment(listEntry, issueKey, markdownComment);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
-        QString uid = issueKey;
-        if (uid.startsWith(QStringLiteral("NC#"))) uid = uid.mid(3);
-        if (uid.contains(QLatin1Char('#'))) uid = uid.split(QLatin1Char('#')).last();
-        if (uid.isEmpty()) return;
-
-        QString calUrl = listEntry.jiraUrl.trimmed();
-        if (!calUrl.endsWith(QLatin1Char('/')) && !calUrl.endsWith(QStringLiteral(".ics"))) calUrl += QLatin1Char('/');
-        const QString itemUrl = calUrl.endsWith(QStringLiteral(".ics")) ? calUrl : (calUrl + uid + QStringLiteral(".ics"));
-
-        QUrl url(itemUrl);
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QNetworkReply* getReply = m_nam.get(req);
-        connect(getReply, &QNetworkReply::finished, this, [this, getReply, req, issueKey, markdownComment]() {
-            getReply->deleteLater();
-            if (getReply->error() != QNetworkReply::NoError) return;
-            QString ics = QString::fromUtf8(getReply->readAll());
-            const QString escapedComment = escapeIcsText(markdownComment);
-            static const QRegularExpression vtodoStartRe(QStringLiteral("(?:^|\r?\n)(BEGIN:VTODO)(?:\r?\n|$)"));
-            const auto vtodoStartMatch = vtodoStartRe.match(ics);
-            if (!vtodoStartMatch.hasMatch()) return;
-            const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
-
-            static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
-            const auto vtodoEndMatch = vtodoEndRe.match(ics, vtodoPropsStart);
-            if (!vtodoEndMatch.hasMatch()) return;
-            const int vtodoEnd = vtodoEndMatch.capturedStart(1);
-
-            int insertPos = vtodoEnd;
-            static const QRegularExpression subBeginRe(QStringLiteral("\r?\n(BEGIN:[^\r\n]*)"));
-            const auto subBeginMatch = subBeginRe.match(ics, vtodoPropsStart);
-            if (subBeginMatch.hasMatch() && subBeginMatch.capturedStart(1) < insertPos) {
-                insertPos = subBeginMatch.capturedStart(1);
-            }
-            const QString nl = ics.contains(QStringLiteral("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
-            const QString commentLine = QStringLiteral("COMMENT:%1%2").arg(escapedComment, nl);
-            ics.insert(insertPos, commentLine);
-            QNetworkRequest putReq = req;
-            putReq.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/calendar; charset=utf-8"));
-            QNetworkReply* putReply = m_nam.put(putReq, ics.toUtf8());
-            connect(putReply, &QNetworkReply::finished, this, [this, putReply, issueKey]() {
-                putReply->deleteLater();
-                if (putReply->error() == QNetworkReply::NoError) {
-                    setStatusMessage(tr("Posted comment to Nextcloud task %1.").arg(issueKey));
-                }
-            });
-        });
+        postNextcloudComment(listEntry, issueKey, markdownComment);
     }
 }
 
@@ -1336,10 +1105,8 @@ QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
     } else if (provider == QStringLiteral("Todoist")) {
         return buildTodoistBrowserUrl(listEntry, issueKey);
     } else if (provider == QStringLiteral("Nextcloud")) {
-        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
-        if (!baseUrl.isEmpty()) {
-            return QUrl(baseUrl + QStringLiteral("/apps/tasks/"));
-        }
+        const QUrl url = buildNextcloudBrowserUrl(listEntry, issueKey);
+        if (!url.isEmpty()) return url;
     }
 
     // Fallback: search taskDescription for an explicit HTTP/HTTPS link

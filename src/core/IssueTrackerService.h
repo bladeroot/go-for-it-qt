@@ -173,6 +173,13 @@ private:
     void postTodoistComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment);
     static QUrl buildTodoistBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
 
+    // Nextcloud actions
+    void postNextcloudWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds);
+    void updateNextcloudDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails);
+    void updateNextcloudStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const std::function<void(QNetworkReply*)>& handleReply, const std::function<void(int, const QString&)>& failWithError);
+    void postNextcloudComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment);
+    static QUrl buildNextcloudBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 
