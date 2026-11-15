@@ -378,8 +378,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
         if (prev == 'c' && (seq == "w" || seq == "c")) {
             if (count > 0) {
                 const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
-                m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::SimpleTextRole).toString();
-                m_inputCursor = static_cast<int>(m_inputBuffer.size());
+                m_inputLine.setText(currentProxy()->data(idx, TaskStoreModel::SimpleTextRole).toString());
                 m_mode = Mode::EditTask;
             }
             return;
@@ -502,8 +501,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Add new task: o or a
     if (seq == "o" || seq == "a" || seq == "A") {
-        m_inputBuffer.clear();
-        m_inputCursor = 0;
+        m_inputLine.clear();
         m_mode = Mode::InsertTask;
         return;
     }
@@ -512,8 +510,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
     if (seq == "i" || seq == "e") {
         if (count > 0) {
             const QModelIndex idx = currentProxy()->index(m_selectedRow, 0);
-            m_inputBuffer = currentProxy()->data(idx, TaskStoreModel::SimpleTextRole).toString();
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
+            m_inputLine.setText(currentProxy()->data(idx, TaskStoreModel::SimpleTextRole).toString());
             m_mode = Mode::EditTask;
         }
         return;
@@ -649,8 +646,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Search: /
     if (seq == "/") {
-        m_inputBuffer = m_app->todoProxyModel()->filterQuery();
-        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_inputLine.setText(m_app->todoProxyModel()->filterQuery());
         m_mode = Mode::Search;
         return;
     }
@@ -666,8 +662,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Ex Command line: :
     if (seq == ":") {
-        m_inputBuffer.clear();
-        m_inputCursor = 0;
+        m_inputLine.clear();
         m_mode = Mode::Command;
         return;
     }
@@ -685,8 +680,8 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 }
 
 void TuiApp::handleInputLineKey(const QByteArray& seq) {
-    // Esc cancels
-    if (seq == "\033") {
+    const InputKeyResult res = m_inputLine.handleKey(seq);
+    if (res == InputKeyResult::Cancel) {
         if (m_mode == Mode::Search) {
             m_app->todoProxyModel()->setFilterQuery(QString());
             m_app->doneProxyModel()->setFilterQuery(QString());
@@ -700,9 +695,8 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
         }
         return;
     }
-    // Enter commits
-    if (seq == "\r" || seq == "\n") {
-        const QString text = m_inputBuffer.trimmed();
+    if (res == InputKeyResult::Commit) {
+        const QString text = m_inputLine.trimmedText();
         const Mode prevMode = m_mode;
         m_mode = Mode::Normal;
 
@@ -719,7 +713,7 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             }
         } else if (prevMode == Mode::EditDetails) {
             if (currentProxy()->rowCount() > 0) {
-                QString restored = m_inputBuffer;
+                QString restored = m_inputLine.text();
                 restored.replace(QStringLiteral(" \\n "), QStringLiteral("\n"));
                 m_app->updateTaskDetails(isClosedTab(), m_selectedRow, restored.trimmed());
                 m_statusMessage = tr("Updated task description.");
@@ -742,68 +736,10 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
         }
         return;
     }
-    // Backspace
-    if (seq == "\x7f" || seq == "\x08") {
-        if (m_inputCursor > 0) {
-            int removeLen = 1;
-            if (m_inputCursor >= 2 && m_inputBuffer.at(m_inputCursor - 1).isLowSurrogate() && m_inputBuffer.at(m_inputCursor - 2).isHighSurrogate()) {
-                removeLen = 2;
-            }
-            m_inputBuffer.remove(m_inputCursor - removeLen, removeLen);
-            m_inputCursor -= removeLen;
-            if (m_mode == Mode::Search) {
-                m_app->todoProxyModel()->setFilterQuery(m_inputBuffer);
-                m_app->doneProxyModel()->setFilterQuery(m_inputBuffer);
-                clampSelection();
-            }
-        }
-        return;
-    }
-    // Left / Right arrows in input line
-    if (seq == "\033[D") {
-        if (m_inputCursor >= 2 && m_inputBuffer.at(m_inputCursor - 1).isLowSurrogate() && m_inputBuffer.at(m_inputCursor - 2).isHighSurrogate()) {
-            m_inputCursor -= 2;
-        } else {
-            m_inputCursor = qMax(0, m_inputCursor - 1);
-        }
-        return;
-    }
-    if (seq == "\033[C") {
-        if (m_inputCursor + 1 < m_inputBuffer.size() && m_inputBuffer.at(m_inputCursor).isHighSurrogate() && m_inputBuffer.at(m_inputCursor + 1).isLowSurrogate()) {
-            m_inputCursor += 2;
-        } else {
-            m_inputCursor = qMin(static_cast<int>(m_inputBuffer.size()), m_inputCursor + 1);
-        }
-        return;
-    }
-    // Ctrl+U clears input line
-    if (seq == "\x15") {
-        m_inputBuffer.clear();
-        m_inputCursor = 0;
-        if (m_mode == Mode::Search) {
-            m_app->todoProxyModel()->setFilterQuery(QString());
-            m_app->doneProxyModel()->setFilterQuery(QString());
-        }
-        return;
-    }
-
-    // Printable UTF-8 character
-    if (!seq.startsWith('\033')) {
-        const QString ch = QString::fromUtf8(seq);
-        if (!ch.isEmpty()) {
-            const char32_t ucs4 = (ch.size() >= 2 && ch.at(0).isHighSurrogate() && ch.at(1).isLowSurrogate())
-                                      ? QChar::surrogateToUcs4(ch.at(0), ch.at(1))
-                                      : ch.at(0).unicode();
-            if (QChar::isPrint(ucs4)) {
-                m_inputBuffer.insert(m_inputCursor, ch);
-                m_inputCursor += static_cast<int>(ch.size());
-                if (m_mode == Mode::Search) {
-                    m_app->todoProxyModel()->setFilterQuery(m_inputBuffer);
-                    m_app->doneProxyModel()->setFilterQuery(m_inputBuffer);
-                    clampSelection();
-                }
-            }
-        }
+    if (res == InputKeyResult::TextChanged && m_mode == Mode::Search) {
+        m_app->todoProxyModel()->setFilterQuery(m_inputLine.text());
+        m_app->doneProxyModel()->setFilterQuery(m_inputLine.text());
+        clampSelection();
     }
 }
 
@@ -859,8 +795,7 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
     } else if (res == ListEditKeyResult::SavedAndActivated) {
         m_mode = Mode::Normal;
     } else if (res == ListEditKeyResult::EditField) {
-        m_inputBuffer = editInitial;
-        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_inputLine.setText(editInitial);
         m_mode = Mode::EditListField;
     }
 }
@@ -871,8 +806,7 @@ void TuiApp::handleSettingsKey(const QByteArray& seq) {
     if (res == SettingsKeyResult::Close) {
         m_mode = Mode::Normal;
     } else if (res == SettingsKeyResult::EditValue) {
-        m_inputBuffer = editInitial;
-        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_inputLine.setText(editInitial);
         m_mode = Mode::EditSettingValue;
     }
 }
@@ -916,8 +850,7 @@ void TuiApp::editTaskDetailsInVim() {
     );
 
     if (noEditor) {
-        m_inputBuffer = currentDetails.isEmpty() ? QString() : currentDetails;
-        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_inputLine.setText(currentDetails);
         m_mode = Mode::EditDetails;
         return;
     }
@@ -1543,21 +1476,18 @@ void TuiApp::render() {
     // Row m_rows: Command / Input / Status Message Bar
     // -------------------------------------------------------------------------
     if (m_mode == Mode::InsertTask) {
-        out += FG_GREEN + ESC_BOLD + tr("New task: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += m_inputLine.render(tr("New task: "), FG_GREEN);
     } else if (m_mode == Mode::EditTask) {
-        out += FG_YELLOW + ESC_BOLD + tr("Edit task: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += m_inputLine.render(tr("Edit task: "), FG_YELLOW);
     } else if (m_mode == Mode::EditDetails) {
-        out += FG_YELLOW + ESC_BOLD + tr("Edit description: ") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += m_inputLine.render(tr("Edit description: "), FG_YELLOW);
     } else if (m_mode == Mode::Search) {
-        out += FG_CYAN + ESC_BOLD + QStringLiteral("/") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += m_inputLine.render(QStringLiteral("/"), FG_CYAN);
     } else if (m_mode == Mode::Command) {
-        out += FG_ORANGE + ESC_BOLD + QStringLiteral(":") + ESC_RESET + m_inputBuffer + QStringLiteral("█\033[K");
+        out += m_inputLine.render(QStringLiteral(":"), FG_ORANGE);
     } else if (m_mode == Mode::EditSettingValue || m_mode == Mode::EditListField) {
-        QString displayInput = m_inputBuffer;
-        if (m_mode == Mode::EditListField && m_listManagerView.isEditingPasswordField()) {
-            displayInput = QString(m_inputBuffer.size(), QChar(0x2022));
-        }
-        out += FG_YELLOW + ESC_BOLD + tr("Enter value: ") + ESC_RESET + displayInput + QStringLiteral("█\033[K");
+        const bool isPassword = (m_mode == Mode::EditListField && m_listManagerView.isEditingPasswordField());
+        out += m_inputLine.render(tr("Enter value: "), FG_YELLOW, isPassword);
     } else if (m_mode == Mode::StatusPicker) {
         out += FG_YELLOW + ESC_BOLD
             + tr("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")

@@ -6,6 +6,7 @@
 #include "tui/TuiCommandHandler.h"
 #include "tui/TuiSettingsView.h"
 #include "tui/TuiListManagerView.h"
+#include "tui/TuiInputLine.h"
 #include <QObject>
 #include <QSet>
 #include <QSocketNotifier>
@@ -101,8 +102,7 @@ private:
     bool m_showPreview = true;
     char m_pendingKey = 0; // for 'g' (gg), 'd' (dd), 'c' (cw)
 
-    QString m_inputBuffer;
-    int m_inputCursor = 0;
+    TuiInputLine m_inputLine;
     QString m_statusMessage;
     TuiMarkdownView m_markdownView;
     TuiDashboardView m_dashboardView;
