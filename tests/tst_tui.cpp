@@ -16,7 +16,10 @@
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSqlQuery>
 #include <QStringList>
@@ -980,6 +983,93 @@ private slots:
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }
+    // KB-122: go-for-it-tui runs on QCoreApplication, and the PDF export (dashboard "p", ":export-pdf")
+    // renders through QTextDocument/QPdfWriter, which needs QFontDatabase and therefore a
+    // QGuiApplication: the process aborted (SIGABRT) and left the terminal in raw/alternate-screen
+    // mode. The real binary is started in its own PTY. It does not run in test mode, so it gets an
+    // unreachable session bus address and never touches the real desktop session or keyring.
+    void testTuiBinarySurvivesPdfExport() {
+
+        const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+        QVERIFY(master >= 0);
+        QVERIFY(::grantpt(master) == 0 && ::unlockpt(master) == 0);
+        const QByteArray slaveName = ::ptsname(master);
+        {
+            const int slave = ::open(slaveName.constData(), O_RDWR | O_NOCTTY);
+            QVERIFY(slave >= 0);
+            struct winsize ws {};
+            ws.ws_row = 30;
+            ws.ws_col = 100;
+            ::ioctl(slave, TIOCSWINSZ, &ws);
+            ::close(slave);
+        }
+        ::fcntl(master, F_SETFL, ::fcntl(master, F_GETFL) | O_NONBLOCK);
+        QByteArray screen;
+        auto pump = [&](int ms) {
+            QElapsedTimer t;
+            t.start();
+            char buf[65536];
+            while (t.elapsed() < ms) {
+                const ssize_t n = ::read(master, buf, sizeof buf);
+                if (n > 0) screen.append(buf, n);
+                else QTest::qWait(20);
+            }
+        };
+
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb122.db"));
+        const QString pdfPath = m_testSandbox.filePath(QStringLiteral("kb122.pdf"));
+        QFile::remove(dbPath);
+        QFile::remove(pdfPath);
+
+        QProcess proc;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"),
+                   QStringLiteral("unix:path=") + m_testSandbox.filePath(QStringLiteral("kb122-no-bus")));
+        env.insert(QStringLiteral("GOFI_NO_SOUND"), QStringLiteral("1"));
+        env.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
+        proc.setProcessEnvironment(env);
+        proc.setChildProcessModifier([slaveName]() {
+            ::setsid();
+            const int s = ::open(slaveName.constData(), O_RDWR);
+            ::ioctl(s, TIOCSCTTY, 0);
+            ::dup2(s, STDIN_FILENO);
+            ::dup2(s, STDOUT_FILENO);
+            ::dup2(s, STDERR_FILENO);
+            if (s > STDERR_FILENO) ::close(s);
+        });
+        proc.start(QStringLiteral(GOFI_TUI_BINARY), {QStringLiteral("--db"), dbPath});
+        QVERIFY2(proc.waitForStarted(5000), qPrintable(proc.errorString()));
+        pump(1500);
+
+        const QByteArray cmd = ":export-pdf " + pdfPath.toUtf8() + "\r";
+        QCOMPARE(::write(master, cmd.constData(), cmd.size()), static_cast<ssize_t>(cmd.size()));
+        pump(2500);
+        const bool aliveAfterExport = proc.state() == QProcess::Running;
+        const QString exitInfo = QStringLiteral("exitStatus=%1 exitCode=%2")
+            .arg(proc.exitStatus() == QProcess::CrashExit ? QStringLiteral("crash") : QStringLiteral("normal"))
+            .arg(proc.exitCode());
+
+        if (aliveAfterExport) {
+            QCOMPARE(::write(master, ":q\r", 3), static_cast<ssize_t>(3));
+            pump(500);
+            proc.waitForFinished(5000);
+        } else {
+            proc.waitForFinished(1000);
+        }
+        if (proc.state() != QProcess::NotRunning) {
+            proc.kill();
+            proc.waitForFinished(2000);
+        }
+        ::close(master);
+        QFile::remove(dbPath);
+
+        QVERIFY2(aliveAfterExport, qPrintable(QStringLiteral("go-for-it-tui died on :export-pdf (%1): %2")
+                                             .arg(exitInfo, QString::fromUtf8(screen.right(400)))));
+        QCOMPARE(proc.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(!screen.contains("QFontDatabase"), screen.right(400).constData());
+        QFile::remove(pdfPath);
+    }
+
 };
 
 QTEST_MAIN(TestTui)

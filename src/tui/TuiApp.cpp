@@ -521,8 +521,12 @@ void TuiApp::handleDashboardKey(const QByteArray& seq) {
     case TuiDashboardView::KeyResult::ExportPdf: {
         const QString periodName = m_dashboardView.periodName();
         const QString outPath = TuiDashboardView::defaultBillingExportPath(QStringLiteral("billing-%1.pdf").arg(periodName));
-        if (m_app->analytics()->exportBillingPdf(outPath, periodName, m_app->activeListFilter())) {
+        if (!AnalyticsService::canExportPdf()) {
+            m_statusMessage = tr("PDF export needs a graphical session: run go-for-it-qt --tui instead.");
+        } else if (m_app->analytics()->exportBillingPdf(outPath, periodName, m_app->activeListFilter())) {
             m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
+        } else {
+            m_statusMessage = tr("Failed to export PDF report.");
         }
         break;
     }

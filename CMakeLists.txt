@@ -226,6 +226,9 @@ if(BUILD_TESTING)
         gofi_core
         Qt6::Test
     )
+    # testTuiBinarySurvivesPdfExport drives the real go-for-it-tui binary (QCoreApplication) in a PTY.
+    add_dependencies(tst_tui go-for-it-tui)
+    target_compile_definitions(tst_tui PRIVATE GOFI_TUI_BINARY="$<TARGET_FILE:go-for-it-tui>")
     add_test(NAME tst_tui COMMAND tst_tui)
     set_tests_properties(tst_tui PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

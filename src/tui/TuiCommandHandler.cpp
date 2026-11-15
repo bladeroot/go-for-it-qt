@@ -83,7 +83,9 @@ void TuiCommandHandler::execute(const QString& cmdLine) {
     if (cmdLine.startsWith(QStringLiteral("export-pdf"))) {
         const QString rest = cmdLine.mid(10).trimmed();
         const QString outPath = !rest.isEmpty() ? rest : TuiDashboardView::defaultBillingExportPath(QStringLiteral("billing-report.pdf"));
-        if (m_tui->m_app->analytics()->exportBillingPdf(outPath, QStringLiteral("month"), m_tui->m_app->activeListFilter())) {
+        if (!AnalyticsService::canExportPdf()) {
+            m_tui->m_statusMessage = tr("PDF export needs a graphical session: run go-for-it-qt --tui instead.");
+        } else if (m_tui->m_app->analytics()->exportBillingPdf(outPath, QStringLiteral("month"), m_tui->m_app->activeListFilter())) {
             m_tui->m_statusMessage = tr("Billing PDF exported to %1").arg(outPath);
         } else {
             m_tui->m_statusMessage = tr("Failed to export PDF report.");

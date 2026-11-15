@@ -399,6 +399,7 @@
   "Opening in browser: %1": "Відкриття у браузері: %1",
   "Overdue": "Прострочено",
   "PDF Files (*.pdf)": "Файли PDF (*.pdf)",
+  "PDF export needs a graphical session: run go-for-it-qt --tui instead.": "Експорт PDF потребує графічного сеансу: запустіть go-for-it-qt --tui.",
   "PDF report saved successfully.": "PDF-звіт успішно збережено.",
   "Pause": "Пауза",
   "Pause Timer": "Призупинити таймер",

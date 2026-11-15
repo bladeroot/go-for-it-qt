@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QLocale>
 #include <QMap>
 #include <QMarginsF>
@@ -385,11 +386,19 @@ bool AnalyticsService::exportBillingCsv(const QString& filePath,
     return true;
 }
 
+bool AnalyticsService::canExportPdf() {
+    return qobject_cast<QGuiApplication*>(QCoreApplication::instance()) != nullptr;
+}
+
 bool AnalyticsService::exportBillingPdf(const QString& filePath,
                                        const QString& period,
                                        const QString& listId) const
 {
     if (filePath.trimmed().isEmpty()) return false;
+    if (!canExportPdf()) {
+        qWarning() << "AnalyticsService::exportBillingPdf: PDF export needs a QGuiApplication";
+        return false;
+    }
 
     const QVariantMap stats = getProductivityStats(period, listId);
     const QVariantList tasks = stats.value(QStringLiteral("taskBreakdown")).toList();

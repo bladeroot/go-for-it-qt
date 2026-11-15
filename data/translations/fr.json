@@ -399,6 +399,7 @@
   "Opening in browser: %1": "Ouverture dans le navigateur : %1",
   "Overdue": "En retard",
   "PDF Files (*.pdf)": "Fichiers PDF (*.pdf)",
+  "PDF export needs a graphical session: run go-for-it-qt --tui instead.": "L'export PDF nécessite une session graphique : lancez plutôt go-for-it-qt --tui.",
   "PDF report saved successfully.": "Rapport PDF enregistré avec succès.",
   "Pause": "Pause",
   "Pause Timer": "Mettre le minuteur en pause",

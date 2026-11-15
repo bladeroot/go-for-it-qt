@@ -33,6 +33,10 @@ public:
                                       const QString& period = QStringLiteral("month"),
                                       const QString& listId = QString()) const;
 
+    // PDF rendering (QTextDocument on QPdfWriter) needs QFontDatabase, i.e. a QGuiApplication.
+    // go-for-it-tui runs on a QCoreApplication, where it would abort the process.
+    [[nodiscard]] static bool canExportPdf();
+
     // Helper utilities
     static QString formatDuration(quint64 totalSeconds);
     static QStringList extractProjects(const QString& text);
