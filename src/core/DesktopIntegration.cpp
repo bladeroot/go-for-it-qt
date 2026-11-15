@@ -320,13 +320,27 @@ QString DesktopIntegration::kwinPinScript(const QString& windowTitle, bool alway
     QString winTitle = windowTitle;
     winTitle.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
 
-    // Target strictly this process's own mini player window by matching both our PID and the
-    // exact window caption, so foreign windows (e.g. VLC/Spotify/browser tabs titled "Mini Player")
-    // and our own main window are never modified.
+    // Target strictly this process's own mini player window:
+    // 1. Process identity: match our PID if present; for native Wayland clients where KWin
+    //    reports pid=0/undefined, fall back to matching resourceClass/desktopFileName "go-for-it-qt".
+    // 2. Caption identity: match exact window title, normalCaption (without KWin suffixes),
+    //    or title prefix/substring, plus localized mini player keywords, while guarding against
+    //    foreign apps (VLC, Spotify, browser tabs) and our own main window / task list views.
     const QString script = QStringLiteral(
         "function applyTo(w) {\n"
         "    if (!w) return;\n"
-        "    if (w.pid === %1 && w.caption === \"%2\") {\n"
+        "    var isOwn = (w.pid && w.pid === %1) || (!w.pid && (w.resourceClass === \"go-for-it-qt\" || (w.desktopFileName && w.desktopFileName.indexOf(\"go-for-it\") !== -1)));\n"
+        "    if (!isOwn) return;\n"
+        "    var c = w.caption || \"\";\n"
+        "    var nc = (typeof w.normalCaption !== \"undefined\" && w.normalCaption) ? w.normalCaption : \"\";\n"
+        "    var match = (c === \"%2\" || nc === \"%2\" || c.indexOf(\"%2\") !== -1 || nc.indexOf(\"%2\") !== -1);\n"
+        "    if (!match) {\n"
+        "        var isMini = (c.indexOf(\"Mini\") !== -1 || c.indexOf(\"Міні\") !== -1 || nc.indexOf(\"Mini\") !== -1 || nc.indexOf(\"Міні\") !== -1);\n"
+        "        if (isMini && (w.height <= 150 || (c.indexOf(\"Inbox\") === -1 && c.indexOf(\"Today\") === -1))) {\n"
+        "            match = true;\n"
+        "        }\n"
+        "    }\n"
+        "    if (match) {\n"
         "        w.keepAbove = %3;\n"
         "        w.onAllDesktops = %3;\n"
         "    }\n"
@@ -351,6 +365,7 @@ void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnect
     if (!tempFile->open()) return;
     tempFile->write(script.toUtf8());
     tempFile->flush();
+    tempFile->close();
     const QString tempPath = tempFile->fileName();
 
     static std::atomic<quint64> s_scriptSeq{0};
@@ -408,7 +423,7 @@ void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop)
 
     // When the window is first shown, the Wayland compositor maps the surface asynchronously
     // (typically takes 50-150ms). Retry after short delays so KWin catches the window.
-    for (int delayMs : {80, 200, 500}) {
+    for (int delayMs : {80, 200, 500, 1000}) {
         QTimer::singleShot(delayMs, [script]() {
             executeKWinPinScript(script);
         });

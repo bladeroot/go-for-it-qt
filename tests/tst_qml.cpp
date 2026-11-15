@@ -1013,6 +1013,8 @@ private slots:
         };
         const QList<FakeWindow> initial = {
             {miniTitle, QStringLiteral("go-for-it-qt"), ownPid, 90, false, false, false, false},
+            {QStringLiteral("Go for It — Mini Player — Go for It Qt"), QStringLiteral("go-for-it-qt"), ownPid, 90, false, false, false, false},
+            {miniTitle, QStringLiteral("go-for-it-qt"), 0, 90, false, false, false, false},
             {QStringLiteral("VLC Mini-Player"), QStringLiteral("vlc"), foreignPid, 300, false, false, false, false},
             // a foreign window the user pinned on their own: our unpin must not clear it
             {QStringLiteral("Spotify Mini Player"), QStringLiteral("spotify"), foreignPid, 200, true, true, false, false},
@@ -1063,16 +1065,20 @@ private slots:
         };
 
         QVERIFY(runScript(true));
-        QVERIFY(prop(0, "keepAbove"));
-        QVERIFY(prop(0, "onAllDesktops"));
-        for (int i = 1; i < initial.size(); ++i) {
+        for (int i = 0; i < 3; ++i) {
+            QVERIFY2(prop(i, "keepAbove"), qPrintable(initial.at(i).caption));
+            QVERIFY2(prop(i, "onAllDesktops"), qPrintable(initial.at(i).caption));
+        }
+        for (int i = 3; i < initial.size(); ++i) {
             QVERIFY2(verifyUntouched(i), qPrintable(initial.at(i).caption));
         }
 
         QVERIFY(runScript(false));
-        QVERIFY(!prop(0, "keepAbove"));
-        QVERIFY(!prop(0, "onAllDesktops"));
-        for (int i = 1; i < initial.size(); ++i) {
+        for (int i = 0; i < 3; ++i) {
+            QVERIFY2(!prop(i, "keepAbove"), qPrintable(initial.at(i).caption));
+            QVERIFY2(!prop(i, "onAllDesktops"), qPrintable(initial.at(i).caption));
+        }
+        for (int i = 3; i < initial.size(); ++i) {
             QVERIFY2(verifyUntouched(i), qPrintable(initial.at(i).caption));
         }
     }
