@@ -3,6 +3,7 @@
 #include "core/AppController.h"
 #include "tui/TuiMarkdownView.h"
 #include "tui/TuiDashboardView.h"
+#include "tui/TuiCommandHandler.h"
 #include <QObject>
 #include <QSet>
 #include <QSocketNotifier>
@@ -108,6 +109,9 @@ private:
     QString m_statusMessage;
     TuiMarkdownView m_markdownView;
     TuiDashboardView m_dashboardView;
+    TuiCommandHandler m_commandHandler;
+
+    friend class TuiCommandHandler;
 };
 
 } // namespace gofi

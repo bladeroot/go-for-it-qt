@@ -101,6 +101,8 @@ set(GOFI_CORE_SOURCES
     src/tui/TuiMarkdownView.cpp
     src/tui/TuiDashboardView.h
     src/tui/TuiDashboardView.cpp
+    src/tui/TuiCommandHandler.h
+    src/tui/TuiCommandHandler.cpp
     src/tui/TuiApp.h
     src/tui/TuiApp.cpp
 )
