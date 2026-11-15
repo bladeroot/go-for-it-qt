@@ -199,6 +199,20 @@ if(BUILD_TESTING)
     set_tests_properties(tst_tui PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )
+
+    add_executable(tst_qml
+        tests/TestSupport.h
+        tests/TestSupport.cpp
+        tests/tst_qml.cpp
+    )
+    target_link_libraries(tst_qml PRIVATE
+        gofi_core
+        Qt6::Test
+    )
+    add_test(NAME tst_qml COMMAND tst_qml)
+    set_tests_properties(tst_qml PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    )
 endif()
 
 # ==============================================================================
