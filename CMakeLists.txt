@@ -49,6 +49,9 @@ set(GOFI_CORE_SOURCES
     src/core/CredentialStore.cpp
     src/core/Schedule.h
     src/core/Schedule.cpp
+    src/core/DatabaseSerialization.h
+    src/core/TaskRepository.h
+    src/core/TaskRepository.cpp
     src/core/DatabaseManager.h
     src/core/DatabaseManager.cpp
     src/core/IssueTrackerService.h

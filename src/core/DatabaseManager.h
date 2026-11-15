@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Schedule.h"
+#include "TaskRepository.h"
 #include "../todotxt/TxtTask.h"
 #include <QDateTime>
 #include <QSqlDatabase>
@@ -73,7 +74,11 @@ public:
     bool removeList(const QString& listId, bool* notFound = nullptr);
     bool updateListsOrder(const QVector<TodoListEntry>& entries);
 
-    // Tasks CRUD
+    // Tasks Repository
+    [[nodiscard]] TaskRepository& tasks() { return m_taskRepo; }
+    [[nodiscard]] const TaskRepository& tasks() const { return m_taskRepo; }
+
+    // Tasks CRUD (delegated to TaskRepository)
     [[nodiscard]] std::optional<TxtTask> loadTask(qint64 taskId, bool* queryError = nullptr) const;
     [[nodiscard]] QVector<TxtTask> loadTasks(const QStringList& listIds, bool done) const;
     [[nodiscard]] QVector<TxtTask> loadTasks(const QString& listId, bool done) const;
@@ -121,9 +126,10 @@ public:
                                                            const QString& listId = {}) const;
 
     friend class CredentialStore;
+    friend class TaskRepository;
 
 private:
-    DatabaseManager() = default;
+    DatabaseManager();
     ~DatabaseManager();
 
     bool createSchema();
@@ -133,6 +139,7 @@ private:
     QString m_connectionName = QStringLiteral("gofi_sqlite_conn");
     QString m_dbPath;
     bool m_initFailed = false;
+    TaskRepository m_taskRepo;
 };
 
 } // namespace gofi
