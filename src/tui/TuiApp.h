@@ -2,6 +2,7 @@
 
 #include "core/AppController.h"
 #include "tui/TuiMarkdownView.h"
+#include "tui/TuiDashboardView.h"
 #include <QObject>
 #include <QSet>
 #include <QSocketNotifier>
@@ -106,8 +107,7 @@ private:
     int m_inputCursor = 0;
     QString m_statusMessage;
     TuiMarkdownView m_markdownView;
-    int m_dashboardPeriod = 0; // 0:Day, 1:Week, 2:Month, 3:All
-    int m_dashboardScroll = 0;
+    TuiDashboardView m_dashboardView;
 };
 
 } // namespace gofi
