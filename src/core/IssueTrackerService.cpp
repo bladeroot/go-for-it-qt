@@ -516,9 +516,11 @@ QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
         const QUrl url = buildYouTrackBrowserUrl(listEntry, issueKey);
         if (!url.isEmpty()) return url;
     } else if (provider == QStringLiteral("GitHub")) {
-        return buildGitHubBrowserUrl(listEntry, issueKey);
+        const QUrl url = buildGitHubBrowserUrl(listEntry, issueKey);
+        if (!url.isEmpty()) return url;
     } else if (provider == QStringLiteral("GitLab")) {
-        return buildGitLabBrowserUrl(listEntry, issueKey);
+        const QUrl url = buildGitLabBrowserUrl(listEntry, issueKey);
+        if (!url.isEmpty()) return url;
     } else if (provider == QStringLiteral("Redmine")) {
         const QUrl url = buildRedmineBrowserUrl(listEntry, issueKey);
         if (!url.isEmpty()) return url;

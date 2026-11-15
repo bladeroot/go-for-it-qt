@@ -2876,6 +2876,20 @@ private slots:
         server.close();
     }
 
+    // KB-121: splitting buildIssueBrowserUrl per provider made the GitHub and GitLab helpers return an
+    // empty URL when no issue URL can be built, so unkeyed tasks in those lists (e.g. a task added
+    // locally to a github.com list) no longer fall back to the link written in the task description.
+    void testBrowserUrlFallsBackToDescriptionLinkForUnkeyedGitHubAndGitLabTasks() {
+        const QString description = QStringLiteral("Read https://example.org/spec/page for details");
+        for (const QString& provider : {QStringLiteral("GitHub"), QStringLiteral("GitLab")}) {
+            TodoListEntry entry;
+            entry.provider = provider;
+            const QUrl url = IssueTrackerService::buildIssueBrowserUrl(entry, QString(), description);
+            QVERIFY2(url == QUrl(QStringLiteral("https://example.org/spec/page")),
+                     qPrintable(provider + QStringLiteral(": ") + url.toString()));
+        }
+    }
+
 };
 
 QTEST_MAIN(TestTrackers)
