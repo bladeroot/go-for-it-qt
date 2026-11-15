@@ -53,6 +53,8 @@ set(GOFI_CORE_SOURCES
     src/core/DatabaseManager.cpp
     src/core/IssueTrackerService.h
     src/core/IssueTrackerService.cpp
+    src/core/trackers/TrackerCommon.h
+    src/core/trackers/GitHub.cpp
     src/core/SettingsManager.h
     src/core/SettingsManager.cpp
     src/core/UkTranslator.h
