@@ -1,5 +1,6 @@
 #include "trackers/YouTrackProvider.h"
 #include "trackers/TrackerCommon.h"
+#include "trackers/TrackerPaginator.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
 #include <QJsonArray>
@@ -144,12 +145,9 @@ struct IssueTrackerService::YouTrackSyncState {
     QVector<RemoteIssueItem> allItems;
     QStringList firstPassKeys;
     int skip = 0;
-    int pagesFetched = 0;
     int nonEmptyPages = 0;
-    bool limitReached = false;
-    bool hasError = false;
-    bool explicitZeroTotal = false;
     bool isSecondPass = false;
+    TrackerPaginator paginator{50};
 };
 
 void IssueTrackerService::fetchYouTrackIssues(const TodoListEntry& entry) {
@@ -197,15 +195,16 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 
         if (reply->error() != QNetworkReply::NoError) {
-            if (state->pagesFetched == 0 && !state->isSecondPass) {
+            if (state->paginator.pagesFetched() == 0 && !state->isSecondPass) {
                 endSyncOperation();
                 const QString errMsg = tr("YouTrack sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
                 setStatusMessage(errMsg);
                 emit syncFailed(entry.id, errMsg);
                 return;
             } else {
-                state->hasError = true;
-                processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError);
+                state->paginator.recordError();
+                const auto outcome = state->paginator.finalize(state->allItems);
+                processSyncedItems(entry, outcome.items, QStringLiteral("YouTrack"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
                 return;
             }
         }
@@ -213,43 +212,36 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         const QByteArray bodyBytes = reply->readAll();
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         if (!doc.isArray()) {
-            state->hasError = true;
+            state->paginator.recordError();
         }
 
         const int rawCount = doc.isArray() ? doc.array().size() : 0;
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
         state->allItems.append(items);
-        state->pagesFetched++;
+        state->paginator.recordPage(rawCount, -1, false);
+
         if (rawCount > 0) {
             state->nonEmptyPages++;
         }
         state->skip += rawCount;
 
-        if (state->pagesFetched == 1 && rawCount == 0 && !state->hasError) {
-            state->explicitZeroTotal = true;
-        }
-
         const bool hasMore = (rawCount >= 100);
-        if (hasMore && !state->hasError) {
-            if (state->pagesFetched < 50) {
-                fetchYouTrackPage(entry, state, baseUrl, ytQuery);
-                return;
-            } else {
-                state->limitReached = true;
-            }
+        if (state->paginator.shouldFetchMore(hasMore)) {
+            fetchYouTrackPage(entry, state, baseUrl, ytQuery);
+            return;
         }
 
         if (!state->isSecondPass) {
-            if (state->nonEmptyPages > 1 && !state->hasError && !state->limitReached) {
+            if (state->nonEmptyPages > 1 && !state->paginator.hasError() && !state->paginator.isLimitReached()) {
                 state->firstPassKeys.clear();
                 for (const auto& it : state->allItems) {
                     state->firstPassKeys.append(it.key);
                 }
                 state->allItems.clear();
                 state->skip = 0;
-                state->pagesFetched = 0;
                 state->nonEmptyPages = 0;
                 state->isSecondPass = true;
+                state->paginator = TrackerPaginator(50);
                 fetchYouTrackPage(entry, state, baseUrl, ytQuery);
                 return;
             }
@@ -259,11 +251,12 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
                 secondPassKeys.append(it.key);
             }
             if (secondPassKeys != state->firstPassKeys) {
-                state->limitReached = true;
+                state->paginator.setLimitReached(true);
             }
         }
 
-        processSyncedItems(entry, state->allItems, QStringLiteral("YouTrack"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        const auto outcome = state->paginator.finalize(state->allItems);
+        processSyncedItems(entry, outcome.items, QStringLiteral("YouTrack"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
     });
 }
 

@@ -1,5 +1,6 @@
 #include "trackers/RedmineProvider.h"
 #include "trackers/TrackerCommon.h"
+#include "trackers/TrackerPaginator.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
 #include <QJsonArray>
@@ -146,12 +147,7 @@ QVariantList IssueTrackerService::parseRedmineStatusesJson(const QByteArray& jso
 struct IssueTrackerService::RedmineSyncState {
     QVector<RemoteIssueItem> allItems;
     int offset = 0;
-    int pagesFetched = 0;
-    int totalCount = -1;
-    int initialTotalCount = -1;
-    bool limitReached = false;
-    bool hasError = false;
-    bool explicitZeroTotal = false;
+    TrackerPaginator paginator{50};
 };
 
 void IssueTrackerService::fetchRedmineIssues(const TodoListEntry& entry) {
@@ -199,19 +195,16 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
     connect(reply, &QNetworkReply::finished, this, [this, reply, entry, state, baseUrl, queryStr]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
-            if (state->pagesFetched == 0) {
+            if (state->paginator.pagesFetched() == 0) {
                 endSyncOperation();
                 const QString errMsg = tr("Redmine sync error: %1").arg(reply->errorString());
                 setStatusMessage(errMsg);
                 emit syncFailed(entry.id, errMsg);
                 return;
             } else {
-                state->hasError = true;
-                if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
-                    state->limitReached = true;
-                }
-
-                processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                state->paginator.recordError();
+                const auto outcome = state->paginator.finalize(state->allItems);
+                processSyncedItems(entry, outcome.items, QStringLiteral("Redmine"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
                 return;
             }
         }
@@ -221,28 +214,21 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
         bool hasMore = false;
 
         if (!doc.isObject()) {
-            state->hasError = true;
+            state->paginator.recordError();
         } else {
             const QJsonObject rootObj = doc.object();
             const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
-            state->totalCount = totalCount;
-            if (state->pagesFetched == 0) {
-                state->initialTotalCount = totalCount;
-            } else if (state->initialTotalCount >= 0 && totalCount != state->initialTotalCount) {
-                state->limitReached = true;
-            }
             const int limit = rootObj.value(QStringLiteral("limit")).toInt(100);
             const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
-            if (state->pagesFetched == 0 && totalCount == 0 && issuesArr.isEmpty()) {
-                state->explicitZeroTotal = true;
-            }
+
+            state->paginator.recordPage(issuesArr.size(), totalCount, false);
 
             if (issuesArr.size() >= limit && (totalCount < 0 || state->allItems.size() + issuesArr.size() < totalCount)) {
                 hasMore = true;
             }
             state->offset += issuesArr.size();
 
-            if (state->pagesFetched == 0) {
+            if (state->paginator.pagesFetched() == 1) {
                 // Auto-learn status IDs from Redmine server statuses if closed ID is missing
                 const bool statusesFetched = entry.statusMapping.contains(QStringLiteral("_statuses_fetched"));
                 bool hasClosedId = statusesFetched;
@@ -323,22 +309,14 @@ void IssueTrackerService::fetchRedminePage(const TodoListEntry& entry,
 
         const QVector<RemoteIssueItem> items = parseRedmineIssuesJson(bodyBytes);
         state->allItems.append(items);
-        state->pagesFetched++;
 
-        if (hasMore && !state->hasError) {
-            if (state->pagesFetched < 50) {
-                fetchRedminePage(entry, state, baseUrl, queryStr);
-                return;
-            } else {
-                state->limitReached = true;
-            }
+        if (state->paginator.shouldFetchMore(hasMore)) {
+            fetchRedminePage(entry, state, baseUrl, queryStr);
+            return;
         }
 
-        if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
-            state->limitReached = true;
-        }
-
-        processSyncedItems(entry, state->allItems, QStringLiteral("Redmine"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        const auto outcome = state->paginator.finalize(state->allItems);
+        processSyncedItems(entry, outcome.items, QStringLiteral("Redmine"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
     });
 }
 

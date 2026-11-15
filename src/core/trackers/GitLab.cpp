@@ -1,5 +1,6 @@
 #include "trackers/GitLabProvider.h"
 #include "trackers/TrackerCommon.h"
+#include "trackers/TrackerPaginator.h"
 #include "DatabaseManager.h"
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -209,14 +210,9 @@ QVariantList IssueTrackerService::parseGitLabStatuses(const QVariantMap& existin
 struct IssueTrackerService::GitLabCombinedSyncState {
     QVector<RemoteIssueItem> items;
     int completedRequests = 0;
-    int initialTotal = -1;
-    int initialIssuesTotal = -1;
-    int initialMrTotal = -1;
-    int issuesParsedCount = 0;
-    int mrParsedCount = 0;
-    bool hasError = false;
     QString errorMsg;
-    bool limitReached = false;
+    TrackerPaginator issuesPaginator{50};
+    TrackerPaginator mrPaginator{50};
 };
 
 void IssueTrackerService::fetchGitLabIssues(const TodoListEntry& entry) {
@@ -273,24 +269,24 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
 
         auto checkDone = [this, entry, combinedState]() {
             if (combinedState->completedRequests < 2) return;
-            if (combinedState->hasError && combinedState->items.isEmpty()) {
+            const bool combinedHasError = combinedState->issuesPaginator.hasError() || combinedState->mrPaginator.hasError();
+            if (combinedHasError && combinedState->items.isEmpty()) {
                 endSyncOperation();
                 setStatusMessage(combinedState->errorMsg);
                 emit syncFailed(entry.id, combinedState->errorMsg);
                 return;
             }
-            if (combinedState->initialIssuesTotal >= 0 && combinedState->issuesParsedCount < combinedState->initialIssuesTotal) {
-                combinedState->limitReached = true;
-            }
-            if (combinedState->initialMrTotal >= 0 && combinedState->mrParsedCount < combinedState->initialMrTotal) {
-                combinedState->limitReached = true;
-            }
-            const bool explicitZero = !combinedState->hasError && combinedState->items.isEmpty();
-            processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedState->limitReached, combinedState->hasError, explicitZero);
+            const auto issuesOutcome = combinedState->issuesPaginator.finalize({});
+            const auto mrOutcome = combinedState->mrPaginator.finalize({});
+            const bool combinedLimitReached = issuesOutcome.limitReached || mrOutcome.limitReached;
+            const bool explicitZero = !combinedHasError && combinedState->items.isEmpty();
+            processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedLimitReached, combinedHasError, explicitZero);
         };
 
+        TrackerPaginator& paginator = isMr ? combinedState->mrPaginator : combinedState->issuesPaginator;
+
         if (reply->error() != QNetworkReply::NoError) {
-            combinedState->hasError = true;
+            paginator.recordError();
             if (combinedState->errorMsg.isEmpty()) {
                 // GitLab explains rejected requests in the JSON body ({"error": "..."} or {"message": ...});
                 // QNetworkReply::errorString() only says "Bad Request".
@@ -326,7 +322,7 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
         QJsonParseError parseErr;
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes, &parseErr);
         if (parseErr.error != QJsonParseError::NoError || !doc.isArray()) {
-            combinedState->hasError = true;
+            paginator.recordError();
             if (combinedState->errorMsg.isEmpty()) {
                 combinedState->errorMsg = isMr
                     ? tr("GitLab merge requests returned invalid response: %1").arg(reply->errorString())
@@ -342,41 +338,16 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
 
         const QByteArray totalHdr = reply->rawHeader("x-total").trimmed();
         const int streamTotal = totalHdr.isEmpty() ? -1 : totalHdr.toInt();
-        if (page == 1) {
-            if (isMr) {
-                combinedState->initialMrTotal = streamTotal;
-            } else {
-                combinedState->initialIssuesTotal = streamTotal;
-            }
-        } else {
-            const int initial = isMr ? combinedState->initialMrTotal : combinedState->initialIssuesTotal;
-            if (initial >= 0) {
-                if (streamTotal != initial) {
-                    combinedState->limitReached = true;
-                }
-            } else {
-                combinedState->limitReached = true;
-            }
-        }
-
-        if (isMr) {
-            combinedState->mrParsedCount += parsed.size();
-        } else {
-            combinedState->issuesParsedCount += parsed.size();
-        }
+        paginator.recordPage(parsed.size(), streamTotal, false);
 
         const QByteArray nextPageHdr = reply->rawHeader("x-next-page").trimmed();
         const int nextPage = nextPageHdr.toInt();
-        const bool hasMore = (nextPage > 0) || (parsed.size() >= 100);
+        const bool hasMore = ((nextPage > 0) || (parsed.size() >= 100)) && !parsed.isEmpty();
 
-        if (hasMore && !parsed.isEmpty()) {
-            if (page < 50) {
-                const int nextP = (nextPage > 0) ? nextPage : (page + 1);
-                fetchGitLabStreamPage(entry, combinedState, baseUrl, path, isMr, nextP);
-                return;
-            } else {
-                combinedState->limitReached = true;
-            }
+        if (paginator.shouldFetchMore(hasMore)) {
+            const int nextP = (nextPage > 0) ? nextPage : (page + 1);
+            fetchGitLabStreamPage(entry, combinedState, baseUrl, path, isMr, nextP);
+            return;
         }
         combinedState->completedRequests++;
         checkDone();

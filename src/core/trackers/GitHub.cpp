@@ -1,5 +1,6 @@
 #include "trackers/GitHubProvider.h"
 #include "trackers/TrackerCommon.h"
+#include "trackers/TrackerPaginator.h"
 #include "DatabaseManager.h"
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -157,12 +158,7 @@ QVariantList IssueTrackerService::parseGitHubStatuses(const QVariantMap& existin
 struct IssueTrackerService::GitHubSyncState {
     QVector<RemoteIssueItem> allItems;
     int page = 1;
-    int pagesFetched = 0;
-    int totalCount = -1;
-    int initialTotalCount = -1;
-    bool limitReached = false;
-    bool hasError = false;
-    bool explicitZeroTotal = false;
+    TrackerPaginator paginator{10};
 };
 
 void IssueTrackerService::fetchGitHubIssues(const TodoListEntry& entry) {
@@ -231,19 +227,16 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
         reply->deleteLater();
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError) {
-            if (state->pagesFetched == 0) {
+            if (state->paginator.pagesFetched() == 0) {
                 endSyncOperation();
                 const QString errMsg = tr("GitHub sync error (%1): %2").arg(httpStatus).arg(reply->errorString());
                 setStatusMessage(errMsg);
                 emit syncFailed(entry.id, errMsg);
                 return;
             } else {
-                state->hasError = true;
-                if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
-                    state->limitReached = true;
-                }
-
-                processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                state->paginator.recordError();
+                const auto outcome = state->paginator.finalize(state->allItems);
+                processSyncedItems(entry, outcome.items, QStringLiteral("GitHub"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
                 return;
             }
         }
@@ -253,26 +246,18 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
         bool hasMore = false;
 
         if (!doc.isObject()) {
-            state->hasError = true;
+            state->paginator.recordError();
         } else {
             const QJsonObject rootObj = doc.object();
             if (rootObj.contains(QStringLiteral("message"))) {
-                state->hasError = true;
+                state->paginator.recordError();
             }
-            if (rootObj.value(QStringLiteral("incomplete_results")).toBool(false)) {
-                state->limitReached = true;
-            }
+            const bool incomplete = rootObj.value(QStringLiteral("incomplete_results")).toBool(false);
             const int totalCount = rootObj.value(QStringLiteral("total_count")).toInt(-1);
-            state->totalCount = totalCount;
-            if (state->pagesFetched == 0) {
-                state->initialTotalCount = totalCount;
-            } else if (state->initialTotalCount >= 0 && totalCount != state->initialTotalCount) {
-                state->limitReached = true;
-            }
             const QJsonArray itemsArray = rootObj.value(QStringLiteral("items")).toArray();
-            if (state->pagesFetched == 0 && totalCount == 0 && !state->hasError && itemsArray.isEmpty()) {
-                state->explicitZeroTotal = true;
-            }
+
+            state->paginator.recordPage(itemsArray.size(), totalCount, incomplete);
+
             if (itemsArray.size() >= 100 && (totalCount < 0 || state->allItems.size() + itemsArray.size() < totalCount)) {
                 hasMore = true;
             }
@@ -280,24 +265,15 @@ void IssueTrackerService::fetchGitHubPage(const TodoListEntry& entry,
 
         const QVector<RemoteIssueItem> items = parseGitHubIssuesJson(bodyBytes);
         state->allItems.append(items);
-        state->pagesFetched++;
         state->page++;
 
-        if (hasMore && !state->hasError) {
-            // GitHub Search API has a hard ceiling of 1000 items (10 pages)
-            if (state->pagesFetched < 10) {
-                fetchGitHubPage(entry, state, apiUrl, queryStr);
-                return;
-            } else {
-                state->limitReached = true;
-            }
+        if (state->paginator.shouldFetchMore(hasMore)) {
+            fetchGitHubPage(entry, state, apiUrl, queryStr);
+            return;
         }
 
-        if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
-            state->limitReached = true;
-        }
-
-        processSyncedItems(entry, state->allItems, QStringLiteral("GitHub"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        const auto outcome = state->paginator.finalize(state->allItems);
+        processSyncedItems(entry, outcome.items, QStringLiteral("GitHub"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
     });
 }
 

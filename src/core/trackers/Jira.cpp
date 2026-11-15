@@ -1,5 +1,6 @@
 #include "trackers/JiraProvider.h"
 #include "trackers/TrackerCommon.h"
+#include "trackers/TrackerPaginator.h"
 #include "DatabaseManager.h"
 #include <QDateTime>
 #include <QJsonArray>
@@ -415,12 +416,7 @@ struct IssueTrackerService::JiraSyncState {
     QVector<RemoteIssueItem> allItems;
     int startAt = 0;
     QString nextPageToken;
-    int pagesFetched = 0;
-    int totalCount = -1;
-    int initialTotalCount = -1;
-    bool limitReached = false;
-    bool hasError = false;
-    bool explicitZeroTotal = false;
+    TrackerPaginator paginator{50};
 };
 
 void IssueTrackerService::fetchJiraIssues(const TodoListEntry& entry, int endpointStage, bool forceBearerAuth) {
@@ -490,7 +486,7 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
             if (forceBearerAuth) {
                 m_jiraBearerTokens.remove(entry.id);
             }
-            if (state->pagesFetched == 0) {
+            if (state->paginator.pagesFetched() == 0) {
                 if (!forceBearerAuth && !entry.jiraUser.trimmed().isEmpty() && (httpStatus == 401 || httpStatus == 403 || seraphAuthFailed)) {
                     endSyncOperation();
                     fetchJiraIssues(entry, endpointStage, true);
@@ -527,12 +523,9 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
                 emit syncFailed(entry.id, errMsg);
                 return;
             } else {
-                state->hasError = true;
-                if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
-                    state->limitReached = true;
-                }
-
-                processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
+                state->paginator.recordError();
+                const auto outcome = state->paginator.finalize(state->allItems);
+                processSyncedItems(entry, outcome.items, QStringLiteral("Jira"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
                 return;
             }
         }
@@ -544,27 +537,23 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
         const QJsonDocument doc = QJsonDocument::fromJson(bodyBytes);
         bool hasMore = false;
         if (!doc.isObject()) {
-            state->hasError = true;
+            state->paginator.recordError();
         } else {
             const QJsonObject rootObj = doc.object();
             if (rootObj.contains(QStringLiteral("errorMessages"))) {
-                state->hasError = true;
+                state->paginator.recordError();
             }
             const int total = rootObj.value(QStringLiteral("total")).toInt(-1);
-            state->totalCount = total;
-            if (state->pagesFetched == 0) {
-                state->initialTotalCount = total;
-            } else if (state->initialTotalCount >= 0 && total != state->initialTotalCount) {
-                state->limitReached = true;
-            }
             const int maxResults = rootObj.value(QStringLiteral("maxResults")).toInt(100);
             const QJsonArray issuesArr = rootObj.value(QStringLiteral("issues")).toArray();
             const bool isLast = rootObj.value(QStringLiteral("isLast")).toBool(true);
             const QString nextToken = rootObj.value(QStringLiteral("nextPageToken")).toString().trimmed();
 
-            if (state->pagesFetched == 0 && !state->hasError && issuesArr.isEmpty()) {
-                if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && rootObj.value(QStringLiteral("isLast")).toBool(false))) {
-                    state->explicitZeroTotal = true;
+            state->paginator.recordPage(issuesArr.size(), total, false);
+
+            if (state->paginator.pagesFetched() == 1 && !state->paginator.hasError() && issuesArr.isEmpty()) {
+                if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && !rootObj.value(QStringLiteral("isLast")).toBool(false))) {
+                    state->paginator.setExplicitZeroTotal(true);
                 }
             }
 
@@ -583,22 +572,14 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
 
         const QVector<RemoteIssueItem> items = parseJiraIssuesJson(bodyBytes);
         state->allItems.append(items);
-        state->pagesFetched++;
 
-        if (hasMore && !state->hasError) {
-            if (state->pagesFetched < 50) {
-                fetchJiraPage(entry, state, baseUrl, path, jql, endpointStage, forceBearerAuth);
-                return;
-            } else {
-                state->limitReached = true;
-            }
+        if (state->paginator.shouldFetchMore(hasMore)) {
+            fetchJiraPage(entry, state, baseUrl, path, jql, endpointStage, forceBearerAuth);
+            return;
         }
 
-        if (state->totalCount >= 0 && state->allItems.size() < state->totalCount) {
-            state->limitReached = true;
-        }
-
-        processSyncedItems(entry, state->allItems, QStringLiteral("Jira"), state->limitReached, state->hasError, state->explicitZeroTotal);
+        const auto outcome = state->paginator.finalize(state->allItems);
+        processSyncedItems(entry, outcome.items, QStringLiteral("Jira"), outcome.limitReached, outcome.hasError, outcome.explicitZeroTotal);
     });
 }
 

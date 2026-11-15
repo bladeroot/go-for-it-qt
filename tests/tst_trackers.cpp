@@ -7,6 +7,7 @@
 #include "core/DesktopIntegration.h"
 #include "core/IssueTrackerService.h"
 #include "trackers/IssueTrackerProvider.h"
+#include "trackers/TrackerPaginator.h"
 #include "trackers/GitHubProvider.h"
 #include "trackers/GitLabProvider.h"
 #include "trackers/JiraProvider.h"
@@ -141,6 +142,180 @@ private slots:
 
         QVERIFY(svc.providerFor(QStringLiteral("UnknownProvider")) == nullptr);
         QVERIFY(svc.providerFor(QString()) == nullptr);
+    }
+
+    void testTrackerPaginatorLifecycleAndSafety() {
+        // 1. Single-page complete sync
+        {
+            TrackerPaginator paginator(10);
+            paginator.recordPage(5, 5, false);
+            QCOMPARE(paginator.pagesFetched(), 1);
+            QVERIFY(!paginator.isLimitReached());
+            QVERIFY(!paginator.hasError());
+            QVERIFY(!paginator.isExplicitZeroTotal());
+            QVERIFY(!paginator.shouldFetchMore(false));
+
+            QVector<RemoteIssueItem> items(5);
+            const auto outcome = paginator.finalize(items);
+            QVERIFY(outcome.canReconcile());
+            QVERIFY(!outcome.limitReached);
+            QVERIFY(!outcome.hasError);
+        }
+
+        // 2. Multi-page pagination reaching ceiling
+        {
+            TrackerPaginator paginator(2);
+            paginator.recordPage(10, 30, false);
+            QVERIFY(paginator.shouldFetchMore(true));
+            paginator.recordPage(10, 30, false);
+            QVERIFY(!paginator.shouldFetchMore(true));
+            QVERIFY(paginator.isLimitReached());
+
+            QVector<RemoteIssueItem> items(20);
+            const auto outcome = paginator.finalize(items);
+            QVERIFY(!outcome.canReconcile());
+            QVERIFY(outcome.limitReached);
+        }
+
+        // 3. Server total shift detection (e.g. 100 on page 1, 105 on page 2)
+        {
+            TrackerPaginator paginator(10);
+            paginator.recordPage(50, 100, false);
+            QVERIFY(!paginator.isLimitReached());
+            paginator.recordPage(50, 105, false);
+            QVERIFY(paginator.isLimitReached());
+
+            QVector<RemoteIssueItem> items(100);
+            const auto outcome = paginator.finalize(items);
+            QVERIFY(!outcome.canReconcile());
+            QVERIFY(outcome.limitReached);
+        }
+
+        // 4. Incomplete results flag (e.g. GitHub timeout / truncated index)
+        {
+            TrackerPaginator paginator(10);
+            paginator.recordPage(25, 25, true /* incompleteResults */);
+            QVERIFY(paginator.isLimitReached());
+            QVector<RemoteIssueItem> items(25);
+            const auto outcome = paginator.finalize(items);
+            QVERIFY(!outcome.canReconcile());
+            QVERIFY(outcome.limitReached);
+        }
+
+        // 5. Explicit zero total
+        {
+            TrackerPaginator paginator(10);
+            paginator.recordPage(0, 0, false);
+            QVERIFY(paginator.isExplicitZeroTotal());
+            QVERIFY(!paginator.isLimitReached());
+            QVERIFY(!paginator.hasError());
+            const auto outcome = paginator.finalize({});
+            QVERIFY(outcome.canReconcile());
+            QVERIFY(outcome.explicitZeroTotal);
+        }
+
+        // 6. Mid-stream network/parse error
+        {
+            TrackerPaginator paginator(10);
+            paginator.recordPage(20, 50, false);
+            paginator.recordError();
+            QVERIFY(paginator.hasError());
+            QVERIFY(!paginator.shouldFetchMore(true));
+            QVector<RemoteIssueItem> items(20);
+            const auto outcome = paginator.finalize(items);
+            QVERIFY(!outcome.canReconcile());
+            QVERIFY(outcome.hasError);
+        }
+
+        // 7. Fewer items accumulated than reported server total
+        {
+            TrackerPaginator paginator(10);
+            paginator.recordPage(20, 100, false);
+            QVector<RemoteIssueItem> items(20);
+            const auto outcome = paginator.finalize(items);
+            QVERIFY(outcome.limitReached);
+            QVERIFY(!outcome.canReconcile());
+        }
+    }
+
+    void testTrackerReconciliationFlagsForAllProviders() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("reconcile_all_providers.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+
+        const QStringList providers = {
+            QStringLiteral("GitHub"),
+            QStringLiteral("GitLab"),
+            QStringLiteral("Jira"),
+            QStringLiteral("Redmine"),
+            QStringLiteral("YouTrack"),
+            QStringLiteral("Todoist"),
+            QStringLiteral("Nextcloud")
+        };
+
+        IssueTrackerService svc;
+
+        for (const QString& providerName : providers) {
+            TodoListEntry entry;
+            entry.id = QStringLiteral("list_%1").arg(providerName);
+            entry.name = QStringLiteral("%1 List").arg(providerName);
+            entry.provider = providerName;
+            entry.jiraUrl = QStringLiteral("https://example.com");
+            entry.apiToken = QStringLiteral("secret");
+            QVERIFY(db.saveList(entry, 0));
+
+            const QString k1 = QStringLiteral("%1-KEY-1").arg(providerName);
+            const QString k2 = QStringLiteral("%1-KEY-2").arg(providerName);
+            const QString k3 = QStringLiteral("%1-KEY-3").arg(providerName);
+
+            TxtTask t1 = TxtTask::fromSimpleTxt(QStringLiteral("Task 1"), false, false);
+            t1.setJiraKey(k1);
+            QVERIFY(db.insertTask(entry.id, t1, 0) >= 0);
+
+            TxtTask t2 = TxtTask::fromSimpleTxt(QStringLiteral("Task 2"), false, false);
+            t2.setJiraKey(k2);
+            QVERIFY(db.insertTask(entry.id, t2, 1) >= 0);
+
+            TxtTask t3 = TxtTask::fromSimpleTxt(QStringLiteral("Task 3"), false, false);
+            t3.setJiraKey(k3);
+            QVERIFY(db.insertTask(entry.id, t3, 2) >= 0);
+
+            QCOMPARE(db.loadTasks(entry.id, false).size(), 3);
+
+            RemoteIssueItem remoteK1;
+            remoteK1.key = k1;
+            remoteK1.description = QStringLiteral("Task 1 remote");
+            remoteK1.remoteStatus = QStringLiteral("open");
+
+            // Flag 1: limitReached == true -> MUST NOT close missing k2 or k3
+            svc.processSyncedItems(entry, {remoteK1}, providerName, true /* limitReached */, false, false);
+            QCOMPARE(db.loadTasks(entry.id, false).size(), 3);
+            QCOMPARE(db.loadTasks(entry.id, true).size(), 0);
+
+            // Flag 2: hasError == true -> MUST NOT close missing k2 or k3
+            svc.processSyncedItems(entry, {remoteK1}, providerName, false, true /* hasError */, false);
+            QCOMPARE(db.loadTasks(entry.id, false).size(), 3);
+            QCOMPARE(db.loadTasks(entry.id, true).size(), 0);
+
+            // Flag 3: explicitZeroTotal == false with empty items -> MUST NOT close open tasks
+            svc.processSyncedItems(entry, {}, providerName, false, false, false /* explicitZeroTotal */);
+            QCOMPARE(db.loadTasks(entry.id, false).size(), 3);
+            QCOMPARE(db.loadTasks(entry.id, true).size(), 0);
+
+            // Flag 4: normal sync with remoteK1 only -> reconciles and closes k2 and k3!
+            svc.processSyncedItems(entry, {remoteK1}, providerName, false, false, false);
+            QCOMPARE(db.loadTasks(entry.id, false).size(), 1);
+            QCOMPARE(db.loadTasks(entry.id, true).size(), 2);
+
+            // Flag 5: explicitZeroTotal == true with empty items -> reconciles and closes remaining k1!
+            svc.processSyncedItems(entry, {}, providerName, false, false, true /* explicitZeroTotal */);
+            QCOMPARE(db.loadTasks(entry.id, false).size(), 0);
+            QCOMPARE(db.loadTasks(entry.id, true).size(), 3);
+        }
+
+        db.close();
+        QFile::remove(testDb);
     }
 
     void cleanupTestCase() {
