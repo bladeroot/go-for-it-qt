@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ActivityRepository.h"
+#include "ListRepository.h"
 #include "Schedule.h"
 #include "TaskRepository.h"
 #include "../todotxt/TxtTask.h"
@@ -11,42 +13,6 @@
 #include <optional>
 
 namespace gofi {
-
-struct TodoListEntry {
-    QString id;
-    QString name;
-    QString provider = QStringLiteral("SQLite");
-    QString directoryPath;
-    QString todoFilePath;
-    QString doneFilePath;
-    QString activityLogPath;
-    bool logTimerInTxt = true;
-    bool addCreationDates = true;
-    int reminderTime = -1;
-    Schedule customSchedule;
-    QString jiraUrl;
-    QString jiraUser;
-    QString jiraJql;
-    QString apiToken;
-    bool autoWorklog = true;
-    bool syncStatusToRemote = false;
-    QVariantMap statusMapping; // remoteStatusName -> "todo" | "in_progress" | "paused" | "done" | "canceled"
-    QVariantMap priorityMapping; // remotePriorityName -> "A" | "B" | "C" | "D" | "E" | "none"
-};
-
-struct ActivityRecord {
-    qint64 id = -1;
-    QString listId;
-    QString listName;
-    qint64 taskId = -1;
-    QString jiraKey;
-    QString taskDescription;
-    QDateTime startTimeUtc;
-    quint32 runtimeSeconds = 0;
-    QDateTime stopTimeUtc;
-    bool worklogSynced = false;
-    bool isPomodoroCompleted = false;
-};
 
 class DatabaseManager {
 public:
@@ -67,7 +33,11 @@ public:
     [[nodiscard]] QVariant getSetting(const QString& key, const QVariant& defaultValue = {}) const;
     bool setSetting(const QString& key, const QVariant& value);
 
-    // Lists CRUD
+    // Lists Repository
+    [[nodiscard]] ListRepository& lists() { return m_listRepo; }
+    [[nodiscard]] const ListRepository& lists() const { return m_listRepo; }
+
+    // Lists CRUD (delegated to ListRepository)
     [[nodiscard]] QVector<TodoListEntry> loadLists() const;
     bool saveList(const TodoListEntry& entry, int sortOrder);
     bool updateListStatusMapping(const QString& listId, const QVariantMap& mapping);
@@ -109,7 +79,11 @@ public:
                                bool* outIsNew = nullptr,
                                QString* outOldStatus = nullptr);
 
-    // Activity Log
+    // Activity Repository
+    [[nodiscard]] ActivityRepository& activity() { return m_activityRepo; }
+    [[nodiscard]] const ActivityRepository& activity() const { return m_activityRepo; }
+
+    // Activity Log CRUD (delegated to ActivityRepository)
     qint64 insertActivityLog(const QString& listId,
                              const QString& listName,
                              qint64 taskId,
@@ -127,6 +101,8 @@ public:
 
     friend class CredentialStore;
     friend class TaskRepository;
+    friend class ListRepository;
+    friend class ActivityRepository;
 
 private:
     DatabaseManager();
@@ -139,7 +115,9 @@ private:
     QString m_connectionName = QStringLiteral("gofi_sqlite_conn");
     QString m_dbPath;
     bool m_initFailed = false;
+    ListRepository m_listRepo;
     TaskRepository m_taskRepo;
+    ActivityRepository m_activityRepo;
 };
 
 } // namespace gofi

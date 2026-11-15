@@ -50,8 +50,12 @@ set(GOFI_CORE_SOURCES
     src/core/Schedule.h
     src/core/Schedule.cpp
     src/core/DatabaseSerialization.h
+    src/core/ListRepository.h
+    src/core/ListRepository.cpp
     src/core/TaskRepository.h
     src/core/TaskRepository.cpp
+    src/core/ActivityRepository.h
+    src/core/ActivityRepository.cpp
     src/core/DatabaseManager.h
     src/core/DatabaseManager.cpp
     src/core/IssueTrackerService.h
