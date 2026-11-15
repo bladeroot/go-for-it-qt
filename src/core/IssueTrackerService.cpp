@@ -612,72 +612,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         postGitHubWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
-        QString proj;
-        QString iid;
-        bool isMr = false;
-        if (issueKey.contains(QLatin1Char('!'))) {
-            isMr = true;
-            const QStringList parts = issueKey.split(QLatin1Char('!'));
-            if (parts.size() >= 3) {
-                proj = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                iid = parts.at(1);
-            }
-        } else if (issueKey.contains(QLatin1Char('#'))) {
-            const QStringList parts = issueKey.split(QLatin1Char('#'));
-            if (parts.size() >= 3) {
-                proj = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                iid = parts.at(1);
-            }
-        }
-        if (iid.isEmpty()) {
-            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
-        }
-        if (iid.isEmpty()) return;
-
-        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
-
-        if (proj.isEmpty()) {
-            proj = listEntry.jiraJql.trimmed();
-            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
-        }
-        if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-            const auto m = glUrlRe.match(baseUrl);
-            if (m.hasMatch()) proj = m.captured(1);
-        }
-        if (proj.isEmpty()) return;
-
-        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
-        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3/add_spent_time?duration=%4m").arg(encodedProj, resource, iid).arg(minutes));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QNetworkReply* reply = m_nam.post(req, QByteArray());
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
-            reply->deleteLater();
-            if (reply->error() == QNetworkReply::NoError) {
-                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
-                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
-                    setStatusMessage(dbErr);
-                    emit syncFailed(listEntry.id, dbErr);
-                } else {
-                    setStatusMessage(tr("Logged %1m to GitLab %2").arg(minutes).arg(issueKey));
-                    emit worklogPosted(issueKey, minutes * 60U);
-                }
-            } else {
-                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                const QString errMsg = tr("Failed to post worklog to GitLab (%1): %2")
-                    .arg(statusCode)
-                    .arg(reply->errorString());
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
-            }
-        });
+        postGitLabWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, baseUrl);
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
         QString numStr;
         if (issueKey.contains(QLatin1Char('#'))) {
@@ -891,60 +826,7 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         updateGitHubDescription(listEntry, issueKey, markdownDetails, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        QString proj;
-        QString iid;
-        bool isMr = false;
-        if (issueKey.contains(QLatin1Char('!'))) {
-            isMr = true;
-            const QStringList parts = issueKey.split(QLatin1Char('!'));
-            if (parts.size() >= 3) {
-                proj = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                iid = parts.at(1);
-            }
-        } else if (issueKey.contains(QLatin1Char('#'))) {
-            const QStringList parts = issueKey.split(QLatin1Char('#'));
-            if (parts.size() >= 3) {
-                proj = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                iid = parts.at(1);
-            }
-        }
-        if (iid.isEmpty()) {
-            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
-        }
-        if (iid.isEmpty()) return;
-
-        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
-
-        if (proj.isEmpty()) {
-            proj = listEntry.jiraJql.trimmed();
-            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
-        }
-        if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-            const auto m = glUrlRe.match(baseUrl);
-            if (m.hasMatch()) proj = m.captured(1);
-        }
-        if (proj.isEmpty()) return;
-
-        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
-        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3").arg(encodedProj, resource, iid));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{{QStringLiteral("description"), markdownDetails}};
-        QNetworkReply* reply = m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                setStatusMessage(tr("Failed to update description on GitLab (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            setStatusMessage(tr("Updated description on GitLab %1.").arg(issueKey));
-        });
+        updateGitLabDescription(listEntry, issueKey, markdownDetails, baseUrl);
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
         QString numStr;
         if (issueKey.contains(QLatin1Char('#'))) {
@@ -1088,47 +970,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
     if (listEntry.provider == QStringLiteral("GitHub")) {
         updateGitHubStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        // Never send status updates for Merge Requests
-        if (issueKey.contains(QLatin1Char('!')) ||
-            issueKey.startsWith(QStringLiteral("MR#"), Qt::CaseInsensitive) ||
-            issueKey.contains(QStringLiteral("#MR#"), Qt::CaseInsensitive)) {
-            return;
-        }
-
-        QString proj;
-        QString iid;
-        if (issueKey.contains(QLatin1Char('#'))) {
-            const QStringList parts = issueKey.split(QLatin1Char('#'));
-            if (parts.size() >= 3) { proj = parts.at(1); iid = parts.at(2); }
-            else if (parts.size() == 2) { iid = parts.at(1); }
-        }
-        if (iid.isEmpty()) {
-            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
-        }
-        if (iid.isEmpty()) return;
-        if (proj.isEmpty()) {
-            proj = listEntry.jiraJql.trimmed();
-            if (proj.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive) ||
-                proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) {
-                proj.clear();
-            }
-        }
-        if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-            const auto m = glUrlRe.match(baseUrl);
-            if (m.hasMatch()) proj = m.captured(1);
-        }
-        if (proj.isEmpty() || proj.startsWith(QStringLiteral("group:"), Qt::CaseInsensitive)) return;
-
-        const QString resource = QStringLiteral("issues");
-        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
-        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3").arg(encodedProj, resource, iid));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{{QStringLiteral("state_event"), done ? QStringLiteral("close") : QStringLiteral("reopen")}};
-        QNetworkReply* reply = m_nam.put(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        handleReply(reply);
+        updateGitLabStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
     } else if (listEntry.provider == QStringLiteral("Todoist")) {
         QString tdTaskId = issueKey;
         if (tdTaskId.startsWith(QStringLiteral("TD#"))) tdTaskId = tdTaskId.mid(3);
@@ -1439,60 +1281,7 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         postGitHubComment(listEntry, issueKey, markdownComment, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
-        QString proj;
-        QString iid;
-        bool isMr = false;
-        if (issueKey.contains(QLatin1Char('!'))) {
-            isMr = true;
-            const QStringList parts = issueKey.split(QLatin1Char('!'));
-            if (parts.size() >= 3) {
-                proj = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                iid = parts.at(1);
-            }
-        } else if (issueKey.contains(QLatin1Char('#'))) {
-            const QStringList parts = issueKey.split(QLatin1Char('#'));
-            if (parts.size() >= 3) {
-                proj = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                iid = parts.at(1);
-            }
-        }
-        if (iid.isEmpty()) {
-            for (const QChar& c : issueKey) if (c.isDigit()) iid.append(c);
-        }
-        if (iid.isEmpty()) return;
-
-        const QString resource = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
-
-        if (proj.isEmpty()) {
-            proj = listEntry.jiraJql.trimmed();
-            if (proj.contains(QLatin1Char('=')) || proj.contains(QLatin1Char('&'))) proj.clear();
-        }
-        if (proj.isEmpty()) {
-            static const QRegularExpression glUrlRe(QStringLiteral("https?://[^/]+/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)"));
-            const auto m = glUrlRe.match(baseUrl);
-            if (m.hasMatch()) proj = m.captured(1);
-        }
-        if (proj.isEmpty()) return;
-
-        const QString encodedProj = QString::fromUtf8(QUrl::toPercentEncoding(proj));
-        QUrl url(baseUrl + QStringLiteral("/api/v4/projects/%1/%2/%3/notes").arg(encodedProj, resource, iid));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{{QStringLiteral("body"), markdownComment}};
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                setStatusMessage(tr("Failed to post comment to GitLab (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            setStatusMessage(tr("Posted comment to GitLab %1.").arg(issueKey));
-        });
+        postGitLabComment(listEntry, issueKey, markdownComment, baseUrl);
     } else if (listEntry.provider == QStringLiteral("Redmine")) {
         QString numStr;
         if (issueKey.contains(QLatin1Char('#'))) {
@@ -1613,60 +1402,7 @@ QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
     } else if (provider == QStringLiteral("GitHub")) {
         return buildGitHubBrowserUrl(listEntry, issueKey);
     } else if (provider == QStringLiteral("GitLab")) {
-        QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
-        if (baseUrl.isEmpty()) {
-            baseUrl = QStringLiteral("https://gitlab.com");
-        }
-
-        const bool isMr = issueKey.startsWith(QStringLiteral("MR!"), Qt::CaseInsensitive)
-                       || issueKey.contains(QLatin1Char('!'));
-        QString project;
-        QString iid;
-
-        if (issueKey.contains(QLatin1Char('!'))) {
-            const QStringList parts = issueKey.split(QLatin1Char('!'));
-            if (parts.size() >= 3) {
-                project = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                if (parts.at(0).contains(QLatin1Char('/'))) {
-                    project = parts.at(0);
-                }
-                iid = parts.at(1);
-            }
-        } else if (issueKey.contains(QLatin1Char('#'))) {
-            const QStringList parts = issueKey.split(QLatin1Char('#'));
-            if (parts.size() >= 3) {
-                project = parts.at(1);
-                iid = parts.at(2);
-            } else if (parts.size() == 2) {
-                if (parts.at(0).contains(QLatin1Char('/'))) {
-                    project = parts.at(0);
-                }
-                iid = parts.at(1);
-            }
-        }
-
-        if (project.isEmpty()) {
-            const QString spec = listEntry.jiraJql.trimmed();
-            if (!spec.contains(QLatin1Char('=')) && !spec.contains(QLatin1Char('&')) && spec.contains(QLatin1Char('/'))) {
-                project = spec;
-            }
-        }
-
-        if (iid.isEmpty()) {
-            for (const QChar& c : issueKey) {
-                if (c.isDigit()) iid.append(c);
-            }
-        }
-
-        if (!project.isEmpty() && !iid.isEmpty()) {
-            const QString itemType = isMr ? QStringLiteral("merge_requests") : QStringLiteral("issues");
-            return QUrl(QStringLiteral("%1/%2/-/%3/%4").arg(baseUrl, project, itemType, iid));
-        }
-        if (!baseUrl.isEmpty() && !listEntry.jiraUrl.trimmed().isEmpty()) {
-            return QUrl(baseUrl);
-        }
+        return buildGitLabBrowserUrl(listEntry, issueKey);
     } else if (provider == QStringLiteral("Redmine")) {
         const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
         QString numStr;

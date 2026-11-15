@@ -159,6 +159,13 @@ private:
     void postGitHubComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
     static QUrl buildGitHubBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
 
+    // GitLab actions
+    void postGitLabWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds, const QString& baseUrl);
+    void updateGitLabDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails, const QString& baseUrl);
+    void updateGitLabStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const QString& baseUrl, const std::function<void(QNetworkReply*)>& handleReply);
+    void postGitLabComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
+    static QUrl buildGitLabBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 
