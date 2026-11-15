@@ -57,6 +57,7 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
     , m_app(controller)
     , m_dashboardView(controller)
     , m_commandHandler(this)
+    , m_settingsView(controller)
 {
     connect(m_app, &AppController::currentListChanged, this, [this]() {
         m_selectedRow = 0;
@@ -602,7 +603,7 @@ void TuiApp::handleNormalKey(const QByteArray& seq) {
 
     // Open Settings: O (Shift+o)
     if (seq == "O") {
-        m_settingsRow = 0;
+        m_settingsView.reset();
         m_mode = Mode::Settings;
         return;
     }
@@ -754,52 +755,9 @@ void TuiApp::handleInputLineKey(const QByteArray& seq) {
             executeExCommand(text);
         } else if (prevMode == Mode::EditSettingValue) {
             m_mode = Mode::Settings;
-            // Parses an integer setting; digits-only input that overflows qint64 is clamped,
-            // anything else (empty, "25m", "2 5") is rejected and the current value is kept.
-            auto parseSettingNumber = [&](qint64 minValue, qint64 maxValue, qint64& out) {
-                static const QRegularExpression numberRe(QStringLiteral("^[+-]?\\d+$"));
-                if (!numberRe.match(text).hasMatch()) {
-                    m_statusMessage = tr("Invalid number: \"%1\" (value unchanged)").arg(text);
-                    return false;
-                }
-                bool ok = false;
-                const qint64 value = text.toLongLong(&ok);
-                if (!ok) {
-                    out = text.startsWith(QLatin1Char('-')) ? minValue : maxValue;
-                } else {
-                    out = qBound(minValue, value, maxValue);
-                }
-                return true;
-            };
-            qint64 parsedValue = 0;
-            if (m_settingsRow == 0) {
-                if (parseSettingNumber(1, 1440, parsedValue)) {
-                    m_app->settings()->setTaskDuration(static_cast<int>(parsedValue * 60));
-                }
-            } else if (m_settingsRow == 1) {
-                if (parseSettingNumber(1, 1440, parsedValue)) {
-                    m_app->settings()->setBreakDuration(static_cast<int>(parsedValue * 60));
-                }
-            } else if (m_settingsRow == 2) {
-                if (parseSettingNumber(0, 3600, parsedValue)) {
-                    m_app->settings()->setReminderTime(static_cast<int>(parsedValue));
-                }
-            } else if (m_settingsRow == 7 && !text.isEmpty()) {
-                if (m_app->changeDatabasePath(text, true)) {
-                    m_statusMessage = tr("Database moved to: %1").arg(m_app->databasePath());
-                } else {
-                    m_statusMessage = tr("Failed to move database to: %1").arg(text);
-                }
-            } else if (m_settingsRow == 8 && !text.isEmpty()) {
-                if (m_app->exportBackup(text)) {
-                    m_statusMessage = tr("Backup exported to: %1").arg(text);
-                } else {
-                    m_statusMessage = tr("Failed to export backup to: %1").arg(text);
-                }
-            } else if (m_settingsRow == 10) {
-                if (parseSettingNumber(0, 1440, parsedValue)) {
-                    m_app->settings()->setAutoSyncIntervalMinutes(static_cast<int>(parsedValue));
-                }
+            const QString msg = m_settingsView.applyEditValue(text);
+            if (!msg.isEmpty()) {
+                m_statusMessage = msg;
             }
         } else if (prevMode == Mode::EditListField) {
             m_mode = Mode::ListEdit;
@@ -1073,83 +1031,14 @@ void TuiApp::handleListEditKey(const QByteArray& seq) {
 }
 
 void TuiApp::handleSettingsKey(const QByteArray& seq) {
-    if (seq == "\033" || seq == "q" || seq == "O") {
+    QString editInitial;
+    const SettingsKeyResult res = m_settingsView.handleKey(seq, editInitial);
+    if (res == SettingsKeyResult::Close) {
         m_mode = Mode::Normal;
-        return;
-    }
-    if (seq == "j" || seq == "\033[B") {
-        m_settingsRow = qMin(14, m_settingsRow + 1);
-        return;
-    }
-    if (seq == "k" || seq == "\033[A") {
-        m_settingsRow = qMax(0, m_settingsRow - 1);
-        return;
-    }
-    SettingsManager* s = m_app->settings();
-    if (seq == "h" || seq == "-" || seq == "\033[D") {
-        if (m_settingsRow == 0) s->setTaskDuration(qMax(60, s->taskDuration() - 60));
-        else if (m_settingsRow == 1) s->setBreakDuration(qMax(60, s->breakDuration() - 60));
-        else if (m_settingsRow == 2) s->setReminderTime(qMax(0, s->reminderTime() - 10));
-        else if (m_settingsRow == 10) s->setAutoSyncIntervalMinutes(qMax(0, s->autoSyncIntervalMinutes() - 1));
-        return;
-    }
-    if (seq == "l" || seq == "+" || seq == "=" || seq == "\033[C") {
-        if (m_settingsRow == 0) s->setTaskDuration(qMin(86400, s->taskDuration() + 60));
-        else if (m_settingsRow == 1) s->setBreakDuration(qMin(86400, s->breakDuration() + 60));
-        else if (m_settingsRow == 2) s->setReminderTime(qMin(3600, s->reminderTime() + 10));
-        else if (m_settingsRow == 10) s->setAutoSyncIntervalMinutes(qMin(1440, s->autoSyncIntervalMinutes() + 1));
-        return;
-    }
-    if (seq == " " || seq == "\r" || seq == "\n" || seq == "e" || seq == "i") {
-        if (m_settingsRow == 0) {
-            m_inputBuffer = QString::number(s->taskDuration() / 60);
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditSettingValue;
-        } else if (m_settingsRow == 1) {
-            m_inputBuffer = QString::number(s->breakDuration() / 60);
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditSettingValue;
-        } else if (m_settingsRow == 2) {
-            m_inputBuffer = QString::number(s->reminderTime());
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditSettingValue;
-        } else if (m_settingsRow == 3) {
-            s->setMuteSounds(!s->muteSounds());
-        } else if (m_settingsRow == 4) {
-            s->setUseDarkTheme(!s->useDarkTheme());
-        } else if (m_settingsRow == 5) {
-            s->setNewTasksOnTop(!s->newTasksOnTop());
-        } else if (m_settingsRow == 6) {
-            s->setResetTimerOnTaskSwitch(!s->resetTimerOnTaskSwitch());
-        } else if (m_settingsRow == 7) {
-            m_inputBuffer = m_app->databasePath();
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditSettingValue;
-        } else if (m_settingsRow == 8) {
-            m_inputBuffer = m_app->databasePath() + QStringLiteral(".backup.db");
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditSettingValue;
-        } else if (m_settingsRow == 9) {
-            const QStringList langs = m_app->availableLanguageCodes();
-            const int idx = langs.indexOf(s->language());
-            if (idx >= 0 && !langs.isEmpty()) {
-                s->setLanguage(langs.at((idx + 1) % langs.size()));
-            } else {
-                s->setLanguage(langs.isEmpty() ? QStringLiteral("system") : langs.first());
-            }
-        } else if (m_settingsRow == 10) {
-            m_inputBuffer = QString::number(s->autoSyncIntervalMinutes());
-            m_inputCursor = static_cast<int>(m_inputBuffer.size());
-            m_mode = Mode::EditSettingValue;
-        } else if (m_settingsRow == 11) {
-            s->setNotifyTaskChangesSound(!s->notifyTaskChangesSound());
-        } else if (m_settingsRow == 12) {
-            s->setNotifyTaskChangesPopup(!s->notifyTaskChangesPopup());
-        } else if (m_settingsRow == 13) {
-            s->setStartMinimized(!s->startMinimized());
-        } else if (m_settingsRow == 14) {
-            s->setStartInTray(!s->startInTray());
-        }
+    } else if (res == SettingsKeyResult::EditValue) {
+        m_inputBuffer = editInitial;
+        m_inputCursor = static_cast<int>(m_inputBuffer.size());
+        m_mode = Mode::EditSettingValue;
     }
 }
 
@@ -1725,36 +1614,7 @@ void TuiApp::render() {
     } else if (m_mode == Mode::MarkdownView) {
         out += m_markdownView.render(bodyRows, m_cols);
     } else if (m_mode == Mode::Settings || m_mode == Mode::EditSettingValue) {
-        out += FG_CYAN + ESC_BOLD + tr("  ⚙ SETTINGS (j/k move, Enter/Space/h/l change, q/Esc close):") + ESC_RESET + QStringLiteral("\033[K\r\n");
-        SettingsManager* s = m_app->settings();
-        const QStringList settingItems = {
-            tr("Pomodoro Work Duration (min)    : %1 min").arg(s->taskDuration() / 60),
-            tr("Pomodoro Break Duration (min)   : %1 min").arg(s->breakDuration() / 60),
-            tr("Reminder Before End (sec)       : %1 sec").arg(s->reminderTime()),
-            tr("Mute Sound Notifications        : %1").arg(s->muteSounds() ? tr("[ON]") : tr("[OFF]")),
-            tr("GUI Dark Theme                  : %1").arg(s->useDarkTheme() ? tr("[ON]") : tr("[OFF]")),
-            tr("Add New Tasks On Top            : %1").arg(s->newTasksOnTop() ? tr("[ON]") : tr("[OFF]")),
-            tr("Reset Timer On Task Switch      : %1").arg(s->resetTimerOnTaskSwitch() ? tr("[ON]") : tr("[OFF]")),
-            tr("Move SQLite Database Path       : %1").arg(m_app->databasePath()),
-            tr("Export SQLite Database Backup   : [Press Enter to export .db backup]"),
-            tr("Language (Enter to cycle)       : [%1] (%2)").arg(s->language(), m_app->languageDisplayName(s->language())),
-            tr("Auto-Sync Jira/YouTrack (min)   : %1 min").arg(s->autoSyncIntervalMinutes()),
-            tr("Sound On New/Changed Tasks      : %1").arg(s->notifyTaskChangesSound() ? tr("[ON]") : tr("[OFF]")),
-            tr("Popup On New/Changed Tasks      : %1").arg(s->notifyTaskChangesPopup() ? tr("[ON]") : tr("[OFF]")),
-            tr("GUI Start Minimized             : %1").arg(s->startMinimized() ? tr("[ON]") : tr("[OFF]")),
-            tr("GUI Start In System Tray        : %1").arg(s->startInTray() ? tr("[ON]") : tr("[OFF]"))
-        };
-        for (int r = 1; r < bodyRows; ++r) {
-            const int idx = r - 1;
-            if (idx < settingItems.size()) {
-                const bool isSel = (idx == m_settingsRow);
-                const QString prefix = isSel ? QStringLiteral("  > ") : QStringLiteral("    ");
-                out += (isSel ? (BG_SELECTED + FG_WHITE + ESC_BOLD) : FG_WHITE)
-                    + padRight(prefix + settingItems.at(idx), m_cols) + ESC_RESET + QStringLiteral("\033[K\r\n");
-            } else {
-                out += QStringLiteral("\033[K\r\n");
-            }
-        }
+        out += m_settingsView.render(bodyRows, m_cols);
     } else if (m_mode == Mode::ListEdit || m_mode == Mode::EditListField) {
         out += FG_CYAN + ESC_BOLD + tr("  ✎ EDIT LIST CONFIGURATION (j/k move, Enter/Space edit, q/Esc cancel):") + ESC_RESET + QStringLiteral("\033[K\r\n");
         const QString prov = m_editingListCfg.value(QStringLiteral("provider")).toString();

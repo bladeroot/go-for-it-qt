@@ -4,6 +4,7 @@
 #include "tui/TuiMarkdownView.h"
 #include "tui/TuiDashboardView.h"
 #include "tui/TuiCommandHandler.h"
+#include "tui/TuiSettingsView.h"
 #include <QObject>
 #include <QSet>
 #include <QSocketNotifier>
@@ -98,7 +99,6 @@ private:
     int m_detailsScroll = 0;
     int m_listPickerRow = 0;
     QSet<QString> m_selectedListIds;
-    int m_settingsRow = 0;
     int m_listEditRow = 0;
     QVariantMap m_editingListCfg;
     bool m_showPreview = true;
@@ -110,6 +110,7 @@ private:
     TuiMarkdownView m_markdownView;
     TuiDashboardView m_dashboardView;
     TuiCommandHandler m_commandHandler;
+    TuiSettingsView m_settingsView;
 
     friend class TuiCommandHandler;
 };

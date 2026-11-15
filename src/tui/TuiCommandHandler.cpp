@@ -54,7 +54,7 @@ void TuiCommandHandler::execute(const QString& cmdLine) {
         return;
     }
     if (cmdLine == QStringLiteral("set") || cmdLine == QStringLiteral("settings") || cmdLine == QStringLiteral("config")) {
-        m_tui->m_settingsRow = 0;
+        m_tui->m_settingsView.reset();
         m_tui->m_mode = TuiApp::Mode::Settings;
         return;
     }
