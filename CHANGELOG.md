@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [2.0.4] - 2026-11-15
+
+**Upgrade note:** issue tracker API tokens move from the SQLite database to the system keyring on first start
+(see Security below). Downgrading to 2.0.3 afterwards leaves the lists without tokens; re-enter them there.
+
 ### Security
 - Remote credentials: moved issue tracker tokens (Jira, GitHub, GitLab, Redmine, Todoist, CalDAV) out of SQLite database into Freedesktop Secret Service (`org.freedesktop.secrets`) with a dedicated `0600`-permission fallback file (`credentials.json`), automatically migrating existing database tokens and ensuring database backups contain no plaintext secrets (KB-105).
 - Remote credentials: hardened keyring token isolation in test mode, completed prompt-based wallet unlock flow with database-wide batch unlocking, scoped tokens by database path, enforced atomic 0600 file permissions via umask 0077, and prioritized newer fallback file tokens over stale keyring entries (KB-106..114).

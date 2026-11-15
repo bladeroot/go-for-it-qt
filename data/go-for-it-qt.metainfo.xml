@@ -24,6 +24,11 @@
     </ul>
   </description>
   <releases>
+    <release version="2.0.4" date="2026-11-15">
+      <description>
+        <p>Release 2.0.4: issue tracker API tokens are now kept in the system keyring (Secret Service) instead of the database and are migrated automatically, the terminal UI no longer crashes on PDF export and its activity heatmap fits standard terminals, comment save failures are reported, PDF reports keep project names with special characters, and tasks without an issue key in GitHub/GitLab lists open the link from their description again.</p>
+      </description>
+    </release>
     <release version="2.0.3" date="2026-11-13">
       <description>
         <p>Release 2.0.3: open task details (description and comments) on Enter or double-click in both task lists and the timer view, add Ocean Waves ambient focus sound, add Always on Top, ambient sound and system tray toggles for the mini player, prevent the mini player from hiding when switching windows, and fix blank ambient sound names and Play/Pause button jitter.</p>

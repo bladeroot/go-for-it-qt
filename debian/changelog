@@ -1,3 +1,19 @@
+go-for-it-qt (2.0.4-1) unstable; urgency=medium
+
+  * Release 2.0.4.
+  * Store issue tracker API tokens in the Freedesktop Secret Service
+    (KWallet / GNOME Keyring) instead of the SQLite database, scoped per
+    database, with a 0600 fallback file when no keyring is available.
+    Tokens are migrated on first start; older versions will not find them.
+  * TUI: PDF export no longer aborts go-for-it-tui; activity heatmap fits
+    the terminal; comment save failures are reported.
+  * PDF billing report escapes project names.
+  * Unkeyed GitHub/GitLab tasks open the link from their description again.
+  * Internal: tracker providers, TUI views, database repositories and the
+    test suite are split into separate files.
+
+ -- Yurii Myronchuk <bladeroot@gmail.com>  Sun, 15 Nov 2026 21:00:00 +0100
+
 go-for-it-qt (2.0.3-1) unstable; urgency=medium
 
   * Release 2.0.3.
