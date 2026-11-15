@@ -159,6 +159,8 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/data DESTINATION ${CMAKE_CURRENT_BINARY_DI
 
 if(BUILD_TESTING)
     add_executable(tst_todotxt
+        tests/TestSupport.h
+        tests/TestSupport.cpp
         tests/tst_todotxt.cpp
     )
     target_link_libraries(tst_todotxt PRIVATE
