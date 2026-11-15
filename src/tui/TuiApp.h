@@ -8,11 +8,9 @@
 #include "tui/TuiListManagerView.h"
 #include "tui/TuiInputLine.h"
 #include "tui/TuiTaskListView.h"
+#include "tui/TuiTerminal.h"
 #include <QObject>
 #include <QSet>
-#include <QSocketNotifier>
-#include <QTimer>
-#include <termios.h>
 
 namespace gofi {
 
@@ -44,15 +42,15 @@ public:
     void openMarkdownFile(const QString& filePath);
     static QString sanitizeTerminalText(const QString& input, bool allowNewlines = false);
 
-private slots:
+public slots:
     void onStdinActivated();
     void render();
 
 private:
-    void enableRawMode();
-    void disableRawMode();
     void quitApp();
-    void updateTerminalSize();
+    void enableRawMode() { m_terminal.enableRawMode(); }
+    void disableRawMode() { m_terminal.disableRawMode(); }
+    void updateTerminalSize() { m_terminal.updateTerminalSize(); }
 
     void handleKeySequence(const QByteArray& seq);
     void handleNormalKey(const QByteArray& seq);
@@ -76,30 +74,23 @@ private:
     void executeExCommand(const QString& cmdLine);
     void switchViewTab(int tabIndex) { m_taskListView.switchViewTab(tabIndex); }
     void clampSelection() { m_taskListView.clampSelection(); }
-    void processPendingStdin();
     TaskFilterProxyModel* currentProxy() const { return m_taskListView.currentProxy(); }
     bool isClosedTab() const { return m_taskListView.isClosedTab(); }
     int selectedRow() const { return m_taskListView.selectedRow(); }
     void setSelectedRow(int row) { m_taskListView.setSelectedRow(row); }
     int viewTab() const { return m_taskListView.viewTab(); }
+    int rows() const { return m_terminal.rows(); }
+    int cols() const { return m_terminal.cols(); }
 
     static QString truncateVisible(const QString& str, int maxCols);
     static QString padRight(const QString& str, int width);
     static QString formatSeconds(uint secs);
 
     AppController* m_app = nullptr;
-    QSocketNotifier* m_stdinNotifier = nullptr;
-    QTimer m_resizeTimer;
-    QTimer m_escTimer;
-    struct termios m_origTermios {};
-    bool m_rawModeActive = false;
-    QByteArray m_stdinPending;
-
-    int m_rows = 24;
-    int m_cols = 80;
 
     Mode m_mode = Mode::Normal;
 
+    TuiTerminal m_terminal;
     TuiTaskListView m_taskListView;
     TuiInputLine m_inputLine;
     QString m_statusMessage;

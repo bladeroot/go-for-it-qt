@@ -20,6 +20,7 @@ using namespace tui;
 TuiApp::TuiApp(AppController* controller, QObject* parent)
     : QObject(parent)
     , m_app(controller)
+    , m_terminal(this)
     , m_taskListView(controller)
     , m_dashboardView(controller)
     , m_commandHandler(this)
@@ -56,31 +57,14 @@ TuiApp::TuiApp(AppController* controller, QObject* parent)
     connect(m_app->doneProxyModel(), &QAbstractItemModel::rowsRemoved, this, &TuiApp::render);
     connect(m_app->doneProxyModel(), &QAbstractItemModel::dataChanged, this, &TuiApp::render);
 
-    connect(&m_resizeTimer, &QTimer::timeout, this, [this]() {
-        const int oldR = m_rows;
-        const int oldC = m_cols;
-        updateTerminalSize();
-        if (m_rows != oldR || m_cols != oldC) {
-            render();
-        }
-    });
-
-    m_escTimer.setSingleShot(true);
-    connect(&m_escTimer, &QTimer::timeout, this, [this]() {
-        if (!m_stdinPending.isEmpty() && m_stdinPending.at(0) == '\033') {
-            handleKeySequence(QByteArray("\033"));
-            m_stdinPending.remove(0, 1);
-            processPendingStdin();
-            render();
-        }
-    });
+    connect(&m_terminal, &TuiTerminal::keySequenceReceived, this, &TuiApp::handleKeySequence);
+    connect(&m_terminal, &TuiTerminal::redrawRequested, this, &TuiApp::render);
 }
 
 TuiApp::~TuiApp() {
     if (m_app && m_app->timer() && m_app->timer()->isRunning()) {
         m_app->timer()->stop();
     }
-    disableRawMode();
 }
 
 void TuiApp::quitApp() {
@@ -94,164 +78,18 @@ bool TuiApp::start() {
     if (!::isatty(STDIN_FILENO) || !::isatty(STDOUT_FILENO)) {
         return false;
     }
-    enableRawMode();
-    updateTerminalSize();
+    if (!m_terminal.initialize()) {
+        return false;
+    }
     switchViewTab(0);
-
-    m_stdinNotifier = new QSocketNotifier(STDIN_FILENO, QSocketNotifier::Read, this);
-    connect(m_stdinNotifier, &QSocketNotifier::activated, this, &TuiApp::onStdinActivated);
-    m_resizeTimer.start(250);
 
     m_statusMessage = tr("Vim keys: j/k move, Space toggle done, s status, o add, i edit, t timer, r sync, L lists, / search, : cmd, ? help");
     render();
     return true;
 }
 
-void TuiApp::enableRawMode() {
-    if (m_rawModeActive) return;
-    if (::tcgetattr(STDIN_FILENO, &m_origTermios) == 0) {
-        struct termios raw = m_origTermios;
-        raw.c_lflag &= ~static_cast<tcflag_t>(ECHO | ICANON | ISIG | IEXTEN);
-        raw.c_iflag &= ~static_cast<tcflag_t>(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
-        raw.c_oflag &= ~static_cast<tcflag_t>(OPOST);
-        raw.c_cc[VMIN] = 0;
-        raw.c_cc[VTIME] = 0;
-        ::tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-        m_rawModeActive = true;
-    }
-    const QByteArray initSeq = (ESC_ALT_ON + ESC_HIDE_CUR + ESC_CLEAR_ALL).toUtf8();
-    (void)::write(STDOUT_FILENO, initSeq.constData(), static_cast<size_t>(initSeq.size()));
-}
-
-void TuiApp::disableRawMode() {
-    if (!m_rawModeActive) return;
-    const QByteArray exitSeq = (ESC_RESET + ESC_SHOW_CUR + ESC_ALT_OFF).toUtf8();
-    (void)::write(STDOUT_FILENO, exitSeq.constData(), static_cast<size_t>(exitSeq.size()));
-    ::tcsetattr(STDIN_FILENO, TCSAFLUSH, &m_origTermios);
-    m_rawModeActive = false;
-}
-
-void TuiApp::updateTerminalSize() {
-    struct winsize ws {};
-    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0) {
-        m_rows = qMax(14, static_cast<int>(ws.ws_row));
-        m_cols = qMax(50, static_cast<int>(ws.ws_col));
-    }
-}
-
 void TuiApp::onStdinActivated() {
-    char buf[128];
-    const ssize_t n = ::read(STDIN_FILENO, buf, sizeof(buf));
-    if (n <= 0) return;
-
-    m_escTimer.stop();
-    m_stdinPending.append(buf, static_cast<int>(n));
-    processPendingStdin();
-    render();
-}
-
-void TuiApp::processPendingStdin() {
-    int pos = 0;
-    while (pos < m_stdinPending.size()) {
-        const unsigned char b = static_cast<unsigned char>(m_stdinPending.at(pos));
-
-        if (b == '\033') {
-            if (pos + 1 >= m_stdinPending.size()) {
-                // Lone trailing '\033' at the end of buffer
-                if (!m_escTimer.isActive()) {
-                    m_escTimer.start(50);
-                }
-                break;
-            }
-
-            const char next = m_stdinPending.at(pos + 1);
-            if (next == '[') {
-                // CSI sequence: '\033[' [0x20-0x3F]* [0x40-0x7E]
-                int idx = pos + 2;
-                bool foundFinal = false;
-                while (idx < m_stdinPending.size()) {
-                    const unsigned char c = static_cast<unsigned char>(m_stdinPending.at(idx));
-                    if (c >= 0x40 && c <= 0x7E) {
-                        foundFinal = true;
-                        ++idx;
-                        break;
-                    } else if (c >= 0x20 && c <= 0x3F) {
-                        ++idx;
-                        if (idx - pos > 32) {
-                            foundFinal = true;
-                            break;
-                        }
-                    } else {
-                        foundFinal = true;
-                        break;
-                    }
-                }
-
-                if (!foundFinal) {
-                    // Incomplete trailing CSI sequence
-                    break;
-                }
-
-                const QByteArray seq = m_stdinPending.mid(pos, idx - pos);
-                pos = idx;
-                m_escTimer.stop();
-                handleKeySequence(seq);
-                continue;
-            } else if (next == 'O') {
-                // SS3 sequence: '\033O' [0x20-0x7E]
-                if (pos + 2 >= m_stdinPending.size()) {
-                    break;
-                }
-                const QByteArray seq = m_stdinPending.mid(pos, 3);
-                pos += 3;
-                m_escTimer.stop();
-                handleKeySequence(seq);
-                continue;
-            } else {
-                // Lone '\033' followed by non-sequence character
-                m_escTimer.stop();
-                handleKeySequence(QByteArray("\033"));
-                pos += 1;
-                continue;
-            }
-        }
-
-        // UTF-8 code point
-        int expectedLen = 1;
-        if ((b & 0x80) == 0) {
-            expectedLen = 1;
-        } else if ((b & 0xE0) == 0xC0) {
-            expectedLen = 2;
-        } else if ((b & 0xF0) == 0xE0) {
-            expectedLen = 3;
-        } else if ((b & 0xF8) == 0xF0) {
-            expectedLen = 4;
-        }
-
-        bool validContinuation = true;
-        for (int k = 1; k < expectedLen && (pos + k < m_stdinPending.size()); ++k) {
-            const unsigned char cb = static_cast<unsigned char>(m_stdinPending.at(pos + k));
-            if ((cb & 0xC0) != 0x80) {
-                validContinuation = false;
-                break;
-            }
-        }
-
-        if (!validContinuation) {
-            expectedLen = 1;
-        } else if (pos + expectedLen > m_stdinPending.size()) {
-            break;
-        }
-
-        const QByteArray token = m_stdinPending.mid(pos, expectedLen);
-        pos += expectedLen;
-
-        handleKeySequence(token);
-    }
-
-    if (pos > 0) {
-        m_stdinPending.remove(0, pos);
-    }
+    m_terminal.onStdinActivated();
 }
 
 void TuiApp::handleKeySequence(const QByteArray& seq) {
@@ -509,14 +347,7 @@ void TuiApp::editTaskDetailsInVim() {
         currentDetails,
         QStringLiteral("gofi-task-details-XXXXXX.md"),
         [this](bool paused) {
-            if (paused) {
-                if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
-                disableRawMode();
-            } else {
-                enableRawMode();
-                updateTerminalSize();
-                if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
-            }
+            m_terminal.setSuspended(paused);
         },
         &noEditor
     );
@@ -551,14 +382,7 @@ void TuiApp::addTaskCommentInVim() {
         QString(),
         QStringLiteral("gofi-task-comment-XXXXXX.md"),
         [this](bool paused) {
-            if (paused) {
-                if (m_stdinNotifier) m_stdinNotifier->setEnabled(false);
-                disableRawMode();
-            } else {
-                enableRawMode();
-                updateTerminalSize();
-                if (m_stdinNotifier) m_stdinNotifier->setEnabled(true);
-            }
+            m_terminal.setSuspended(paused);
         },
         &noEditor
     );
@@ -729,8 +553,11 @@ QString TuiApp::sanitizeTerminalText(const QString& input, bool allowNewlines) {
 }
 
 void TuiApp::render() {
-    if (!m_rawModeActive) return;
+    if (!m_terminal.isRawMode()) return;
     clampSelection();
+
+    const int cols = m_terminal.cols();
+    const int rows = m_terminal.rows();
 
     QString out;
     out.reserve(16384);
@@ -743,12 +570,12 @@ void TuiApp::render() {
         ? tr("⟳ Syncing...")
         : tr("[L:Lists] [O:Settings] [v:MD] [r:Sync] [?:Help]");
     const int syncInfoWidth = displayWidth(syncInfo);
-    const int maxBadgeWidth = qMax(10, m_cols - syncInfoWidth - 2);
+    const int maxBadgeWidth = qMax(10, cols - syncInfoWidth - 2);
     const QString rawTitle = sanitizeTerminalText(m_app->currentFilterTitle());
     const QString rawListBadge = QStringLiteral(" 🍅 Go for It Qt [VIM TUI] │ 📋 %1 (%2) ")
         .arg(rawTitle, m_app->currentListProvider());
     const QString listBadge = truncateVisible(rawListBadge, maxBadgeWidth);
-    const int headerGap = qMax(1, m_cols - displayWidth(listBadge) - syncInfoWidth - 1);
+    const int headerGap = qMax(1, cols - displayWidth(listBadge) - syncInfoWidth - 1);
     out += BG_HEADER + FG_CYAN + ESC_BOLD + listBadge + ESC_RESET + BG_HEADER
         + QString(headerGap, QLatin1Char(' ')) + FG_GRAY + syncInfo + QLatin1Char(' ') + ESC_RESET + QStringLiteral("\033[K\r\n");
 
@@ -771,7 +598,7 @@ void TuiApp::render() {
         + QString(barWidth - filled, QChar(0x2591))
         + QStringLiteral("]");
     // Total prefix columns: 1 (" ") + 20 (state) + 2 ("  ") + 7 (clock) + 1 (" ") + 18 (progBar) + 4 (" │ ") = 53
-    const int availActiveCols = qMax(8, m_cols - 54);
+    const int availActiveCols = qMax(8, cols - 54);
     QString rawActiveDesc = timer->hasActiveTask() ? sanitizeTerminalText(timer->activeTaskDescription()) : tr("No active task");
     rawActiveDesc.replace(QLatin1Char('\r'), QLatin1Char(' '));
     rawActiveDesc.replace(QLatin1Char('\n'), QLatin1Char(' '));
@@ -785,34 +612,34 @@ void TuiApp::render() {
     // -------------------------------------------------------------------------
     // Row 3: View / Status Filter Tabs (1..6)
     // -------------------------------------------------------------------------
-    out += m_taskListView.renderTabRow(m_cols);
+    out += m_taskListView.renderTabRow(cols);
 
     // -------------------------------------------------------------------------
     // Row 4: Horizontal Divider
     // -------------------------------------------------------------------------
-    out += FG_GRAY + QString(m_cols, QChar(0x2500)) + ESC_RESET + QStringLiteral("\033[K\r\n");
+    out += FG_GRAY + QString(cols, QChar(0x2500)) + ESC_RESET + QStringLiteral("\033[K\r\n");
 
-    // Middle viewport (rows 5 .. m_rows - 2)
-    const int bodyRows = qMax(4, m_rows - 6);
+    // Middle viewport (rows 5 .. rows - 2)
+    const int bodyRows = qMax(4, rows - 6);
 
     if (m_mode == Mode::Help) {
-        out += m_taskListView.renderHelp(bodyRows, m_cols);
+        out += m_taskListView.renderHelp(bodyRows, cols);
     } else if (m_mode == Mode::MarkdownView) {
-        out += m_markdownView.render(bodyRows, m_cols);
+        out += m_markdownView.render(bodyRows, cols);
     } else if (m_mode == Mode::Settings || m_mode == Mode::EditSettingValue) {
-        out += m_settingsView.render(bodyRows, m_cols);
+        out += m_settingsView.render(bodyRows, cols);
     } else if (m_mode == Mode::ListEdit || m_mode == Mode::EditListField) {
-        out += m_listManagerView.renderEdit(bodyRows, m_cols);
+        out += m_listManagerView.renderEdit(bodyRows, cols);
     } else if (m_mode == Mode::ListPicker) {
-        out += m_listManagerView.renderPicker(bodyRows, m_cols);
+        out += m_listManagerView.renderPicker(bodyRows, cols);
     } else if (m_mode == Mode::Dashboard) {
-        out += m_dashboardView.render(bodyRows, m_cols);
+        out += m_dashboardView.render(bodyRows, cols);
     } else {
-        out += m_taskListView.renderTaskList(bodyRows, m_cols);
+        out += m_taskListView.renderTaskList(bodyRows, cols);
     }
 
     // -------------------------------------------------------------------------
-    // Row m_rows - 1: Vim Statusline
+    // Row rows - 1: Vim Statusline
     // -------------------------------------------------------------------------
     QString modeTag = BG_MODE_NORM + QStringLiteral(" NORMAL ") + ESC_RESET;
     if (m_mode == Mode::InsertTask || m_mode == Mode::EditTask || m_mode == Mode::EditDetails) {
@@ -838,11 +665,11 @@ void TuiApp::render() {
         .arg(totalTasks > 0 ? (selectedRow() + 1) : 0)
         .arg(totalTasks);
     out += modeTag + BG_HEADER + FG_WHITE
-        + padRight(QStringLiteral(" %1 │ %2").arg(sanitizeTerminalText(m_app->currentFilterTitle()), posTag), m_cols - 9)
+        + padRight(QStringLiteral(" %1 │ %2").arg(sanitizeTerminalText(m_app->currentFilterTitle()), posTag), cols - 9)
         + ESC_RESET + QStringLiteral("\033[K\r\n");
 
     // -------------------------------------------------------------------------
-    // Row m_rows: Command / Input / Status Message Bar
+    // Row rows: Command / Input / Status Message Bar
     // -------------------------------------------------------------------------
     if (m_mode == Mode::InsertTask) {
         out += m_inputLine.render(tr("New task: "), FG_GREEN);
@@ -862,11 +689,10 @@ void TuiApp::render() {
             + tr("Set status: [1/t] To-Do  [2/i] In Progress  [3/p] Paused  [4/d] Done  [5/c] Canceled  [Esc] Cancel")
             + ESC_RESET + QStringLiteral("\033[K");
     } else {
-        out += FG_GRAY + truncateVisible(sanitizeTerminalText(m_statusMessage), m_cols - 1) + ESC_RESET + QStringLiteral("\033[K");
+        out += FG_GRAY + truncateVisible(sanitizeTerminalText(m_statusMessage), cols - 1) + ESC_RESET + QStringLiteral("\033[K");
     }
 
-    const QByteArray frameBytes = out.toUtf8();
-    (void)::write(STDOUT_FILENO, frameBytes.constData(), static_cast<size_t>(frameBytes.size()));
+    m_terminal.write(out);
 }
 
 } // namespace gofi
