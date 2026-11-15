@@ -60,6 +60,7 @@ set(GOFI_CORE_SOURCES
     src/core/trackers/Nextcloud.cpp
     src/core/trackers/Redmine.cpp
     src/core/trackers/YouTrack.cpp
+    src/core/trackers/Jira.cpp
     src/core/SettingsManager.h
     src/core/SettingsManager.cpp
     src/core/UkTranslator.h
