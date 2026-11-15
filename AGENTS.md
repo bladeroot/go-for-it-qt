@@ -30,6 +30,12 @@ Tests use Qt Test through CTest. Add focused private slots to `tests/tst_todotxt
 
 Review the repository after every commit or relevant working-tree change; do not limit review to the latest diff. For each reproducible defect, add a regression test first and verify it. Only afterward update `REVIEW.md`. Keep every unresolved issue under `Open`, repeat still-present findings in subsequent reviews, and move verified fixes to `Resolved` (and record them in `FIXES.md`). Record the reviewed commit and test results. During active monitoring, check HEAD, `git status`, file diffs, and `REVIEW.md` contents at least once per minute.
 
+A regression test counts only once it has been seen failing for the right reason. Before committing a fix, revert just the production change (for example in a scratch `git worktree`), confirm the new test fails at the assertion that targets the defect, then restore the fix and confirm it passes. A failure in an older assertion of the same test, a setup failure, or a missing tool does not count. Check that the asserted strings are ones the code really prints (use `tr()`/`QCoreApplication::translate` with the exact source string), and that the scenario cannot pass through another code path, such as an escaped copy of the same text elsewhere in the output, or default tasks in a freshly created list. Note in `REVIEW.md` which tests were verified this way.
+
+Tests must run in the CI image (`debian:trixie-slim`, see `.github/workflows/release.yml`). A test that needs an external program (e.g. `pdftotext`) must locate it with `QStandardPaths::findExecutable` and fail with a message naming the package, and the package must be added to the workflow's `apt-get install` list in the same commit.
+
+A local run is not CI. After every push, wait for the GitHub Actions run (`gh run list`, `gh run watch <id> --exit-status`) and treat a red `main` as an `Open` defect with top priority. Do not push further changes on top of a red `main` except the fix. In commit messages and `REVIEW.md`, say where test totals come from (local or CI run id).
+
 ## Configuration & Safety
 
 Manual runs use persistent user settings and SQLite data. Pass `--db /tmp/goforit-test.db` while experimenting to avoid modifying normal data. Keep multi-step SQLite changes transactional, check every database result, and do not trigger notifications or remote updates until local persistence succeeds. Guard audio, D-Bus, process, and desktop integrations in test mode.
