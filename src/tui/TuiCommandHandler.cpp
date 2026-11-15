@@ -106,8 +106,8 @@ void TuiCommandHandler::execute(const QString& cmdLine) {
     if (cmdLine.startsWith(QStringLiteral("comment "))) {
         const QString cText = cmdLine.mid(8).trimmed();
         if (!cText.isEmpty()) {
-            if (m_tui->currentProxy()->rowCount() > 0 && m_tui->m_selectedRow >= 0 && m_tui->m_selectedRow < m_tui->currentProxy()->rowCount()) {
-                if (m_tui->m_app->addTaskComment(m_tui->isClosedTab(), m_tui->m_selectedRow, cText)) {
+            if (m_tui->currentProxy()->rowCount() > 0 && m_tui->selectedRow() >= 0 && m_tui->selectedRow() < m_tui->currentProxy()->rowCount()) {
+                if (m_tui->m_app->addTaskComment(m_tui->isClosedTab(), m_tui->selectedRow(), cText)) {
                     if (m_tui->m_mode == TuiApp::Mode::MarkdownView) m_tui->openTaskMarkdownView();
                     m_tui->m_statusMessage = tr("Comment added & queued for Jira/YouTrack sync.");
                 } else {
@@ -223,8 +223,8 @@ void TuiCommandHandler::execute(const QString& cmdLine) {
     }
     if (cmdLine.startsWith(QStringLiteral("p ")) || cmdLine.startsWith(QStringLiteral("prio ")) || cmdLine.startsWith(QStringLiteral("priority "))) {
         const QString prioArg = cmdLine.section(QLatin1Char(' '), 1).trimmed();
-        if (m_tui->currentProxy()->rowCount() > 0 && m_tui->m_selectedRow >= 0) {
-            m_tui->m_app->changeTaskPriority(m_tui->isClosedTab(), m_tui->m_selectedRow, prioArg);
+        if (m_tui->currentProxy()->rowCount() > 0 && m_tui->selectedRow() >= 0) {
+            m_tui->m_app->changeTaskPriority(m_tui->isClosedTab(), m_tui->selectedRow(), prioArg);
             m_tui->m_statusMessage = tr("Priority set to %1").arg(prioArg.toUpper());
         }
         return;

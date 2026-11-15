@@ -1,5 +1,6 @@
 #include "tui/TuiUtils.h"
 #include <QChar>
+#include <QCoreApplication>
 #include <QRegularExpression>
 #include <algorithm>
 
@@ -180,6 +181,14 @@ QString sanitizeTerminalText(const QString& input, bool allowNewlines) {
         }
     }
     return result;
+}
+
+QString statusLabel(const QString& status) {
+    if (status == QStringLiteral("in_progress")) return QCoreApplication::translate("TuiApp", "In Progress");
+    if (status == QStringLiteral("paused")) return QCoreApplication::translate("TuiApp", "Paused");
+    if (status == QStringLiteral("done")) return QCoreApplication::translate("TuiApp", "Done");
+    if (status == QStringLiteral("canceled")) return QCoreApplication::translate("TuiApp", "Canceled / Rejected");
+    return QCoreApplication::translate("TuiApp", "To-Do");
 }
 
 } // namespace tui

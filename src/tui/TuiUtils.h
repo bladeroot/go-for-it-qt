@@ -41,6 +41,7 @@ QString truncateVisible(const QString& str, int maxCols);
 QString padRight(const QString& str, int width);
 QString formatSeconds(uint secs);
 QString sanitizeTerminalText(const QString& input, bool allowNewlines = false);
+QString statusLabel(const QString& status);
 
 } // namespace tui
 } // namespace gofi

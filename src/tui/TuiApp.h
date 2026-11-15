@@ -7,6 +7,7 @@
 #include "tui/TuiSettingsView.h"
 #include "tui/TuiListManagerView.h"
 #include "tui/TuiInputLine.h"
+#include "tui/TuiTaskListView.h"
 #include <QObject>
 #include <QSet>
 #include <QSocketNotifier>
@@ -73,11 +74,14 @@ private:
     static QString formatInlineMarkdown(const QString& text);
 
     void executeExCommand(const QString& cmdLine);
-    void switchViewTab(int tabIndex);
-    void clampSelection();
+    void switchViewTab(int tabIndex) { m_taskListView.switchViewTab(tabIndex); }
+    void clampSelection() { m_taskListView.clampSelection(); }
     void processPendingStdin();
-    TaskFilterProxyModel* currentProxy() const;
-    bool isClosedTab() const;
+    TaskFilterProxyModel* currentProxy() const { return m_taskListView.currentProxy(); }
+    bool isClosedTab() const { return m_taskListView.isClosedTab(); }
+    int selectedRow() const { return m_taskListView.selectedRow(); }
+    void setSelectedRow(int row) { m_taskListView.setSelectedRow(row); }
+    int viewTab() const { return m_taskListView.viewTab(); }
 
     static QString truncateVisible(const QString& str, int maxCols);
     static QString padRight(const QString& str, int width);
@@ -95,13 +99,8 @@ private:
     int m_cols = 80;
 
     Mode m_mode = Mode::Normal;
-    int m_viewTab = 0; // 0:All Open, 1:To-Do, 2:In Progress, 3:Paused, 4:Done, 5:Canceled
-    int m_selectedRow = 0;
-    int m_scrollOffset = 0;
-    int m_detailsScroll = 0;
-    bool m_showPreview = true;
-    char m_pendingKey = 0; // for 'g' (gg), 'd' (dd), 'c' (cw)
 
+    TuiTaskListView m_taskListView;
     TuiInputLine m_inputLine;
     QString m_statusMessage;
     TuiMarkdownView m_markdownView;

@@ -111,6 +111,8 @@ set(GOFI_CORE_SOURCES
     src/tui/TuiListManagerView.cpp
     src/tui/TuiInputLine.h
     src/tui/TuiInputLine.cpp
+    src/tui/TuiTaskListView.h
+    src/tui/TuiTaskListView.cpp
     src/tui/TuiApp.h
     src/tui/TuiApp.cpp
 )
