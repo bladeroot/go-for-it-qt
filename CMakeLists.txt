@@ -171,6 +171,20 @@ if(BUILD_TESTING)
     set_tests_properties(tst_todotxt PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )
+
+    add_executable(tst_credentials
+        tests/TestSupport.h
+        tests/TestSupport.cpp
+        tests/tst_credentials.cpp
+    )
+    target_link_libraries(tst_credentials PRIVATE
+        gofi_core
+        Qt6::Test
+    )
+    add_test(NAME tst_credentials COMMAND tst_credentials)
+    set_tests_properties(tst_credentials PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    )
 endif()
 
 # ==============================================================================
