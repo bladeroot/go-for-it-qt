@@ -189,6 +189,14 @@ private:
     void postRedmineComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
     static QUrl buildRedmineBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
 
+    // YouTrack actions
+    void fetchYouTrackStatuses(const QString& baseUrl, const TodoListEntry& tempEntry, const QVariantMap& existingMapping);
+    void postYouTrackWorklog(const TodoListEntry& listEntry, qint64 activityLogId, const QString& issueKey, quint32 runtimeSeconds, const QDateTime& startTimeUtc, const QString& baseUrl);
+    void updateYouTrackDescription(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownDetails, const QString& baseUrl);
+    void updateYouTrackStatusRemote(const TodoListEntry& listEntry, const QString& issueKey, bool done, const QString& baseUrl, const std::function<void(QNetworkReply*)>& handleReply);
+    void postYouTrackComment(const TodoListEntry& listEntry, const QString& issueKey, const QString& markdownComment, const QString& baseUrl);
+    static QUrl buildYouTrackBrowserUrl(const TodoListEntry& listEntry, const QString& issueKey);
+
     void startSyncOperation();
     void endSyncOperation();
 

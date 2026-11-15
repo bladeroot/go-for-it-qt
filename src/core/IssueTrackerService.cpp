@@ -301,34 +301,7 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
             emit remoteStatusesLoaded(parseJiraStatusesJson(reply->readAll(), existingMapping));
         });
     } else if (provider == QStringLiteral("YouTrack")) {
-        QUrl url(baseUrl + QStringLiteral("/api/admin/customFieldSettings/bundles/state?fields=values(name,isResolved)"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, tempEntry);
-
-        QNetworkReply* reply = m_nam.get(req);
-        connect(reply, &QNetworkReply::finished, this, [this, reply, tempEntry, existingMapping]() {
-            reply->deleteLater();
-            if (reply->error() == QNetworkReply::NoError) {
-                const QVariantList list = parseYouTrackStatusesJson(reply->readAll(), existingMapping);
-                if (!list.isEmpty()) {
-                    emit remoteStatusesLoaded(list);
-                    return;
-                }
-            }
-            // Fallback for non-admin YouTrack users: extract states from issues
-            QUrl fallbackUrl(tempEntry.jiraUrl + QStringLiteral("/api/issues?$top=100&fields=customFields(name,value(name,isResolved))"));
-            QNetworkRequest fbReq(fallbackUrl);
-            applyAuthHeader(fbReq, tempEntry);
-            QNetworkReply* fbReply = m_nam.get(fbReq);
-            connect(fbReply, &QNetworkReply::finished, this, [this, fbReply, existingMapping]() {
-                fbReply->deleteLater();
-                if (fbReply->error() != QNetworkReply::NoError) {
-                    emit remoteStatusesError(tr("Failed to load YouTrack states: %1").arg(fbReply->errorString()));
-                    return;
-                }
-                emit remoteStatusesLoaded(parseYouTrackStatusesJson(fbReply->readAll(), existingMapping));
-            });
-        });
+        fetchYouTrackStatuses(baseUrl, tempEntry, existingMapping);
     } else if (provider == QStringLiteral("Redmine")) {
         fetchRedmineStatuses(baseUrl, tempEntry, existingMapping);
     }
@@ -546,42 +519,7 @@ void IssueTrackerService::postWorklog(const TodoListEntry& listEntry,
             }
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        const quint32 minutes = qMax(1U, (runtimeSeconds + 30U) / 60U);
-        const QString encodedKey = QString::fromUtf8(QUrl::toPercentEncoding(issueKey));
-        QUrl url(baseUrl + QStringLiteral("/api/issues/") + encodedKey + QStringLiteral("/timeTracking/workItems?fields=id"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject durationObj;
-        durationObj[QStringLiteral("minutes")] = static_cast<qint64>(minutes);
-
-        QJsonObject payload;
-        payload[QStringLiteral("duration")] = durationObj;
-        payload[QStringLiteral("date")] = startTimeUtc.toMSecsSinceEpoch();
-        payload[QStringLiteral("text")] = QStringLiteral("Logged via Go for It Qt Pomodoro timer");
-        payload[QStringLiteral("usesMarkdown")] = true;
-
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, listEntry, activityLogId, issueKey, minutes]() {
-            reply->deleteLater();
-            if (reply->error() == QNetworkReply::NoError) {
-                if (!DatabaseManager::instance().markActivityWorklogSynced(activityLogId)) {
-                    const QString dbErr = tr("Database error: failed to mark activity worklog as synced for %1.").arg(issueKey);
-                    setStatusMessage(dbErr);
-                    emit syncFailed(listEntry.id, dbErr);
-                } else {
-                    setStatusMessage(tr("Logged %1m to YouTrack issue %2").arg(minutes).arg(issueKey));
-                    emit worklogPosted(issueKey, minutes * 60U);
-                }
-            } else {
-                const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-                const QString errMsg = tr("Failed to post worklog to YouTrack (%1): %2")
-                    .arg(statusCode)
-                    .arg(reply->errorString());
-                setStatusMessage(errMsg);
-                emit syncFailed(listEntry.id, errMsg);
-            }
-        });
+        postYouTrackWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, startTimeUtc, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         postGitHubWorklog(listEntry, activityLogId, issueKey, runtimeSeconds, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
@@ -651,20 +589,7 @@ void IssueTrackerService::updateIssueDescription(const TodoListEntry& listEntry,
             setStatusMessage(tr("Updated description on Jira issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        QUrl url(baseUrl + QStringLiteral("/api/issues/") + issueKey.trimmed() + QStringLiteral("?fields=id"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{{QStringLiteral("description"), markdownDetails}};
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                setStatusMessage(tr("Failed to update description on YouTrack (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            setStatusMessage(tr("Updated description on YouTrack issue %1.").arg(issueKey));
-        });
+        updateYouTrackDescription(listEntry, issueKey, markdownDetails, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         updateGitHubDescription(listEntry, issueKey, markdownDetails, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
@@ -812,41 +737,7 @@ void IssueTrackerService::updateIssueStatusRemote(const TodoListEntry& listEntry
             });
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        QUrl url(baseUrl + QStringLiteral("/api/commands"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-
-        QString statusCmd = done ? QStringLiteral("State Fixed") : QStringLiteral("State Open");
-        {
-            // Pick the remote state mapped to the wanted local status; reopening prefers "todo",
-            // then "in_progress", and never a canceled/paused state. Keys starting with '_' are
-            // metadata entries, not remote state names.
-            const QStringList wanted = done
-                ? QStringList{QStringLiteral("done")}
-                : QStringList{QStringLiteral("todo"), QStringLiteral("in_progress")};
-            QString chosenState;
-            for (const QString& category : wanted) {
-                for (auto it = listEntry.statusMapping.constBegin(); it != listEntry.statusMapping.constEnd(); ++it) {
-                    if (it.key().startsWith(QLatin1Char('_'))) continue;
-                    if (it.value().toString().compare(category, Qt::CaseInsensitive) == 0) {
-                        chosenState = it.key();
-                        break;
-                    }
-                }
-                if (!chosenState.isEmpty()) break;
-            }
-            if (!chosenState.isEmpty()) {
-                statusCmd = QStringLiteral("State {%1}").arg(chosenState);
-            }
-        }
-
-        QJsonObject payload{
-            {QStringLiteral("issues"), QJsonArray{QJsonObject{{QStringLiteral("idReadable"), issueKey.trimmed()}}}},
-            {QStringLiteral("query"), statusCmd}
-        };
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        handleReply(reply);
+        updateYouTrackStatusRemote(listEntry, issueKey, done, baseUrl, handleReply);
     } else if (listEntry.provider == QStringLiteral("Nextcloud")) {
         updateNextcloudStatusRemote(listEntry, issueKey, done, handleReply, failWithError);
     }
@@ -905,23 +796,7 @@ void IssueTrackerService::postIssueComment(const TodoListEntry& listEntry,
             setStatusMessage(tr("Posted comment to Jira issue %1.").arg(issueKey));
         });
     } else if (listEntry.provider == QStringLiteral("YouTrack")) {
-        QUrl url(baseUrl + QStringLiteral("/api/issues/") + issueKey.trimmed() + QStringLiteral("/comments?fields=id"));
-        QNetworkRequest req(url);
-        applyAuthHeader(req, listEntry);
-
-        QJsonObject payload{
-            {QStringLiteral("text"), markdownComment},
-            {QStringLiteral("usesMarkdown"), true}
-        };
-        QNetworkReply* reply = m_nam.post(req, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, issueKey]() {
-            reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
-                setStatusMessage(tr("Failed to post comment to YouTrack (%1): %2").arg(issueKey, reply->errorString()));
-                return;
-            }
-            setStatusMessage(tr("Posted comment to YouTrack issue %1.").arg(issueKey));
-        });
+        postYouTrackComment(listEntry, issueKey, markdownComment, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitHub")) {
         postGitHubComment(listEntry, issueKey, markdownComment, baseUrl);
     } else if (listEntry.provider == QStringLiteral("GitLab")) {
@@ -947,11 +822,8 @@ QUrl IssueTrackerService::buildIssueBrowserUrl(const TodoListEntry& listEntry,
             return QUrl(baseUrl + QStringLiteral("/browse/") + key);
         }
     } else if (provider == QStringLiteral("YouTrack")) {
-        const QString baseUrl = normalizeBaseUrl(listEntry.jiraUrl);
-        const QString key = issueKey.trimmed();
-        if (!baseUrl.isEmpty() && !key.isEmpty()) {
-            return QUrl(baseUrl + QStringLiteral("/issue/") + key);
-        }
+        const QUrl url = buildYouTrackBrowserUrl(listEntry, issueKey);
+        if (!url.isEmpty()) return url;
     } else if (provider == QStringLiteral("GitHub")) {
         return buildGitHubBrowserUrl(listEntry, issueKey);
     } else if (provider == QStringLiteral("GitLab")) {
