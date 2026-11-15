@@ -56,6 +56,7 @@ set(GOFI_CORE_SOURCES
     src/core/trackers/TrackerCommon.h
     src/core/trackers/GitHub.cpp
     src/core/trackers/GitLab.cpp
+    src/core/trackers/Todoist.cpp
     src/core/SettingsManager.h
     src/core/SettingsManager.cpp
     src/core/UkTranslator.h
