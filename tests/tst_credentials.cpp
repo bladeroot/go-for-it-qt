@@ -717,6 +717,52 @@ private slots:
         store.setFallbackFilePath(QString());
     }
 
+    // ListRepository::saveList changed the CredentialStore before running the INSERT/UPDATE. When the
+    // SQL failed, a new token was stored for a list that was never created, a changed token replaced
+    // the one the unchanged list still used, and clearing the token lost it.
+    void testFailedListSaveLeavesTokensUnchanged() {
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_failed_save_XXXXXX")));
+        QVERIFY(dir.isValid());
+        auto& store = gofi::CredentialStore::instance();
+        store.setInMemoryMode(false);
+        store.setFallbackFilePath(dir.filePath(QStringLiteral("credentials.json")));
+
+        auto& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(dir.filePath(QStringLiteral("failed_save.db"))));
+        gofi::TodoListEntry entry;
+        entry.id = QStringLiteral("cs_failed_save_list");
+        entry.name = QStringLiteral("Failed Save");
+        entry.provider = QStringLiteral("GitHub");
+        entry.jiraUrl = QStringLiteral("https://example.invalid");
+        entry.apiToken = QStringLiteral("pat_original");
+        QVERIFY(db.saveList(entry, 0));
+
+        QSqlQuery trig(QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn")));
+        QVERIFY(trig.exec(QStringLiteral(
+            "CREATE TRIGGER fail_list_update BEFORE UPDATE ON lists "
+            "BEGIN SELECT RAISE(ABORT, 'Simulated list update failure'); END;")));
+        QVERIFY(trig.exec(QStringLiteral(
+            "CREATE TRIGGER fail_list_insert BEFORE INSERT ON lists "
+            "BEGIN SELECT RAISE(ABORT, 'Simulated list insert failure'); END;")));
+
+        entry.apiToken = QStringLiteral("pat_changed");
+        QVERIFY(!db.saveList(entry, 0));
+        QCOMPARE(store.loadToken(entry.id), QStringLiteral("pat_original"));
+
+        entry.apiToken.clear();
+        QVERIFY(!db.saveList(entry, 0));
+        QCOMPARE(store.loadToken(entry.id), QStringLiteral("pat_original"));
+
+        gofi::TodoListEntry fresh = entry;
+        fresh.id = QStringLiteral("cs_failed_save_new");
+        fresh.apiToken = QStringLiteral("pat_never_saved");
+        QVERIFY(!db.saveList(fresh, 1));
+        QVERIFY(store.loadToken(fresh.id).isEmpty());
+
+        db.close();
+        store.setFallbackFilePath(QString());
+    }
+
     void testRemovingListWhileKeyringLockedPurgesOrphanAfterUnlock() {
         // When a list is removed while the wallet/keyring is locked and the unlock prompt was dismissed,
         // deleteFromKeyring cannot unlock/delete the item immediately. When the keyring is unlocked

@@ -1,4 +1,5 @@
 #include "ListRepository.h"
+#include <QDebug>
 #include "CredentialStore.h"
 #include "DatabaseManager.h"
 #include "DatabaseSerialization.h"
@@ -70,13 +71,6 @@ QVector<TodoListEntry> ListRepository::loadLists() const {
 }
 
 bool ListRepository::saveList(const TodoListEntry& entry, int sortOrder) {
-    if (!entry.id.isEmpty()) {
-        if (entry.apiToken.isEmpty()) {
-            CredentialStore::instance().deleteToken(entry.id);
-        } else {
-            CredentialStore::instance().storeToken(entry.id, entry.apiToken);
-        }
-    }
     QSqlQuery q(db());
     q.prepare(QStringLiteral(
         "INSERT INTO lists (id, name, provider, sort_order, activity_log_path, "
@@ -116,7 +110,19 @@ bool ListRepository::saveList(const TodoListEntry& entry, int sortOrder) {
     q.bindValue(QStringLiteral(":status_mapping"), nonNullString(serializeStatusMapping(entry.statusMapping)));
     q.bindValue(QStringLiteral(":priority_mapping"), nonNullString(serializePriorityMapping(entry.priorityMapping)));
     q.bindValue(QStringLiteral(":sync_status_to_remote"), entry.syncStatusToRemote ? 1 : 0);
-    return q.exec();
+    if (!q.exec()) {
+        // The list row is unchanged, so its token must stay unchanged too.
+        return false;
+    }
+    if (!entry.id.isEmpty()) {
+        const bool ok = entry.apiToken.isEmpty()
+            ? CredentialStore::instance().deleteToken(entry.id)
+            : CredentialStore::instance().storeToken(entry.id, entry.apiToken);
+        if (!ok) {
+            qWarning() << "ListRepository::saveList: could not update the stored token for list" << entry.id;
+        }
+    }
+    return true;
 }
 
 bool ListRepository::updateListStatusMapping(const QString& listId, const QVariantMap& mapping) {
