@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [2.0.5] - 2026-11-16
+
 ### Fixed
 - Desktop: ensure mini player stays on top on KDE Plasma (Wayland) by matching window identity via fallback resource class when process PID is zero, matching window title without compositor suffixes, and ensuring script file is flushed before KWin execution (KB-124).
 - Desktop: the mini player "Always on Top" no longer pins the main window or task dialogs whose title contains "Mini" (KB-131).

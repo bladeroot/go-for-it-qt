@@ -24,6 +24,11 @@
     </ul>
   </description>
   <releases>
+    <release version="2.0.5" date="2026-11-16">
+      <description>
+        <p>Release 2.0.5: closed Jira, GitLab and YouTrack issues are marked done locally again, a sync that failed part-way says the list may be incomplete, databases from newer versions are left untouched and schema upgrades run step by step, API tokens stay unchanged when saving or removing a list fails, backup files are replaced atomically, and the mini player "Always on Top" works on KDE Plasma Wayland, no longer pins other windows and is no longer re-enabled right after unpinning.</p>
+      </description>
+    </release>
     <release version="2.0.4" date="2026-11-15">
       <description>
         <p>Release 2.0.4: issue tracker API tokens are now kept in the system keyring (Secret Service) instead of the database and are migrated automatically, the terminal UI no longer crashes on PDF export and its activity heatmap fits standard terminals, comment save failures are reported, PDF reports keep project names with special characters, and tasks without an issue key in GitHub/GitLab lists open the link from their description again.</p>

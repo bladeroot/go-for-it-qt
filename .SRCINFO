@@ -1,6 +1,6 @@
 pkgbase = go-for-it-qt
 	pkgdesc = A stylish to-do list with built-in productivity timer, SQLite storage, TUI, and multi-tracker integrations (Qt 6)
-	pkgver = 2.0.4
+	pkgver = 2.0.5
 	pkgrel = 1
 	url = https://github.com/bladeroot/go-for-it-qt
 	arch = x86_64
@@ -17,7 +17,7 @@ pkgbase = go-for-it-qt
 	depends = qt6-multimedia
 	provides = go-for-it-qt
 	conflicts = go-for-it-qt-git
-	source = git+https://github.com/bladeroot/go-for-it-qt.git#tag=v2.0.4
+	source = git+https://github.com/bladeroot/go-for-it-qt.git#tag=v2.0.5
 	sha256sums = SKIP
 
 pkgname = go-for-it-qt
