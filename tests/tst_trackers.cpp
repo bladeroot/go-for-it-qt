@@ -2532,6 +2532,34 @@ private slots:
     // retry with Bearer on 401/403 (Jira Server/DC personal access token with the email field
     // filled in), but the priority "Fetch" button does not, so those users get the five stock
     // names instead of their instance's priorities, with no error shown.
+    // 18a206d moved YouTrack to the "no server needed" group of fetchRemotePriorities, so an empty
+    // Server URL no longer produced "Please enter the Server URL first." (unlike fetchRemoteStatuses
+    // for YouTrack), and a provider without an IssueTrackerProvider returned without any signal, which
+    // left the priority dialog waiting instead of showing the list's existing mapping.
+    void testFetchRemotePrioritiesKeepsUrlCheckAndFallback() {
+        IssueTrackerService svc;
+        QSignalSpy loadedSpy(&svc, &IssueTrackerService::remotePrioritiesLoaded);
+        QSignalSpy errorSpy(&svc, &IssueTrackerService::remotePrioritiesError);
+
+        svc.fetchRemotePriorities(QStringLiteral("YouTrack"), QString(), QString(), QStringLiteral("token"), {});
+        QCOMPARE(loadedSpy.count(), 0);
+        QCOMPARE(errorSpy.count(), 1);
+        QCOMPARE(errorSpy.at(0).at(0).toString(),
+                 QCoreApplication::translate("gofi::IssueTrackerService", "Please enter the Server URL first."));
+
+        errorSpy.clear();
+        const QVariantMap existing{{QStringLiteral("Custom"), QStringLiteral("A")}};
+        svc.fetchRemotePriorities(QStringLiteral("Custom tracker"), QStringLiteral("https://example.invalid"),
+                                  QString(), QStringLiteral("token"), existing);
+        QCOMPARE(errorSpy.count(), 0);
+        QCOMPARE(loadedSpy.count(), 1);
+        bool hasCustom = false;
+        for (const QVariant& v : loadedSpy.at(0).at(0).toList()) {
+            if (v.toMap().value(QStringLiteral("remoteName")).toString() == QStringLiteral("Custom")) hasCustom = true;
+        }
+        QVERIFY2(hasCustom, "the existing mapping must be offered for a provider without presets");
+    }
+
     void testJiraFetchRemotePrioritiesRetriesWithBearer() {
         QTcpServer server;
         if (!server.listen(QHostAddress::LocalHost, 0)) {

@@ -167,11 +167,8 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
                                                 const QVariantMap& existingMapping)
 {
     auto* p = providerFor(provider);
-    if (!p) return;
-
-    if (provider == QStringLiteral("GitHub") || provider == QStringLiteral("GitLab")
-        || provider == QStringLiteral("Todoist") || provider == QStringLiteral("Nextcloud")
-        || provider == QStringLiteral("YouTrack")) {
+    if (p && (provider == QStringLiteral("GitHub") || provider == QStringLiteral("GitLab")
+              || provider == QStringLiteral("Todoist") || provider == QStringLiteral("Nextcloud"))) {
         emit remotePrioritiesLoaded(p->defaultPriorities(existingMapping));
         return;
     }
@@ -188,6 +185,11 @@ void IssueTrackerService::fetchRemotePriorities(const QString& provider,
     tempEntry.jiraUser = username;
     tempEntry.apiToken = apiToken;
 
+    if (!p) {
+        // No provider implementation: offer the list's existing mapping instead of leaving the dialog waiting.
+        emit remotePrioritiesLoaded(defaultPrioritiesForProvider(provider, existingMapping));
+        return;
+    }
     p->fetchRemotePriorities(baseUrl, tempEntry, existingMapping);
 }
 
