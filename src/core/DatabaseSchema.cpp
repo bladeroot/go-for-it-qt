@@ -70,16 +70,17 @@ bool DatabaseSchema::createSchema(QSqlDatabase database) {
     q.exec(QStringLiteral("PRAGMA journal_mode = WAL;"));
     q.exec(QStringLiteral("PRAGMA synchronous = NORMAL;"));
 
-    if (!ensureUniqueJiraIndex(database)) {
-        return false;
-    }
-
     int version = userVersion(database);
     if (version > CurrentSchemaVersion) {
-        // Written by a newer build: leave it alone, the columns this build needs already exist.
+        // Written by a newer build: leave it alone (no index repair, no row merging), the columns
+        // this build needs already exist.
         qWarning() << "DatabaseSchema: database user_version" << version << "is newer than"
                    << CurrentSchemaVersion << "- skipping migrations";
         return true;
+    }
+
+    if (!ensureUniqueJiraIndex(database)) {
+        return false;
     }
     if (version == CurrentSchemaVersion) {
         return true;

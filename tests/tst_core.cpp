@@ -787,6 +787,43 @@ private slots:
         QFile::remove(testDb);
     }
 
+    // createSchema() ran ensureUniqueJiraIndex() before reading user_version, so opening a database
+    // written by a newer build merged and DELETED duplicate jira_key rows and created an index in it,
+    // although the newer-version branch promises to leave such a database alone.
+    void testDatabaseSchemaLeavesNewerVersionDatabaseUntouched() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("schema_newer_version.db"));
+        QFile::remove(testDb);
+        const QString conn = QStringLiteral("schema_newer_conn");
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+            db.setDatabaseName(testDb);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec(QStringLiteral("CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL);")));
+            QVERIFY(q.exec(QStringLiteral(
+                "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, list_id TEXT NOT NULL, description TEXT NOT NULL,"
+                " jira_key TEXT NOT NULL DEFAULT '', timer_seconds INTEGER NOT NULL DEFAULT 0,"
+                " duration_seconds INTEGER NOT NULL DEFAULT 0, jira_synced_seconds INTEGER NOT NULL DEFAULT 0);")));
+            // A future schema may allow several rows per key (e.g. one per sub-item).
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO tasks (list_id, description, jira_key, timer_seconds) VALUES ('l1', 'Part A', 'KEY-1', 10);")));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO tasks (list_id, description, jira_key, timer_seconds) VALUES ('l1', 'Part B', 'KEY-1', 15);")));
+            QVERIFY(DatabaseSchema::setUserVersion(db, DatabaseSchema::CurrentSchemaVersion + 1));
+
+            QVERIFY(DatabaseSchema::createSchema(db));
+            QCOMPARE(DatabaseSchema::userVersion(db), DatabaseSchema::CurrentSchemaVersion + 1);
+            QVERIFY(q.exec(QStringLiteral("SELECT count(*), sum(timer_seconds) FROM tasks WHERE jira_key = 'KEY-1';")));
+            QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 2);
+            QCOMPARE(q.value(1).toInt(), 25);
+            QVERIFY(q.exec(QStringLiteral("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_tasks_list_jira_key';")));
+            QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 0);
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(conn);
+        QFile::remove(testDb);
+    }
+
     void testDatabaseSchemaPragmaUserVersionAndMigration() {
         const QString testDb = m_testSandbox.filePath(QStringLiteral("schema_version_test.db"));
         QFile::remove(testDb);
