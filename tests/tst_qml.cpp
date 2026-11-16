@@ -1093,6 +1093,43 @@ private slots:
     }
 
 
+    // KB-140: every configureMiniPlayerWindow call scheduled KWin pin retries (80..1000 ms) with the
+    // state captured at call time and nothing cancelled them. Unpinning shortly after the mini player
+    // is shown let the earlier call's "pin" retries run after the "unpin" script, so the window was
+    // kept above again while the button showed it unpinned.
+    void testKWinPinRetriesOfOlderStateAreCancelled() {
+        QWindow win;
+        win.setTitle(QStringLiteral("Go for It — Mini Player"));
+        const QString pinScript = DesktopIntegration::kwinPinScript(win.title(), true);
+        const QString unpinScript = DesktopIntegration::kwinPinScript(win.title(), false);
+        QStringList executed;
+        const auto record = [&executed](const QString& script) { executed.append(script); };
+
+        DesktopIntegration::schedulePinScript(&win, true, record);
+        QTest::qWait(150);
+        DesktopIntegration::schedulePinScript(&win, false, record);
+        const qsizetype unpinStart = executed.size();
+        QCOMPARE(executed.value(unpinStart - 1), unpinScript);
+        QTest::qWait(1300);
+
+        // Immediate pin + its 80 ms retry, then the unpin call with all four of its retries.
+        QCOMPARE(executed.count(unpinScript), 5);
+        for (qsizetype i = unpinStart; i < executed.size(); ++i) {
+            QVERIFY2(executed.at(i) != pinScript,
+                     qPrintable(QStringLiteral("stale pin retry ran after unpin at position %1").arg(i)));
+        }
+        QCOMPARE(executed.last(), unpinScript);
+
+        // Retries die with the window.
+        executed.clear();
+        {
+            auto shortLived = std::make_unique<QWindow>();
+            DesktopIntegration::schedulePinScript(shortLived.get(), true, record);
+        }
+        QTest::qWait(1100);
+        QCOMPARE(executed.size(), 1);
+    }
+
     // KB-102: since KB-100 (177089d) executeKWinPinScript keeps the temporary script file only in
     // the loadScript reply handler, so the file is deleted right after `run` is sent. KWin's
     // Script::run() reads the file asynchronously and answers only after evaluating it, so it finds

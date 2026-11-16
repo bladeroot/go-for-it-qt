@@ -12,6 +12,7 @@
 #include <QFontMetrics>
 #include <QIcon>
 #include <QPainter>
+#include <QPointer>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QTemporaryFile>
@@ -405,23 +406,41 @@ void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnect
     });
 }
 
-void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop) {
-    if (!win || QStandardPaths::isTestModeEnabled()) {
+void DesktopIntegration::schedulePinScript(QWindow* win, bool alwaysOnTop, const std::function<void(const QString&)>& execute) {
+    if (!win || !execute) {
         return;
     }
+    static const char* const generationProperty = "_gofi_kwin_pin_generation";
+    const quint64 generation = win->property(generationProperty).toULongLong() + 1;
+    win->setProperty(generationProperty, generation);
 
     const QString script = kwinPinScript(win->title(), alwaysOnTop);
 
     // Execute immediately in case the window is already mapped
-    executeKWinPinScript(script);
+    execute(script);
 
     // When the window is first shown, the Wayland compositor maps the surface asynchronously
-    // (typically takes 50-150ms). Retry after short delays so KWin catches the window.
+    // (typically takes 50-150ms). Retry after short delays so KWin catches the window. The window
+    // is the timer context, so retries die with it; a newer call bumps the generation and the
+    // retries of this one skip themselves.
+    QPointer<QWindow> guard(win);
     for (int delayMs : {80, 200, 500, 1000}) {
-        QTimer::singleShot(delayMs, [script]() {
-            executeKWinPinScript(script);
+        QTimer::singleShot(delayMs, win, [guard, generation, script, execute]() {
+            if (!guard || guard->property(generationProperty).toULongLong() != generation) {
+                return;
+            }
+            execute(script);
         });
     }
+}
+
+void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop) {
+    if (!win || QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
+    schedulePinScript(win, alwaysOnTop, [](const QString& script) {
+        executeKWinPinScript(script);
+    });
 }
 
 } // namespace gofi

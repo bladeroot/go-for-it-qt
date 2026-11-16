@@ -6,6 +6,7 @@
 #include <QMenu>
 #include <QObject>
 #include <QSystemTrayIcon>
+#include <functional>
 
 class QDBusConnection;
 
@@ -31,6 +32,10 @@ public:
     // Loads, runs and unloads `script` through the KWin Scripting D-Bus API of `service` on `connection`.
     static void runKWinScript(const QString& script, const QDBusConnection& connection, const QString& service);
     [[nodiscard]] static QString kwinPinScript(const QString& windowTitle, bool alwaysOnTop);
+    // Calls `execute` with the pin script now and again on the retry schedule (the compositor maps a
+    // new window asynchronously). A later call for the same window cancels the pending retries of
+    // earlier calls, so a stale pin/unpin never runs after a newer state.
+    static void schedulePinScript(QWindow* win, bool alwaysOnTop, const std::function<void(const QString&)>& execute);
     [[nodiscard]] QMenu* trayMenu() const noexcept { return m_trayMenu; }
     [[nodiscard]] QAction* toggleMiniPlayerAction() const noexcept { return m_toggleMiniPlayerAction; }
 
