@@ -680,6 +680,43 @@ private slots:
         QCOMPARE(afterUnlock, QStringLiteral("pat_new_current"));
     }
 
+    // ListRepository::removeList removed the token before running DELETE FROM lists. When the DELETE
+    // failed (locked or read-only database, constraint), the list stayed but its token was gone, so the
+    // next sync failed with an authentication error and the user had to re-enter the token.
+    void testFailedListRemovalKeepsToken() {
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_failed_remove_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString dbPath = dir.filePath(QStringLiteral("failed_remove.db"));
+        const QString listId = QStringLiteral("cs_failed_remove_list");
+
+        auto& store = gofi::CredentialStore::instance();
+        store.setInMemoryMode(false);
+        store.setFallbackFilePath(dir.filePath(QStringLiteral("credentials.json")));
+
+        auto& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(dbPath));
+        gofi::TodoListEntry entry;
+        entry.id = listId;
+        entry.name = QStringLiteral("Failed Remove");
+        entry.provider = QStringLiteral("GitHub");
+        entry.jiraUrl = QStringLiteral("https://example.invalid");
+        entry.apiToken = QStringLiteral("pat_keep_me");
+        QVERIFY(db.saveList(entry, 0));
+        QCOMPARE(store.loadToken(listId), QStringLiteral("pat_keep_me"));
+
+        QSqlQuery trig(QSqlDatabase::database(QStringLiteral("gofi_sqlite_conn")));
+        QVERIFY(trig.exec(QStringLiteral(
+            "CREATE TRIGGER fail_list_delete BEFORE DELETE ON lists "
+            "BEGIN SELECT RAISE(ABORT, 'Simulated list delete failure'); END;")));
+
+        QVERIFY(!db.removeList(listId));
+        const auto lists = db.loadLists();
+        QCOMPARE(lists.size(), 1);
+        QCOMPARE(lists.first().apiToken, QStringLiteral("pat_keep_me"));
+        db.close();
+        store.setFallbackFilePath(QString());
+    }
+
     void testRemovingListWhileKeyringLockedPurgesOrphanAfterUnlock() {
         // When a list is removed while the wallet/keyring is locked and the unlock prompt was dismissed,
         // deleteFromKeyring cannot unlock/delete the item immediately. When the keyring is unlocked

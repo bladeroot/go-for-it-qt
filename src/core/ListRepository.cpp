@@ -138,13 +138,15 @@ bool ListRepository::removeList(const QString& listId, bool* notFound) {
         }
         return false;
     }
-    CredentialStore::instance().removeListCredentials(listId);
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM lists WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), listId);
     if (!q.exec()) {
         return false;
     }
+    // Only once the row is gone (deleted now, or already missing): a failed DELETE must leave the
+    // list usable with its token.
+    CredentialStore::instance().removeListCredentials(listId);
     if (q.numRowsAffected() <= 0) {
         if (notFound) {
             *notFound = true;
