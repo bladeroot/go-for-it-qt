@@ -276,9 +276,14 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
                 emit syncFailed(entry.id, combinedState->errorMsg);
                 return;
             }
-            const auto issuesOutcome = combinedState->issuesPaginator.finalize({});
-            const auto mrOutcome = combinedState->mrPaginator.finalize({});
-            const bool combinedLimitReached = issuesOutcome.limitReached || mrOutcome.limitReached;
+            // Each stream is complete only if it delivered as many items as its first X-Total
+            // announced. The combined item list mixes both streams, so it cannot be passed to finalize().
+            auto streamTruncated = [](const TrackerPaginator& p) {
+                return p.isLimitReached()
+                    || (p.initialTotalCount() >= 0 && p.itemsAccumulated() < p.initialTotalCount());
+            };
+            const bool combinedLimitReached = streamTruncated(combinedState->issuesPaginator)
+                || streamTruncated(combinedState->mrPaginator);
             const bool explicitZero = !combinedHasError && combinedState->items.isEmpty();
             processSyncedItems(entry, combinedState->items, QStringLiteral("GitLab"), combinedLimitReached, combinedHasError, explicitZero);
         };
@@ -339,6 +344,11 @@ void IssueTrackerService::fetchGitLabStreamPage(const TodoListEntry& entry,
         const QByteArray totalHdr = reply->rawHeader("x-total").trimmed();
         const int streamTotal = totalHdr.isEmpty() ? -1 : totalHdr.toInt();
         paginator.recordPage(parsed.size(), streamTotal, false);
+        if (paginator.pagesFetched() > 1 && paginator.initialTotalCount() < 0) {
+            // Without X-Total (omitted by GitLab for large result sets) a shift between pages
+            // cannot be detected, so a multi-page stream must not drive reconciliation.
+            paginator.setLimitReached(true);
+        }
 
         const QByteArray nextPageHdr = reply->rawHeader("x-next-page").trimmed();
         const int nextPage = nextPageHdr.toInt();

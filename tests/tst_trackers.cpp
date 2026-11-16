@@ -1566,6 +1566,70 @@ private slots:
     }
 
 
+    // KB-129: GitLab omits X-Total for large result sets. KB-15 therefore treated a multi-page GitLab
+    // stream without X-Total as possibly shifted (limitReached); 95a4e77 dropped that branch, so a
+    // shifted page silently skipped an issue and reconciliation closed it although it was still open.
+    void testGitLabPaginationShiftWithoutTotalHeaderDoesNotCloseSkippedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        const quint16 port = server.serverPort();
+        serveHttp(server, [port](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            if (target.contains("/merge_requests")) {
+                return httpResponse("200 OK", "application/json", "[]");
+            }
+            // Issue 5 is closed after page 1 was served; later issues shift up by one.
+            const bool secondPage = target.contains("page=2");
+            QVector<int> open;
+            for (int iid = 1; iid <= 150; ++iid) {
+                if (secondPage && iid == 5) continue;
+                open.append(iid);
+            }
+            const int offset = secondPage ? 100 : 0;
+            QJsonArray arr;
+            for (int i = offset; i < qMin(offset + 100, static_cast<int>(open.size())); ++i) {
+                const int iid = open.at(i);
+                arr.append(QJsonObject{
+                    {QStringLiteral("iid"), iid},
+                    {QStringLiteral("title"), QStringLiteral("Issue %1").arg(iid)},
+                    {QStringLiteral("state"), QStringLiteral("opened")},
+                    {QStringLiteral("web_url"), QStringLiteral("http://127.0.0.1:%1/grp/proj/-/issues/%2").arg(port).arg(iid)}
+                });
+            }
+            QByteArray headers;
+            if (!secondPage) headers += "X-Next-Page: 2\r\n";
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact), headers);
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(m_testSandbox.filePath(QStringLiteral("kb129_gitlab_nototal.db"))));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb129_gl_nototal");
+        entry.name = QStringLiteral("KB129 GitLab no total");
+        entry.provider = QStringLiteral("GitLab");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(port);
+        entry.jiraJql = QStringLiteral("grp/proj");
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        for (int iid = 1; iid <= 150; ++iid) {
+            TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Issue %1").arg(iid), false, false);
+            t.setJiraKey(QStringLiteral("GL#grp/proj#%1").arg(iid));
+            QVERIFY(db.insertTask(entry.id, t, iid - 1) >= 0);
+        }
+
+        IssueTrackerService svc;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        QSet<QString> openKeys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) openKeys.insert(t.jiraKey());
+        QVERIFY(openKeys.contains(QStringLiteral("GL#grp/proj#5")));   // seen open on page 1
+        QVERIFY(openKeys.contains(QStringLiteral("GL#grp/proj#101")));
+        server.close();
+    }
+
+
     // KB-15: YouTrack ($skip, no total in the response) has no shift guard either.
     void testYouTrackPaginationShiftDoesNotCloseSkippedIssue() {
         const QSet<QString> openKeys = runYouTrackShiftScenario(QStringLiteral("kb15_yt"), true);
@@ -1683,6 +1747,153 @@ private slots:
     // KB-18: the KB-15 fix sets limitReached whenever YouTrack needed more than one page,
     // so lists with >= 100 open issues (exactly 100 included: the empty second page counts)
     // never reconcile, and remotely closed issues stay open locally forever.
+    // KB-128: 95a4e77 inverted the Jira "isLast" check for an empty first page. Jira Cloud's
+    // /search/jql answers without "total", so when the last open issue of a query is resolved the
+    // response is {"issues":[],"isLast":true}. That is an explicit empty result and must close the
+    // local task; after the refactor it no longer reconciled at all (and an empty page with
+    // "isLast":false was treated as explicitly empty instead).
+    void testJiraEmptyLastPageWithoutTotalReconcilesClosedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttpFull(server, [](const QByteArray&, const QByteArray&, const QByteArray&, const QByteArray&) {
+            return httpResponse("200 OK", "application/json", "{\"issues\":[],\"isLast\":true}");
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb128_jira.db"));
+        QFile::remove(dbPath);
+        QVERIFY(db.initialize(dbPath));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb128_jira");
+        entry.name = QStringLiteral("KB128 Jira");
+        entry.provider = QStringLiteral("Jira");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraUser = QStringLiteral("user@example.com");
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+        TxtTask t = TxtTask::fromSimpleTxt(QStringLiteral("Resolved remotely"), false, false);
+        t.setJiraKey(QStringLiteral("KB-1"));
+        QVERIFY(db.insertTask(entry.id, t, 0) >= 0);
+
+        IssueTrackerService svc;
+        QSignalSpy synced(&svc, &IssueTrackerService::listIssuesSynced);
+        QSignalSpy failed(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(failed.count(), 0);
+        QCOMPARE(synced.count(), 1);
+
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 0);
+        const QVector<TxtTask> done = db.loadTasks(entry.id, true);
+        QCOMPARE(done.size(), 1);
+        QCOMPARE(done.first().jiraKey(), QStringLiteral("KB-1"));
+        server.close();
+    }
+
+    // KB-129: 95a4e77 finalizes the GitLab issue and MR paginators with an empty item list
+    // (finalize({})), and finalize() flags limitReached whenever items.size() < X-Total. Every
+    // GitLab sync that reports X-Total > 0 was therefore treated as truncated, so an issue closed
+    // on GitLab was never marked done locally.
+    void testGitLabSyncWithTotalHeaderReconcilesClosedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        const QString base = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        int openIssues = 2;
+        serveHttpFull(server, [&openIssues, base](const QByteArray&, const QByteArray& target, const QByteArray&, const QByteArray&) {
+            QJsonArray arr;
+            if (!target.contains("/merge_requests")) {
+                for (int n = 1; n <= openIssues; ++n) {
+                    arr.append(QJsonObject{
+                        {QStringLiteral("iid"), n},
+                        {QStringLiteral("title"), QStringLiteral("Issue %1").arg(n)},
+                        {QStringLiteral("state"), QStringLiteral("opened")},
+                        {QStringLiteral("web_url"), QStringLiteral("%1/grp/proj/-/issues/%2").arg(base).arg(n)}
+                    });
+                }
+            }
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact),
+                                "X-Total: " + QByteArray::number(arr.size()) + "\r\n");
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb129_gitlab.db"));
+        QFile::remove(dbPath);
+        QVERIFY(db.initialize(dbPath));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb129_gl");
+        entry.name = QStringLiteral("KB129 GitLab");
+        entry.provider = QStringLiteral("GitLab");
+        entry.jiraUrl = base;
+        entry.jiraJql = QStringLiteral("grp/proj");
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+
+        IssueTrackerService svc;
+        QSignalSpy failed(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 2);
+
+        openIssues = 1; // issue #2 was closed on GitLab
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(failed.count(), 0);
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 1);
+        QCOMPARE(db.loadTasks(entry.id, true).size(), 1);
+        server.close();
+    }
+
+    // KB-130: 95a4e77 records YouTrack pages with serverTotalCount = -1, and TrackerPaginator sets
+    // explicitZeroTotal only for a total of 0. An empty YouTrack result (the last open issue of the
+    // query was resolved) therefore no longer reconciled, so the local task stayed open.
+    void testYouTrackEmptyResultReconcilesClosedIssue() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        bool issueOpen = true;
+        serveHttp(server, [&issueOpen](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            QJsonArray arr;
+            if (issueOpen && !target.contains("skip=")) {
+                arr.append(QJsonObject{
+                    {QStringLiteral("idReadable"), QStringLiteral("YT-1")},
+                    {QStringLiteral("summary"), QStringLiteral("Issue 1")}
+                });
+            }
+            return httpResponse("200 OK", "application/json", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb130_youtrack.db"));
+        QFile::remove(dbPath);
+        QVERIFY(db.initialize(dbPath));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("kb130_yt");
+        entry.name = QStringLiteral("KB130 YouTrack");
+        entry.provider = QStringLiteral("YouTrack");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        QVERIFY(db.saveList(entry, 0));
+
+        IssueTrackerService svc;
+        QSignalSpy failed(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 1);
+
+        issueOpen = false;
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+        QCOMPARE(failed.count(), 0);
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 0);
+        QCOMPARE(db.loadTasks(entry.id, true).size(), 1);
+        server.close();
+    }
+
     void testYouTrackMultiPageListStillReconcilesClosedIssue() {
         QTcpServer server;
         if (!server.listen(QHostAddress::LocalHost, 0)) {

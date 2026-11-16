@@ -552,7 +552,7 @@ void IssueTrackerService::fetchJiraPage(const TodoListEntry& entry,
             state->paginator.recordPage(issuesArr.size(), total, false);
 
             if (state->paginator.pagesFetched() == 1 && !state->paginator.hasError() && issuesArr.isEmpty()) {
-                if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && !rootObj.value(QStringLiteral("isLast")).toBool(false))) {
+                if (total == 0 || (rootObj.contains(QStringLiteral("isLast")) && rootObj.value(QStringLiteral("isLast")).toBool(false))) {
                     state->paginator.setExplicitZeroTotal(true);
                 }
             }

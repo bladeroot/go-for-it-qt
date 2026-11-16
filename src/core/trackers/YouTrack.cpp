@@ -219,6 +219,10 @@ void IssueTrackerService::fetchYouTrackPage(const TodoListEntry& entry,
         const QVector<RemoteIssueItem> items = parseYouTrackIssuesJson(bodyBytes);
         state->allItems.append(items);
         state->paginator.recordPage(rawCount, -1, false);
+        // YouTrack sends no total: an empty, valid first page is the explicit "no open issues" answer.
+        if (state->paginator.pagesFetched() == 1 && rawCount == 0 && !state->paginator.hasError()) {
+            state->paginator.setExplicitZeroTotal(true);
+        }
 
         if (rawCount > 0) {
             state->nonEmptyPages++;
