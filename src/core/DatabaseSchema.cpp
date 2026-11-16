@@ -1,4 +1,6 @@
 #include "DatabaseSchema.h"
+#include <QDebug>
+#include <iterator>
 #include <QSqlQuery>
 #include <QString>
 
@@ -72,8 +74,14 @@ bool DatabaseSchema::createSchema(QSqlDatabase database) {
         return false;
     }
 
-    const int version = userVersion(database);
-    if (version >= CurrentSchemaVersion) {
+    int version = userVersion(database);
+    if (version > CurrentSchemaVersion) {
+        // Written by a newer build: leave it alone, the columns this build needs already exist.
+        qWarning() << "DatabaseSchema: database user_version" << version << "is newer than"
+                   << CurrentSchemaVersion << "- skipping migrations";
+        return true;
+    }
+    if (version == CurrentSchemaVersion) {
         return true;
     }
 
@@ -88,13 +96,38 @@ bool DatabaseSchema::createSchema(QSqlDatabase database) {
             }
             return setUserVersion(database, CurrentSchemaVersion);
         }
-
-        if (!migrateLegacyDatabase(database)) {
-            return false;
-        }
-        return setUserVersion(database, CurrentSchemaVersion);
     }
 
+    // Stepwise upgrade: every step whose target version is above the stored one runs in order, and
+    // the version is stamped after each successful step, so an interrupted upgrade resumes from the
+    // last completed step. Steps must be idempotent (ALTERs guarded by PRAGMA table_info, IF NOT
+    // EXISTS, ...). To change the schema: update initializeFreshDatabase(), append a step here and
+    // raise CurrentSchemaVersion to its target version.
+    struct MigrationStep {
+        int targetVersion;
+        bool (*apply)(QSqlDatabase);
+    };
+    static constexpr MigrationStep steps[] = {
+        // Versions 1..5 never had separate steps: the idempotent legacy migration brings any older
+        // database (user_version 0..4) to the version-5 schema.
+        {5, &DatabaseSchema::migrateLegacyDatabase},
+    };
+    static_assert(steps[std::size(steps) - 1].targetVersion == CurrentSchemaVersion,
+                  "the last migration step must reach CurrentSchemaVersion");
+
+    for (const MigrationStep& step : steps) {
+        if (version >= step.targetVersion) {
+            continue;
+        }
+        if (!step.apply(database)) {
+            qWarning() << "DatabaseSchema: migration to user_version" << step.targetVersion << "failed";
+            return false;
+        }
+        if (!setUserVersion(database, step.targetVersion)) {
+            return false;
+        }
+        version = step.targetVersion;
+    }
     return true;
 }
 

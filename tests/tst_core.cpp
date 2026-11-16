@@ -25,6 +25,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QSqlQuery>
+#include <QSqlError>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QDesktopServices>
@@ -733,6 +734,56 @@ private slots:
         QFile::remove(testDb);
         QFile::remove(validBackup);
         QFile::remove(corruptFile);
+    }
+
+    // ad2cf05 migrated only user_version == 0: a database stamped with any lower non-zero version
+    // (an intermediate build, or a DB at today's version once CurrentSchemaVersion is raised) was
+    // reported as up to date without running the missing steps, so its columns were never added.
+    void testDatabaseSchemaMigratesIntermediateUserVersion() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("schema_intermediate_version.db"));
+        QFile::remove(testDb);
+        const QString conn = QStringLiteral("schema_intermediate_conn");
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), conn);
+            db.setDatabaseName(testDb);
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec(QStringLiteral(
+                "CREATE TABLE lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL DEFAULT 'SQLite',"
+                " sort_order INTEGER NOT NULL DEFAULT 0, activity_log_path TEXT NOT NULL DEFAULT '',"
+                " add_creation_dates INTEGER NOT NULL DEFAULT 1, reminder_time INTEGER NOT NULL DEFAULT -1,"
+                " custom_schedule TEXT NOT NULL DEFAULT '', jira_url TEXT NOT NULL DEFAULT '',"
+                " jira_user TEXT NOT NULL DEFAULT '', jira_jql TEXT NOT NULL DEFAULT '');")));
+            QVERIFY(q.exec(QStringLiteral(
+                "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, list_id TEXT NOT NULL,"
+                " description TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, priority INTEGER NOT NULL DEFAULT 127,"
+                " creation_date TEXT NOT NULL DEFAULT '', completion_date TEXT NOT NULL DEFAULT '',"
+                " duration_seconds INTEGER NOT NULL DEFAULT 0, timer_seconds INTEGER NOT NULL DEFAULT 0,"
+                " sort_order INTEGER NOT NULL DEFAULT 0, jira_key TEXT NOT NULL DEFAULT '',"
+                " jira_synced_seconds INTEGER NOT NULL DEFAULT 0);")));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO lists (id, name) VALUES ('l1', 'Old list');")));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO tasks (list_id, description, done) VALUES ('l1', 'Finished', 1);")));
+            QVERIFY(DatabaseSchema::setUserVersion(db, DatabaseSchema::CurrentSchemaVersion - 2));
+
+            QVERIFY(DatabaseSchema::createSchema(db));
+            QCOMPARE(DatabaseSchema::userVersion(db), DatabaseSchema::CurrentSchemaVersion);
+            QVERIFY2(q.exec(QStringLiteral("SELECT api_token, onboarding_completed, sync_status_to_remote FROM lists;")),
+                     qPrintable(q.lastError().text()));
+            QVERIFY2(q.exec(QStringLiteral("SELECT status, details, comments_json, is_viewed FROM tasks WHERE done = 1;")),
+                     qPrintable(q.lastError().text()));
+            QVERIFY(q.next());
+            QCOMPARE(q.value(0).toString(), QStringLiteral("done"));
+            QVERIFY2(q.exec(QStringLiteral("SELECT is_pomodoro_completed FROM activity_log;")), qPrintable(q.lastError().text()));
+            QVERIFY2(q.exec(QStringLiteral("SELECT key FROM app_settings;")), qPrintable(q.lastError().text()));
+
+            // A database written by a newer build keeps its version and is not touched.
+            QVERIFY(DatabaseSchema::setUserVersion(db, DatabaseSchema::CurrentSchemaVersion + 1));
+            QVERIFY(DatabaseSchema::createSchema(db));
+            QCOMPARE(DatabaseSchema::userVersion(db), DatabaseSchema::CurrentSchemaVersion + 1);
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(conn);
+        QFile::remove(testDb);
     }
 
     void testDatabaseSchemaPragmaUserVersionAndMigration() {
