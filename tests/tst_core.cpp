@@ -3308,6 +3308,7 @@ private slots:
         const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
         QFile::remove(dbPath);
         AppController ctrl(QString(), dbPath);
+        ctrl.settings()->setLanguage(QStringLiteral("uk"));
 
         // Heatmap title in Ukrainian must properly decline "день / дні / днів"
         const QString title31 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 31).arg(31);
@@ -3318,6 +3319,7 @@ private slots:
         QCOMPARE(title32, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 32 ДНІ ──"));
         QCOMPARE(title28, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 28 ДНІВ ──"));
 
+        ctrl.settings()->setLanguage(QStringLiteral("system"));
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }
