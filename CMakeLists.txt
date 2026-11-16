@@ -209,6 +209,7 @@ if(BUILD_TESTING)
         gofi_core
         Qt6::Test
     )
+    target_compile_definitions(tst_core PRIVATE GOFI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME tst_core COMMAND tst_core)
     set_tests_properties(tst_core PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

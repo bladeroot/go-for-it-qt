@@ -3481,8 +3481,28 @@ private slots:
         QCOMPARE(title(25), expected(25, "ДНІВ"));
     }
 
+    // Arch consumers use .SRCINFO rather than evaluating PKGBUILD. Keep the checked-in metadata
+    // synchronized so a release package cannot silently follow the moving main branch.
+    void testArchSourceInfoMatchesPkgbuildReleaseTag() {
+        const QString sourceDir = QString::fromUtf8(GOFI_SOURCE_DIR);
+        for (const QString& relativeDir : {QString(), QStringLiteral("packaging/arch")}) {
+            const QDir directory(relativeDir.isEmpty() ? sourceDir : sourceDir + QLatin1Char('/') + relativeDir);
+            QFile pkgbuild(directory.filePath(QStringLiteral("PKGBUILD")));
+            QFile sourceInfo(directory.filePath(QStringLiteral(".SRCINFO")));
+            QVERIFY2(pkgbuild.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(pkgbuild.fileName()));
+            QVERIFY2(sourceInfo.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(sourceInfo.fileName()));
 
-
+            const QString recipe = QString::fromUtf8(pkgbuild.readAll());
+            const QString metadata = QString::fromUtf8(sourceInfo.readAll());
+            const QRegularExpression versionRe(QStringLiteral("(?m)^pkgver=([^\\r\\n]+)$"));
+            const QRegularExpressionMatch match = versionRe.match(recipe);
+            QVERIFY2(match.hasMatch(), qPrintable(pkgbuild.fileName()));
+            const QString expectedSource = QStringLiteral("source = git+https://github.com/bladeroot/go-for-it-qt.git#tag=v%1")
+                                               .arg(match.captured(1));
+            QVERIFY2(metadata.contains(expectedSource),
+                     qPrintable(sourceInfo.fileName() + QStringLiteral(" does not contain: ") + expectedSource));
+        }
+    }
 
     // KB-116: AnalyticsService::exportBillingPdf did not HTML-escape project names, causing
     // projects with angle brackets like "+Security<Core>" to be treated as HTML markup and
