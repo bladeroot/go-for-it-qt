@@ -27,7 +27,7 @@
   "  t / S / B / R                     Start/Pause timer (t), Skip phase (B), Reset phase (R)": "  t / S / B / R                     Старт/Пауза таймера (t), Пропустити фазу (B), Скинути таймер (R)",
   "  v / M or :md <file.md>            Open Full-Screen Markdown Viewer for task or any .md file": "  v / M або :md <file.md>           Повноекранний переглядач Markdown для задачі або .md файлу",
   "  w / gx                            Open task / issue in web browser (GitHub, GitLab, Jira, YouTrack...)": "  w / gx                            Відкрити задачу / issue у браузері (GitHub, GitLab, Jira, YouTrack...)",
-  "  ── %1-DAY ACTIVITY HEATMAP ──": "  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА %1 ДНІВ ──",
+  "  ── %1-DAY ACTIVITY HEATMAP ──": "  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА %1 ДЕНЬ ──;;  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА %1 ДНІ ──;;  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА %1 ДНІВ ──",
   "  ── CONTEXTS (@Context) ──": "  ── КОНТЕКСТИ (@Контекст) ──",
   "  ── Comments (%1) ──": "  ── Коментарі (%1) ──",
   "  ── PROJECTS (+Project) ──": "  ── ПРОЄКТИ (+Проєкт) ──",

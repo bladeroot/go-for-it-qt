@@ -232,7 +232,6 @@ QString UkTranslator::translate(const char* context,
 {
     Q_UNUSED(context)
     Q_UNUSED(disambiguation)
-    Q_UNUSED(n)
     if (!sourceText) return {};
     const QString key = QString::fromUtf8(sourceText);
 
@@ -246,15 +245,43 @@ QString UkTranslator::translate(const char* context,
     };
 
     QString res = tryLookup(m_langCode);
-    if (!res.isEmpty()) return res;
-
-    // Fallback: if m_langCode has region (e.g. "uk_ua" -> fallback to "uk")
-    if (m_langCode.contains(QLatin1Char('_')) || m_langCode.contains(QLatin1Char('-'))) {
+    if (res.isEmpty() && (m_langCode.contains(QLatin1Char('_')) || m_langCode.contains(QLatin1Char('-')))) {
         const QString base = m_langCode.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0);
         res = tryLookup(base);
-        if (!res.isEmpty()) return res;
     }
-    return {};
+    if (res.isEmpty()) return {};
+
+    if (res.contains(QStringLiteral(";;"))) {
+        const QStringList forms = res.split(QStringLiteral(";;"));
+        if (!forms.isEmpty()) {
+            if (n < 0) {
+                return forms.last();
+            }
+            const QString lang = m_langCode.section(QLatin1Char('_'), 0, 0).section(QLatin1Char('-'), 0, 0).toLower();
+            if (lang == QStringLiteral("uk")) {
+                // Slavic 3-form plural: one, few, many
+                if (forms.size() >= 3) {
+                    const int mod10 = n % 10;
+                    const int mod100 = n % 100;
+                    if (mod10 == 1 && mod100 != 11) {
+                        return forms[0];
+                    }
+                    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) {
+                        return forms[1];
+                    }
+                    return forms[2];
+                }
+            }
+            // 2-form plural fallback (one, other)
+            if (forms.size() >= 2) {
+                if (n == 1) return forms[0];
+                return forms[1];
+            }
+            return forms.last();
+        }
+    }
+
+    return res;
 }
 
 } // namespace gofi

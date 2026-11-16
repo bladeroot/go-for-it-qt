@@ -1008,7 +1008,7 @@ private slots:
         screen.remove(QRegularExpression(QStringLiteral("\x1b\\[[0-9;?]*[A-Za-z]")));
 
         // Title must show the accurate day count, not hardcoded 28-DAY
-        const QString expectedTitle = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──").arg(actualDays).trimmed();
+        const QString expectedTitle = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, actualDays).arg(actualDays).trimmed();
         QVERIFY2(screen.contains(expectedTitle), qPrintable(screen.left(2000)));
 
         // Today's cell ([█]) must be visible on the 80-column terminal, not truncated away

@@ -102,7 +102,7 @@ QString TuiDashboardView::render(int bodyRows, int cols) {
              QString::number(stats.value(QStringLiteral("totalSessions")).toInt())));
 
     lines.append(QString());
-    lines.append(FG_GREEN + ESC_BOLD + QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──").arg(heatmap.size()) + ESC_RESET);
+    lines.append(FG_GREEN + ESC_BOLD + QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, heatmap.size()).arg(heatmap.size()) + ESC_RESET);
     const int maxWeeks = (cols - 2) / 21;
     const int cellsPerRow = maxWeeks >= 1 ? maxWeeks * 7 : std::max(1, (cols - 2) / 3);
 

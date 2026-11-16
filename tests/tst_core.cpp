@@ -3304,6 +3304,24 @@ private slots:
                                                + missing.join(QStringLiteral(" | "))));
     }
 
+    void testUkTranslatorPluralHandling() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+
+        // Heatmap title in Ukrainian must properly decline "день / дні / днів"
+        const QString title31 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 31).arg(31);
+        const QString title32 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 32).arg(32);
+        const QString title28 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 28).arg(28);
+
+        QCOMPARE(title31, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 31 ДЕНЬ ──"));
+        QCOMPARE(title32, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 32 ДНІ ──"));
+        QCOMPARE(title28, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 28 ДНІВ ──"));
+
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
 
 
 
