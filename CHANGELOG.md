@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database: opening a database created by a newer version no longer modifies it (KB-135); replacing an existing backup file is atomic (KB-138).
 - Lists: if saving a list fails, its stored API token is left unchanged (KB-136).
 - Sync: a sync that failed part-way now says the list may be incomplete instead of reporting success (KB-137).
+- Desktop: unpinning the mini player right after it appears no longer gets undone by pending pin retries (KB-140).
 
 ---
 
