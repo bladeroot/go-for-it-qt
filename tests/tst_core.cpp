@@ -3045,8 +3045,13 @@ private slots:
             QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
             const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
             QVERIFY(!obj.isEmpty());
+            // Collect keys by iteration, as UkTranslator::loadTranslationsFromJson does: with Qt 6.12,
+            // QJsonObject::contains() misses existing keys near escaped ones (e.g. "Invalid number: \"%1\"…")
+            // depending on unrelated insertions elsewhere in the file.
+            QSet<QString> present;
+            for (auto it = obj.begin(); it != obj.end(); ++it) present.insert(it.key());
             for (const QString& k : keys) {
-                if (!obj.contains(k)) missing << lang + QStringLiteral(": ") + k;
+                if (!present.contains(k)) missing << lang + QStringLiteral(": ") + k;
             }
         }
         QVERIFY2(missing.isEmpty(), qPrintable(QString::number(missing.size()) + QStringLiteral(" missing")));
@@ -3385,8 +3390,13 @@ private slots:
             QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
             const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
             QVERIFY(!obj.isEmpty());
+            // Collect keys by iteration, as UkTranslator::loadTranslationsFromJson does: with Qt 6.12,
+            // QJsonObject::contains() misses existing keys near escaped ones (e.g. "Invalid number: \"%1\"…")
+            // depending on unrelated insertions elsewhere in the file.
+            QSet<QString> present;
+            for (auto it = obj.begin(); it != obj.end(); ++it) present.insert(it.key());
             for (const QString& k : keys) {
-                if (!obj.contains(k)) missing << lang + QStringLiteral(": ") + k;
+                if (!present.contains(k)) missing << lang + QStringLiteral(": ") + k;
             }
         }
         QVERIFY2(missing.isEmpty(), qPrintable(QString::number(missing.size()) + QStringLiteral(" missing: ")
