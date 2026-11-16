@@ -14,6 +14,9 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <sys/stat.h>
+#include <QDebug>
+#include <filesystem>
+#include <system_error>
 
 namespace gofi {
 
@@ -305,25 +308,16 @@ bool DatabaseBackup::exportDatabaseBackup(const QString& destinationFilePath) co
     }
     QFile::setPermissions(tempDest, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 
-    if (QFile::exists(cleanDest)) {
-        if (!QFile::rename(tempDest, cleanDest)) {
-            QFile::remove(cleanDest);
-            if (!QFile::rename(tempDest, cleanDest)) {
-                if (!QFile::copy(tempDest, cleanDest)) {
-                    QFile::remove(tempDest);
-                    return false;
-                }
-                QFile::remove(tempDest);
-            }
-        }
-    } else {
-        if (!QFile::rename(tempDest, cleanDest)) {
-            if (!QFile::copy(tempDest, cleanDest)) {
-                QFile::remove(tempDest);
-                return false;
-            }
-            QFile::remove(tempDest);
-        }
+    // rename(2) replaces an existing backup in one step: at every moment either the old or the new
+    // backup is in place. The temporary file is in the same directory, so this never crosses devices.
+    std::error_code ec;
+    std::filesystem::rename(std::filesystem::path(QFile::encodeName(tempDest).toStdString()),
+                            std::filesystem::path(QFile::encodeName(cleanDest).toStdString()), ec);
+    if (ec) {
+        qWarning() << "DatabaseBackup::exportDatabaseBackup: cannot replace" << cleanDest << ":"
+                   << QString::fromStdString(ec.message());
+        QFile::remove(tempDest);
+        return false;
     }
     QFile::setPermissions(cleanDest, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return QFile::exists(cleanDest);

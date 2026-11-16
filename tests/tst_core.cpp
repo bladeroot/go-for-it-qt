@@ -657,6 +657,53 @@ private slots:
         QFile::remove(markerFile);
     }
 
+    // exportDatabaseBackup replaced an existing backup by removing it and then renaming the temporary
+    // copy, so a crash or I/O error in between left no backup at all. It now uses one rename(2). The
+    // crash window itself cannot be hit deterministically here; this checks the replacement result
+    // and that a failed replacement keeps the old backup and leaves no temporary file behind.
+    void testBackupExportReplacesExistingBackup() {
+        const QString dir = m_testSandbox.filePath(QStringLiteral("backup_replace"));
+        QVERIFY(QDir().mkpath(dir));
+        const QString testDb = dir + QStringLiteral("/live.db");
+        const QString backup = dir + QStringLiteral("/backup.db");
+        QFile::remove(testDb);
+        QFile::remove(backup);
+
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("backup_list");
+        entry.name = QStringLiteral("Backup List");
+        QVERIFY(db.saveList(entry, 0));
+
+        {
+            QFile old(backup);
+            QVERIFY(old.open(QIODevice::WriteOnly));
+            old.write("OLD BACKUP");
+        }
+        QVERIFY(db.exportDatabaseBackup(backup));
+        {
+            QFile f(backup);
+            QVERIFY(f.open(QIODevice::ReadOnly));
+            QVERIFY(f.read(16).startsWith("SQLite format 3"));
+        }
+        const QFile::Permissions perms = QFile::permissions(backup);
+        QVERIFY(perms & QFile::ReadOwner);
+        QVERIFY(!(perms & QFile::ReadGroup));
+        QVERIFY(!(perms & QFile::ReadOther));
+
+        // The destination is a non-empty directory: the replacement fails and must not delete it.
+        const QString blocked = dir + QStringLiteral("/blocked.db");
+        QVERIFY(QDir().mkpath(blocked + QStringLiteral("/keep")));
+        QVERIFY(!db.exportDatabaseBackup(blocked));
+        QVERIFY(QFileInfo(blocked + QStringLiteral("/keep")).isDir());
+
+        const QStringList leftovers = QDir(dir).entryList(QStringList{QStringLiteral(".*.tmp.*")},
+                                                          QDir::Files | QDir::Hidden);
+        QVERIFY2(leftovers.isEmpty(), qPrintable(leftovers.join(QStringLiteral(", "))));
+        db.close();
+    }
+
     void testDatabaseBackupImportSafety() {
         const QString testDb = m_testSandbox.filePath(QStringLiteral("safety_test.db"));
         QFile::remove(testDb);
