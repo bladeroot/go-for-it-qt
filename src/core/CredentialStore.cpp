@@ -12,6 +12,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
@@ -254,6 +255,9 @@ void CredentialStore::unlockKeyringForCurrentDatabase() {
     if (!locked.isEmpty()) {
         unlockObjects(locked);
     }
+    if (!m_unlockPromptDismissed) {
+        processPendingDeletions();
+    }
 }
 
 bool CredentialStore::openSecretServiceSession(QString& sessionPath) const {
@@ -426,10 +430,13 @@ bool CredentialStore::deleteFromKeyring(const QString& listId) {
         return false;
     }
 
-    QList<QDBusObjectPath> itemsToDelete = parseObjectPathList(searchReply.arguments().at(0));
+    const QList<QDBusObjectPath> unlockedInitial = parseObjectPathList(searchReply.arguments().at(0));
+    QList<QDBusObjectPath> itemsToDelete = unlockedInitial;
+    int lockedCount = 0;
     if (searchReply.arguments().size() > 1) {
         const QList<QDBusObjectPath> locked = parseObjectPathList(searchReply.arguments().at(1));
         if (!locked.isEmpty()) {
+            lockedCount = locked.size();
             const QList<QDBusObjectPath> unlockedNow = unlockObjects(locked);
             itemsToDelete.append(unlockedNow);
         }
@@ -443,6 +450,10 @@ bool CredentialStore::deleteFromKeyring(const QString& listId) {
             QStringLiteral("Delete")
         );
         bus.call(delMsg, QDBus::BlockWithGui, 1000);
+    }
+
+    if (lockedCount > 0 && itemsToDelete.size() < (unlockedInitial.size() + lockedCount)) {
+        return false;
     }
     return true;
 }
@@ -544,10 +555,115 @@ bool CredentialStore::deleteFromFile(const QString& listId) {
     return storeInFile(listId, QString());
 }
 
+void CredentialStore::recordPendingDeletion(const QString& listId) {
+    if (listId.isEmpty() || m_inMemory) {
+        return;
+    }
+    const QString dbScope = currentDbScope();
+    const QString tokenKey = dbScope.isEmpty() ? listId : QStringLiteral("%1:%2").arg(dbScope, listId);
+    QJsonObject root = readFallbackJson();
+    root[QStringLiteral("version")] = 1;
+    QJsonArray pendingArr = root.value(QStringLiteral("pending_deletions")).toArray();
+    for (const QJsonValue& val : pendingArr) {
+        if (val.toString() == tokenKey) {
+            return;
+        }
+    }
+    pendingArr.append(tokenKey);
+    root[QStringLiteral("pending_deletions")] = pendingArr;
+    writeFallbackJson(root);
+}
+
+void CredentialStore::removePendingDeletion(const QString& listId) {
+    if (listId.isEmpty() || m_inMemory) {
+        return;
+    }
+    const QString dbScope = currentDbScope();
+    const QString tokenKey = dbScope.isEmpty() ? listId : QStringLiteral("%1:%2").arg(dbScope, listId);
+    QJsonObject root = readFallbackJson();
+    if (!root.contains(QStringLiteral("pending_deletions"))) {
+        return;
+    }
+    const QJsonArray pendingArr = root.value(QStringLiteral("pending_deletions")).toArray();
+    QJsonArray newArr;
+    bool found = false;
+    for (const QJsonValue& val : pendingArr) {
+        const QString str = val.toString();
+        if (str == tokenKey || (dbScope.isEmpty() && str == listId)) {
+            found = true;
+        } else {
+            newArr.append(val);
+        }
+    }
+    if (found) {
+        if (newArr.isEmpty()) {
+            root.remove(QStringLiteral("pending_deletions"));
+        } else {
+            root[QStringLiteral("pending_deletions")] = newArr;
+        }
+        writeFallbackJson(root);
+    }
+}
+
+void CredentialStore::processPendingDeletions() {
+    if (m_inMemory || !isKeyringAvailable() || m_unlockPromptDismissed) {
+        return;
+    }
+    const QString dbScope = currentDbScope();
+    const QString prefix = dbScope.isEmpty() ? QString() : dbScope + QStringLiteral(":");
+
+    QJsonObject root = readFallbackJson();
+    if (!root.contains(QStringLiteral("pending_deletions"))) {
+        return;
+    }
+    const QJsonArray pendingArr = root.value(QStringLiteral("pending_deletions")).toArray();
+    if (pendingArr.isEmpty()) {
+        return;
+    }
+
+    QJsonArray remainingArr;
+    bool modified = false;
+
+    for (const QJsonValue& val : pendingArr) {
+        const QString itemKey = val.toString();
+        QString listId;
+        bool matchesScope = false;
+        if (!prefix.isEmpty()) {
+            if (itemKey.startsWith(prefix)) {
+                matchesScope = true;
+                listId = itemKey.mid(prefix.length());
+            }
+        } else {
+            if (!itemKey.contains(QLatin1Char(':'))) {
+                matchesScope = true;
+                listId = itemKey;
+            }
+        }
+
+        if (matchesScope && !listId.isEmpty()) {
+            if (deleteFromKeyring(listId)) {
+                modified = true;
+                continue;
+            }
+        }
+        remainingArr.append(val);
+    }
+
+    if (modified) {
+        if (remainingArr.isEmpty()) {
+            root.remove(QStringLiteral("pending_deletions"));
+        } else {
+            root[QStringLiteral("pending_deletions")] = remainingArr;
+        }
+        writeFallbackJson(root);
+    }
+}
+
 bool CredentialStore::storeToken(const QString& listId, const QString& token) {
     if (listId.isEmpty()) {
         return false;
     }
+    removePendingDeletion(listId);
     if (m_inMemory) {
         if (token.isEmpty()) {
             m_inMemoryTokens.remove(listId);
@@ -602,6 +718,7 @@ bool CredentialStore::deleteToken(const QString& listId) {
     if (listId.isEmpty()) {
         return false;
     }
+    removePendingDeletion(listId);
     if (m_inMemory) {
         m_inMemoryTokens.remove(listId);
         return true;
@@ -612,6 +729,27 @@ bool CredentialStore::deleteToken(const QString& listId) {
     }
     ok = deleteFromFile(listId) && ok;
     return ok;
+}
+
+bool CredentialStore::removeListCredentials(const QString& listId) {
+    if (listId.isEmpty()) {
+        return false;
+    }
+    if (m_inMemory) {
+        m_inMemoryTokens.remove(listId);
+        return true;
+    }
+    deleteFromFile(listId);
+    bool deletedFromKeyring = false;
+    if (isKeyringAvailable()) {
+        deletedFromKeyring = deleteFromKeyring(listId);
+    }
+    if (!deletedFromKeyring) {
+        recordPendingDeletion(listId);
+    } else {
+        removePendingDeletion(listId);
+    }
+    return true;
 }
 
 int CredentialStore::migratePlaintextDatabaseTokens() {

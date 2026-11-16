@@ -679,6 +679,93 @@ private slots:
         QVERIFY(storedWhileLocked);
         QCOMPARE(afterUnlock, QStringLiteral("pat_new_current"));
     }
+
+    void testRemovingListWhileKeyringLockedPurgesOrphanAfterUnlock() {
+        // When a list is removed while the wallet/keyring is locked and the unlock prompt was dismissed,
+        // deleteFromKeyring cannot unlock/delete the item immediately. When the keyring is unlocked
+        // in a subsequent session or after unlock, the orphaned secret item must be cleanly purged.
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("cs_orphan_fake");
+        const QString clientName = QStringLiteral("cs_orphan_client");
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_orphan_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString dbPath = dir.filePath(QStringLiteral("orphan_test.db"));
+        const QString credsPath = dir.filePath(QStringLiteral("credentials.json"));
+        const QString listId = QStringLiteral("cs_orphan_list");
+        const QString service = QStringLiteral("org.freedesktop.secrets");
+
+        QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+        QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+        QVERIFY(fakeConn.isConnected());
+        QVERIFY(clientConn.isConnected());
+
+        FakeSecretService fakeSecrets;
+        QVERIFY(fakeConn.registerService(service));
+        QVERIFY(fakeConn.registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fakeSecrets, QDBusConnection::SubPath));
+
+        auto& store = gofi::CredentialStore::instance();
+        store.setInMemoryMode(false);
+        store.setFallbackFilePath(credsPath);
+        store.setDBusConnection(clientConn, service);
+
+        auto& db = DatabaseManager::instance();
+
+        // Step 1: Initialize DB and save list with token into Keyring
+        QVERIFY(db.initialize(dbPath));
+        gofi::TodoListEntry entry;
+        entry.id = listId;
+        entry.name = QStringLiteral("Orphan Test List");
+        entry.provider = QStringLiteral("GitHub");
+        entry.jiraUrl = QStringLiteral("https://example.invalid");
+        entry.apiToken = QStringLiteral("pat_orphan_secret");
+        QVERIFY(db.saveList(entry, 0));
+        db.close();
+
+        QCOMPARE(fakeSecrets.items.size(), 1);
+
+        // Step 2: Lock the keyring and simulate user dismissing the unlock prompt
+        fakeSecrets.lockedPaths.insert(fakeSecrets.items.firstKey());
+        fakeSecrets.unlockNeedsPrompt = true;
+        fakeSecrets.promptDismisses = true;
+
+        QVERIFY(db.initialize(dbPath));
+        const auto lists = db.loadLists();
+        QCOMPARE(lists.size(), 1);
+
+        // User removes the list while the keyring is locked
+        QVERIFY(db.removeList(listId));
+        QCOMPARE(db.loadLists().size(), 0);
+        db.close();
+
+        // The list is removed from SQLite, but since the keyring was locked and prompt dismissed,
+        // the item could not be removed from fakeSecrets.items yet.
+        QCOMPARE(fakeSecrets.items.size(), 1);
+
+        // Step 3: Unlock the keyring (in a new session or after prompt reset)
+        store.resetPromptState();
+        fakeSecrets.lockedPaths.clear();
+        fakeSecrets.unlockNeedsPrompt = false;
+        fakeSecrets.promptDismisses = false;
+
+        // Open database again and load lists (which unlocks keyring for the current database)
+        QVERIFY(db.initialize(dbPath));
+        const auto listsAfterUnlock = db.loadLists();
+        QCOMPARE(listsAfterUnlock.size(), 0);
+        db.close();
+
+        // The orphaned secret MUST have been purged from the keyring!
+        QCOMPARE(fakeSecrets.items.size(), 0);
+
+        store.resetDBusConnection();
+        store.setFallbackFilePath(QString());
+        fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+        fakeConn.unregisterService(service);
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+    }
 };
 
 QTEST_MAIN(TestCredentials)

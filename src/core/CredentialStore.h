@@ -70,6 +70,7 @@ public:
     [[nodiscard]] QString loadToken(const QString& listId);
     bool storeToken(const QString& listId, const QString& token);
     bool deleteToken(const QString& listId);
+    bool removeListCredentials(const QString& listId);
 
     // Migration of legacy plaintext tokens from SQLite database
     int migratePlaintextDatabaseTokens();
@@ -94,6 +95,10 @@ private:
     bool deleteFromFile(const QString& listId);
     QJsonObject readFallbackJson() const;
     bool writeFallbackJson(const QJsonObject& root);
+
+    void processPendingDeletions();
+    void recordPendingDeletion(const QString& listId);
+    void removePendingDeletion(const QString& listId);
 
     QString defaultFallbackFilePath() const;
     QString currentDbScope() const;

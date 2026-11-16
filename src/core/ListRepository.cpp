@@ -138,7 +138,7 @@ bool ListRepository::removeList(const QString& listId, bool* notFound) {
         }
         return false;
     }
-    CredentialStore::instance().deleteToken(listId);
+    CredentialStore::instance().removeListCredentials(listId);
     QSqlQuery q(db());
     q.prepare(QStringLiteral("DELETE FROM lists WHERE id = :id"));
     q.bindValue(QStringLiteral(":id"), listId);
