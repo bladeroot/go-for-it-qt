@@ -503,7 +503,6 @@ void IssueTrackerService::updateNextcloudStatusRemote(const TodoListEntry& listE
             failWithError(statusCode, tr("Invalid CalDAV VTODO response"));
             return;
         }
-        const int vtodoStart = vtodoStartMatch.capturedStart(1);
         const int vtodoPropsStart = vtodoStartMatch.capturedEnd(1);
 
         static const QRegularExpression vtodoEndRe(QStringLiteral("\r?\n(END:VTODO)(?:\r?\n|$)"));
