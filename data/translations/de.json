@@ -513,6 +513,7 @@
   "Sync task completion back to tracker": "Aufgabenabschluss mit Tracker synchronisieren",
   "Sync with ": "Synchronisieren mit ",
   "Synced %1 issues from %2 (maximum page limit reached; older items omitted).": "%1 Aufgaben aus %2 synchronisiert (Seitenlimit erreicht; ältere Einträge ausgelassen).",
+  "Synced %1 issues from %2, but the server reported an error: the list may be incomplete.": "%1 Aufgaben aus %2 synchronisiert, aber der Server meldete einen Fehler: Die Liste ist möglicherweise unvollständig.",
   "Synced %1 issues from %2.": "%1 Aufgaben aus %2 synchronisiert.",
   "Synced %1 issues from Jira.": "%1 Aufgaben aus Jira synchronisiert.",
   "Synced %1 issues from YouTrack.": "%1 Aufgaben aus YouTrack synchronisiert.",

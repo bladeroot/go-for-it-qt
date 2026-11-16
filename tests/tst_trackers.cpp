@@ -1317,6 +1317,68 @@ private slots:
 
     // KB-13: offset pagination skips an item when an earlier item leaves the result set
     // between page requests; reconciliation must not close the skipped, still-open issue.
+    // A failed later page (or GitLab stream) only blocked reconciliation: processSyncedItems still set
+    // "Synced N issues from …" and emitted only listIssuesSynced, so the user was not told that the
+    // list is incomplete and syncFailed never fired.
+    void testPartialSyncIsReportedAsFailure() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        serveHttp(server, [](const QByteArray&, const QByteArray& target, const QByteArray&) {
+            if (!target.startsWith("/issues.json")) {
+                return httpResponse("404 Not Found", "application/json", "{}");
+            }
+            if (target.contains("offset=")) {
+                return httpResponse("500 Internal Server Error", "application/json", "{}");
+            }
+            QJsonArray issues;
+            for (int id = 1; id <= 100; ++id) {
+                issues.append(QJsonObject{
+                    {QStringLiteral("id"), id},
+                    {QStringLiteral("subject"), QStringLiteral("Issue %1").arg(id)},
+                    {QStringLiteral("status"), QJsonObject{{QStringLiteral("id"), 1}, {QStringLiteral("name"), QStringLiteral("New")}}},
+                    {QStringLiteral("project"), QJsonObject{{QStringLiteral("name"), QStringLiteral("Proj")}, {QStringLiteral("identifier"), QStringLiteral("proj")}}}
+                });
+            }
+            const QJsonObject root{{QStringLiteral("issues"), issues}, {QStringLiteral("total_count"), 150},
+                                   {QStringLiteral("offset"), 0}, {QStringLiteral("limit"), 100}};
+            return httpResponse("200 OK", "application/json", QJsonDocument(root).toJson(QJsonDocument::Compact));
+        });
+
+        DatabaseManager& db = DatabaseManager::instance();
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("partial_sync.db"));
+        QFile::remove(dbPath);
+        QVERIFY(db.initialize(dbPath));
+        TodoListEntry entry;
+        entry.id = QStringLiteral("partial_rm");
+        entry.name = QStringLiteral("Partial Redmine");
+        entry.provider = QStringLiteral("Redmine");
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.apiToken = QStringLiteral("token");
+        entry.statusMapping[QStringLiteral("_statuses_fetched")] = 1;
+        entry.statusMapping[QStringLiteral("_id_New")] = 1;
+        QVERIFY(db.saveList(entry, 0));
+
+        IssueTrackerService svc;
+        QSignalSpy synced(&svc, &IssueTrackerService::listIssuesSynced);
+        QSignalSpy failed(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 5000);
+
+        // The 100 issues that did arrive are kept and the view refreshes...
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 100);
+        QCOMPARE(synced.count(), 1);
+        // ...but the sync is reported as incomplete.
+        const QString expected = QCoreApplication::translate("gofi::IssueTrackerService",
+            "Synced %1 issues from %2, but the server reported an error: the list may be incomplete.")
+            .arg(100).arg(QStringLiteral("Redmine"));
+        QCOMPARE(failed.count(), 1);
+        QCOMPARE(failed.at(0).at(1).toString(), expected);
+        QCOMPARE(svc.lastStatusMessage(), expected);
+        server.close();
+    }
+
     void testRedminePaginationShiftDoesNotCloseSkippedIssue() {
         QTcpServer server;
         if (!server.listen(QHostAddress::LocalHost, 0)) {

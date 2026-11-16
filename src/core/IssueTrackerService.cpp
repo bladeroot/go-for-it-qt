@@ -340,7 +340,10 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
                                 !entry.apiToken.trimmed().isEmpty();
 
     QString statusText;
-    if (limitReached) {
+    if (hasError) {
+        statusText = tr("Synced %1 issues from %2, but the server reported an error: the list may be incomplete.")
+                         .arg(items.size()).arg(providerName);
+    } else if (limitReached) {
         statusText = tr("Synced %1 issues from %2 (maximum page limit reached; older items omitted).").arg(items.size()).arg(providerName);
     } else {
         statusText = tr("Synced %1 issues from %2.").arg(items.size()).arg(providerName);
@@ -352,6 +355,10 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
     emit listIssuesSynced(entry.id, static_cast<int>(items.size()));
     if (!newIssues.isEmpty() || !statusChanges.isEmpty()) {
         emit trackerChangesDetected(entry.name, newIssues, statusChanges);
+    }
+    if (hasError) {
+        // The items that arrived are saved, but the sync itself did not complete.
+        emit syncFailed(entry.id, statusText);
     }
 }
 

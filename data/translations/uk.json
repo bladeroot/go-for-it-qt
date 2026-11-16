@@ -513,6 +513,7 @@
   "Sync task completion back to tracker": "Синхронізувати завершення задач із трекером",
   "Sync with ": "Синхронізувати з ",
   "Synced %1 issues from %2 (maximum page limit reached; older items omitted).": "Синхронізовано задач із %2: %1 (досягнуто ліміту сторінки; старіші елементи пропущено).",
+  "Synced %1 issues from %2, but the server reported an error: the list may be incomplete.": "Синхронізовано %1 задач з %2, але сервер повідомив про помилку: список може бути неповним.",
   "Synced %1 issues from %2.": "Синхронізовано задач із %2: %1.",
   "Synced %1 issues from Jira.": "Синхронізовано задач із Jira: %1.",
   "Synced %1 issues from YouTrack.": "Синхронізовано задач із YouTrack: %1.",

@@ -513,6 +513,7 @@
   "Sync task completion back to tracker": "Sincronizza il completamento delle attività con il tracker",
   "Sync with ": "Sincronizza con ",
   "Synced %1 issues from %2 (maximum page limit reached; older items omitted).": "%1 ticket sincronizzati da %2 (limite pagina raggiunto; elementi meno recenti omessi).",
+  "Synced %1 issues from %2, but the server reported an error: the list may be incomplete.": "Sincronizzate %1 attività da %2, ma il server ha segnalato un errore: l'elenco potrebbe essere incompleto.",
   "Synced %1 issues from %2.": "%1 ticket sincronizzati da %2.",
   "Synced %1 issues from Jira.": "%1 ticket sincronizzati da Jira.",
   "Synced %1 issues from YouTrack.": "%1 ticket sincronizzati da YouTrack.",
