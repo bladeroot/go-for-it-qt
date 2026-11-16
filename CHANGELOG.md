@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sync: Jira, GitLab and YouTrack lists again mark issues done locally when they are closed on the tracker; GitLab results without a total count are no longer trusted across pages (KB-128..130).
 - Database: schema upgrades now run step by step from whatever version a database is at (KB-132).
 - Lists: if removing a list fails, its API token is kept (KB-133).
+- Database: opening a database created by a newer version no longer modifies it (KB-135); replacing an existing backup file is atomic (KB-138).
+- Lists: if saving a list fails, its stored API token is left unchanged (KB-136).
+- Sync: a sync that failed part-way now says the list may be incomplete instead of reporting success (KB-137).
 
 ---
 
