@@ -323,9 +323,9 @@ QString DesktopIntegration::kwinPinScript(const QString& windowTitle, bool alway
     // Target strictly this process's own mini player window:
     // 1. Process identity: match our PID if present; for native Wayland clients where KWin
     //    reports pid=0/undefined, fall back to matching resourceClass/desktopFileName "go-for-it-qt".
-    // 2. Caption identity: match exact window title, normalCaption (without KWin suffixes),
-    //    or title prefix/substring, plus localized mini player keywords, while guarding against
-    //    foreign apps (VLC, Spotify, browser tabs) and our own main window / task list views.
+    // 2. Caption identity: the caption or normalCaption equals the (already translated) mini player
+    //    title or starts with it (KWin may append suffixes). Keyword matching such as "Mini" is not
+    //    used: our main window and task dialogs carry user-chosen list/task names (KB-131).
     const QString script = QStringLiteral(
         "function applyTo(w) {\n"
         "    if (!w) return;\n"
@@ -333,13 +333,7 @@ QString DesktopIntegration::kwinPinScript(const QString& windowTitle, bool alway
         "    if (!isOwn) return;\n"
         "    var c = w.caption || \"\";\n"
         "    var nc = (typeof w.normalCaption !== \"undefined\" && w.normalCaption) ? w.normalCaption : \"\";\n"
-        "    var match = (c === \"%2\" || nc === \"%2\" || c.indexOf(\"%2\") !== -1 || nc.indexOf(\"%2\") !== -1);\n"
-        "    if (!match) {\n"
-        "        var isMini = (c.indexOf(\"Mini\") !== -1 || c.indexOf(\"Міні\") !== -1 || nc.indexOf(\"Mini\") !== -1 || nc.indexOf(\"Міні\") !== -1);\n"
-        "        if (isMini && (w.height <= 150 || (c.indexOf(\"Inbox\") === -1 && c.indexOf(\"Today\") === -1))) {\n"
-        "            match = true;\n"
-        "        }\n"
-        "    }\n"
+        "    var match = (c === \"%2\" || nc === \"%2\" || c.indexOf(\"%2\") === 0 || nc.indexOf(\"%2\") === 0);\n"
         "    if (match) {\n"
         "        w.keepAbove = %3;\n"
         "        w.onAllDesktops = %3;\n"

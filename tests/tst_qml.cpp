@@ -996,6 +996,9 @@ private slots:
     // KB-97: the KWin pin script runs over every window of the KDE session. It must change only the
     // mini player window of this process, never other applications' windows (substring captions such
     // as "VLC Mini-Player") or this app's own main window when it is resized below 150 px.
+    // KB-131: the KB-124 caption heuristic (any own window whose caption contains "Mini"/"Міні" and
+    // not "Inbox"/"Today") also pinned the main window of a list named e.g. "Mini sprint" and task
+    // details dialogs titled after such a task, and the unpin pass cleared a pin the user set on them.
     void testKWinPinScriptTouchesOnlyOwnMiniPlayerWindow() {
         const QString miniTitle = QStringLiteral("Go for It — Mini Player");
         const qint64 ownPid = QCoreApplication::applicationPid();
@@ -1021,6 +1024,12 @@ private slots:
             {QStringLiteral("Mini Player review — Mozilla Firefox"), QStringLiteral("firefox"), foreignPid, 900, false, false, false, false},
             {QStringLiteral("Міні-плеєр — Chromium"), QStringLiteral("chromium"), foreignPid, 900, false, false, false, false},
             {QStringLiteral("Inbox — Go for It Qt"), QStringLiteral("go-for-it-qt"), ownPid, 120, false, false, false, false},
+            // KB-131: own main window showing a list whose name contains "Mini", and an own task
+            // details dialog titled after a task: neither is the mini player.
+            {QStringLiteral("Mini sprint — Go for It Qt"), QStringLiteral("go-for-it-qt"), ownPid, 700, false, false, false, false},
+            {QStringLiteral("Minimize memory usage"), QStringLiteral("go-for-it-qt"), ownPid, 500, false, false, false, false},
+            {QStringLiteral("Міні-проєкт — Go for It Qt"), QStringLiteral("go-for-it-qt"), 0, 700, false, false, false, false},
+            {QStringLiteral("Fix Go for It — Mini Player focus"), QStringLiteral("go-for-it-qt"), ownPid, 500, false, false, false, false},
         };
 
         QJSEngine engine;
