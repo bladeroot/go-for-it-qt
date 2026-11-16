@@ -26,6 +26,7 @@
 #include <QProcess>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QScopeGuard>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QDesktopServices>
@@ -3359,20 +3360,31 @@ private slots:
         const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
         QFile::remove(dbPath);
         AppController ctrl(QString(), dbPath);
+        // Restore the language even when a QCOMPARE below returns early, so later slots keep English.
+        const QString previousLanguage = ctrl.settings()->language();
+        const auto restoreLanguage = qScopeGuard([&ctrl, &previousLanguage, &dbPath] {
+            ctrl.settings()->setLanguage(previousLanguage);
+            DatabaseManager::instance().close();
+            QFile::remove(dbPath);
+        });
         ctrl.settings()->setLanguage(QStringLiteral("uk"));
 
         // Heatmap title in Ukrainian must properly decline "день / дні / днів"
-        const QString title31 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 31).arg(31);
-        const QString title32 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 32).arg(32);
-        const QString title28 = QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, 28).arg(28);
-
-        QCOMPARE(title31, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 31 ДЕНЬ ──"));
-        QCOMPARE(title32, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 32 ДНІ ──"));
-        QCOMPARE(title28, QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА 28 ДНІВ ──"));
-
-        ctrl.settings()->setLanguage(QStringLiteral("system"));
-        DatabaseManager::instance().close();
-        QFile::remove(dbPath);
+        auto title = [](int n) {
+            return QCoreApplication::translate("TuiApp", "  ── %1-DAY ACTIVITY HEATMAP ──", nullptr, n).arg(n);
+        };
+        auto expected = [](int n, const char* word) {
+            return QStringLiteral("  ── ТЕПЛОВА КАРТА АКТИВНОСТІ ЗА %1 %2 ──").arg(n).arg(QString::fromUtf8(word));
+        };
+        QCOMPARE(title(31), expected(31, "ДЕНЬ"));
+        QCOMPARE(title(32), expected(32, "ДНІ"));
+        QCOMPARE(title(28), expected(28, "ДНІВ"));
+        // Slavic rules beyond the heatmap range: 11..14 take the "many" form, 21/22 do not.
+        QCOMPARE(title(11), expected(11, "ДНІВ"));
+        QCOMPARE(title(12), expected(12, "ДНІВ"));
+        QCOMPARE(title(21), expected(21, "ДЕНЬ"));
+        QCOMPARE(title(22), expected(22, "ДНІ"));
+        QCOMPARE(title(25), expected(25, "ДНІВ"));
     }
 
 
