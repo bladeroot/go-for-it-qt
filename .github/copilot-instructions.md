@@ -26,8 +26,10 @@ directory when finished. There is no configured linter or formatter.
   `TuiApp`.
 - Persistence is SQLite through the process-wide `DatabaseManager` singleton.
   `TxtTask` handles Todo.txt line parsing/serialization; it is not the storage
-  layer. When changing the schema, update both the table definition and its
-  matching `ALTER TABLE` in `DatabaseManager::createSchema()`.
+  layer. Schema versions use `PRAGMA user_version`: when changing the schema,
+  update `DatabaseSchema::initializeFreshDatabase()`, append an idempotent
+  `MigrationStep` in `DatabaseSchema::createSchema()` and raise
+  `CurrentSchemaVersion`.
 - `TaskManager` owns todo and done source models; `AppController` exposes proxy
   models to QML. Controller invokables that take a row receive a **proxy row**,
   so map it to the source model before operating on a task.

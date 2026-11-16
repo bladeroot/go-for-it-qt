@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop: ensure mini player stays on top on KDE Plasma (Wayland) by matching window identity via fallback resource class when process PID is zero, matching window title without compositor suffixes, and ensuring script file is flushed before KWin execution (KB-124).
 - Desktop: the mini player "Always on Top" no longer pins the main window or task dialogs whose title contains "Mini" (KB-131).
 - Sync: Jira, GitLab and YouTrack lists again mark issues done locally when they are closed on the tracker; GitLab results without a total count are no longer trusted across pages (KB-128..130).
+- Database: schema upgrades now run step by step from whatever version a database is at (KB-132).
+- Lists: if removing a list fails, its API token is kept (KB-133).
 
 ---
 
