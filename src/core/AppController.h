@@ -132,6 +132,11 @@ public:
     Q_INVOKABLE void openUrlExternally(const QUrl& url);
     Q_INVOKABLE void setMiniPlayerVisible(bool visible);
     Q_INVOKABLE void configureMiniPlayerWindow(QObject* windowObject, bool alwaysOnTop);
+    // Mini player position: restored on show and saved after moves. On Wayland a client can neither
+    // read nor set its global position, so there it goes through a KWin script (when KWin runs).
+    Q_INVOKABLE void miniPlayerShown(QObject* windowObject);
+    Q_INVOKABLE void miniPlayerHidden();
+    Q_INVOKABLE void miniPlayerMoved(QObject* windowObject);
     Q_INVOKABLE void checkDueReminders();
     Q_INVOKABLE void reloadTranslations();
     [[nodiscard]] QVariantList availableLanguages() const;

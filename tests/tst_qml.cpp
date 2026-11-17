@@ -29,6 +29,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeySequence>
+#include <QScreen>
+#include <QGuiApplication>
 #include <QObject>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -1092,6 +1094,200 @@ private slots:
         }
     }
 
+
+    // KB-142: the mini player position was never saved, so it reopened wherever the window system
+    // put it. On Wayland a client cannot read or set its global position, so a KWin script places the
+    // window and reports finished moves back over D-Bus.
+    void testMiniPlayerTrackerScriptPlacesAndReportsOnlyOwnWindow() {
+        const QString miniTitle = QStringLiteral("Go for It — Mini Player");
+        const qint64 ownPid = QCoreApplication::applicationPid();
+        QJSEngine engine;
+        QJSValue setup = engine.evaluate(QStringLiteral(
+            "var __calls = [];\n"
+            "var __added = [];\n"
+            "function callDBus() { __calls.push(Array.prototype.slice.call(arguments)); }\n"
+            // Like KWin 6: reading frameGeometry yields a read-only copy, only assignment moves.
+            "function makeWindow(caption, pid, resourceClass, x, y) {\n"
+            "    var rect = { x: x, y: y, width: 440, height: 58 };\n"
+            "    var w = { caption: caption, pid: pid, resourceClass: resourceClass, __finished: [] };\n"
+            "    Object.defineProperty(w, \"frameGeometry\", {\n"
+            "        get: function() { return Object.freeze({ x: rect.x, y: rect.y, width: rect.width, height: rect.height }); },\n"
+            "        set: function(r) { rect = { x: r.x, y: r.y, width: r.width, height: r.height }; } });\n"
+            "    w.interactiveMoveResizeFinished = { connect: function(f) { w.__finished.push(f); } };\n"
+            "    return w;\n"
+            "}\n"
+            "var __windows = [\n"
+            "    makeWindow(\"Go for It — Mini Player\", %1, \"go-for-it-qt\", 580, 421),\n"
+            "    makeWindow(\"VLC Mini Player\", %2, \"vlc\", 10, 10),\n"
+            "    makeWindow(\"Inbox — Go for It Qt\", %1, \"go-for-it-qt\", 30, 30)\n"
+            "];\n"
+            "var workspace = { windowList: function() { return __windows; },\n"
+            "                  windowAdded: { connect: function(f) { __added.push(f); } } };\n")
+            .arg(ownPid).arg(ownPid + 1));
+        QVERIFY2(!setup.isError(), qPrintable(setup.toString()));
+
+        const QString service = QStringLiteral(":1.42");
+        QJSValue result = engine.evaluate(DesktopIntegration::kwinMiniPlayerTrackerScript(miniTitle, QPoint(700, 500), service));
+        QVERIFY2(!result.isError(), qPrintable(result.toString()));
+        auto geo = [&](const QString& expr) { return engine.evaluate(expr).toString(); };
+        QCOMPARE(geo(QStringLiteral("JSON.stringify(__windows[0].frameGeometry)")),
+                 QStringLiteral("{\"x\":700,\"y\":500,\"width\":440,\"height\":58}"));
+        QCOMPARE(geo(QStringLiteral("JSON.stringify(__windows[1].frameGeometry)")),
+                 QStringLiteral("{\"x\":10,\"y\":10,\"width\":440,\"height\":58}"));
+        QCOMPARE(geo(QStringLiteral("JSON.stringify(__windows[2].frameGeometry)")),
+                 QStringLiteral("{\"x\":30,\"y\":30,\"width\":440,\"height\":58}"));
+        QCOMPARE(engine.evaluate(QStringLiteral("__windows[1].__finished.length + __windows[2].__finished.length")).toInt(), 0);
+
+        // The user drags the mini player: the finished move is reported with whole coordinates.
+        QJSValue moved = engine.evaluate(QStringLiteral(
+            "__windows[0].frameGeometry = { x: 120.4, y: 80.6, width: 440, height: 58 };\n"
+            "__windows[0].__finished.forEach(function(f) { f(); });\n"
+            "JSON.stringify(__calls)"));
+        QCOMPARE(moved.toString(),
+                 QStringLiteral("[[\":1.42\",\"%1\",\"io.github.bladeroot.GoForItQt.MiniPlayer\",\"reportPosition\",120,81]]")
+                     .arg(QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath)));
+
+        // A mini player mapped after the script started is placed too; a foreign one is not.
+        QJSValue added = engine.evaluate(QStringLiteral(
+            "var late = makeWindow(\"Go for It — Mini Player\", %1, \"go-for-it-qt\", 1, 2);\n"
+            "var foreign = makeWindow(\"Go for It — Mini Player\", %2, \"other\", 3, 4);\n"
+            "__added.forEach(function(f) { f(late); f(foreign); });\n"
+            "JSON.stringify([late.frameGeometry.x, late.frameGeometry.y, foreign.frameGeometry.x, foreign.frameGeometry.y])")
+            .arg(ownPid).arg(ownPid + 1));
+        QCOMPARE(added.toString(), QStringLiteral("[700,500,3,4]"));
+
+        // Without a saved position the window stays where KWin placed it, but moves are still reported.
+        QJSEngine fresh;
+        QJSValue setup2 = fresh.evaluate(QStringLiteral(
+            "var __calls = [];\n"
+            "function callDBus() { __calls.push(Array.prototype.slice.call(arguments)); }\n"
+            "var w = { caption: \"Go for It — Mini Player\", pid: %1, __finished: [],\n"
+            "          frameGeometry: { x: 580, y: 421, width: 440, height: 58 } };\n"
+            "w.interactiveMoveResizeFinished = { connect: function(f) { w.__finished.push(f); } };\n"
+            "var workspace = { windowList: function() { return [w]; }, windowAdded: { connect: function() {} } };\n").arg(ownPid));
+        QVERIFY2(!setup2.isError(), qPrintable(setup2.toString()));
+        QVERIFY(!fresh.evaluate(DesktopIntegration::kwinMiniPlayerTrackerScript(miniTitle, std::nullopt, service)).isError());
+        QCOMPARE(fresh.evaluate(QStringLiteral("w.frameGeometry.x + \",\" + w.frameGeometry.y")).toString(), QStringLiteral("580,421"));
+        QCOMPARE(fresh.evaluate(QStringLiteral("w.__finished.length")).toInt(), 1);
+    }
+
+    // KB-142 on platforms where Qt knows window positions (X11; here offscreen): Main.qml's mini
+    // player reopens where it was and saves where the user moves it.
+    void testMiniPlayerWindowRestoresAndSavesItsPosition() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb142_qml.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QRect area = QGuiApplication::primaryScreen()->availableGeometry();
+        const QPoint saved = area.topLeft() + QPoint(50, 60);
+        controller.settings()->setMiniPlayerPosition(saved);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb142_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QWindow* mini = qobject_cast<QWindow*>(root->findChild<QObject*>(QStringLiteral("miniPlayerWindow")));
+        QVERIFY(mini);
+
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "toggleMiniPlayer"));
+        QVERIFY(mini->isVisible());
+        QTRY_COMPARE(mini->position(), saved);
+
+        const QPoint moved = area.topLeft() + QPoint(120, 90);
+        mini->setPosition(moved);
+        QTRY_COMPARE(controller.settings()->miniPlayerPosition(), std::optional<QPoint>(moved));
+
+        // Hidden and shown again (as the tray toggle does): it comes back at the moved position.
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "toggleMiniPlayer"));
+        QVERIFY(!mini->isVisible());
+        mini->setPosition(area.topLeft());
+        QCOMPARE(controller.settings()->miniPlayerPosition(), std::optional<QPoint>(moved));
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "toggleMiniPlayer"));
+        QTRY_COMPARE(mini->position(), moved);
+    }
+
+    void testRestorableMiniPlayerPositionNeedsAVisibleScreen() {
+        const QSize size(440, 58);
+        const QList<QRect> screens = {QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)};
+        QCOMPARE(DesktopIntegration::restorableMiniPlayerPosition(std::nullopt, size, screens), std::nullopt);
+        QCOMPARE(DesktopIntegration::restorableMiniPlayerPosition(QPoint(700, 500), size, screens), QPoint(700, 500));
+        QCOMPARE(DesktopIntegration::restorableMiniPlayerPosition(QPoint(3000, 1200), size, screens), QPoint(3000, 1200));
+        // Saved on a monitor that is gone now: let the window system place it.
+        QCOMPARE(DesktopIntegration::restorableMiniPlayerPosition(QPoint(5000, 200), size, screens), std::nullopt);
+        QCOMPARE(DesktopIntegration::restorableMiniPlayerPosition(QPoint(-2000, 100), size, screens), std::nullopt);
+        // Mostly off the screen edge (centre outside): not restored either.
+        QCOMPARE(DesktopIntegration::restorableMiniPlayerPosition(QPoint(1700, 1060), size, {QRect(0, 0, 1920, 1080)}), std::nullopt);
+    }
+
+    void testMiniPlayerPositionReportOverDBusIsSaved() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString appName = QStringLiteral("kb142_app");
+        const QString kwinName = QStringLiteral("kb142_kwin");
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb142_report.db"));
+        QFile::remove(dbPath);
+        {
+            AppController controller(QString(), dbPath);
+            QDBusConnection appConn = QDBusConnection::connectToBus(bus.address, appName);
+            QDBusConnection kwinConn = QDBusConnection::connectToBus(bus.address, kwinName);
+            QVERIFY(appConn.isConnected());
+            QVERIFY(kwinConn.isConnected());
+            MiniPlayerPositionReceiver receiver;
+            QObject::connect(&receiver, &MiniPlayerPositionReceiver::positionReported,
+                             controller.desktopIntegration(), &DesktopIntegration::miniPlayerPositionReported);
+            QVERIFY(appConn.registerObject(QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath), &receiver,
+                                           QDBusConnection::ExportScriptableSlots));
+
+            // What KWin's callDBus sends: two integers to the app's unique bus name.
+            QDBusMessage call = QDBusMessage::createMethodCall(appConn.baseService(),
+                QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath),
+                QStringLiteral("io.github.bladeroot.GoForItQt.MiniPlayer"), QStringLiteral("reportPosition"));
+            call << 1234 << 56;
+            const QDBusMessage reply = kwinConn.call(call, QDBus::BlockWithGui, 3000);
+            QVERIFY2(reply.type() == QDBusMessage::ReplyMessage, qPrintable(reply.errorMessage()));
+            QCOMPARE(controller.settings()->miniPlayerPosition(), std::optional<QPoint>(QPoint(1234, 56)));
+            appConn.unregisterObject(QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath));
+        }
+        QDBusConnection::disconnectFromBus(appName);
+        QDBusConnection::disconnectFromBus(kwinName);
+    }
+
+    void testKWinTrackerScriptStaysLoadedUntilUnloaded() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("kb142_fake_kwin");
+        const QString clientName = QStringLiteral("kb142_client");
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.kde.KWin");
+            FakeKWinScripting kwin(fakeConn);
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerObject(QStringLiteral("/Scripting"), &kwin, QDBusConnection::ExportScriptableSlots));
+
+            const QString script = DesktopIntegration::kwinMiniPlayerTrackerScript(
+                QStringLiteral("Go for It — Mini Player"), QPoint(10, 20), clientConn.baseService());
+            DesktopIntegration::startKWinScript(script, clientConn, service, QStringLiteral("gofi_miniplayer_test"));
+            QTRY_COMPARE_WITH_TIMEOUT(kwin.executed, QStringList{script}, 3000);
+            QTest::qWait(200);
+            QCOMPARE(kwin.unloads, 0);
+            QCOMPARE(kwin.unreadable, 0);
+
+            DesktopIntegration::unloadKWinScript(clientConn, service, QStringLiteral("gofi_miniplayer_test"));
+            QTRY_COMPARE_WITH_TIMEOUT(kwin.unloads, 1, 3000);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+    }
 
     // KB-140: every configureMiniPlayerWindow call scheduled KWin pin retries (80..1000 ms) with the
     // state captured at call time and nothing cancelled them. Unpinning shortly after the mini player

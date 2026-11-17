@@ -7,6 +7,7 @@
 #include <QDBusPendingCall>
 #include <QDBusPendingCallWatcher>
 #include <QDBusReply>
+#include <QDebug>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontMetrics>
@@ -18,6 +19,7 @@
 #include <QTemporaryFile>
 #include <QTimer>
 #include <QWindow>
+#include <atomic>
 #include <memory>
 
 namespace gofi {
@@ -49,10 +51,25 @@ DesktopIntegration::DesktopIntegration(AppController* controller,
         connect(m_timer, &TaskTimer::runningChanged, this, &DesktopIntegration::updateLauncherBadge);
     }
 
+    connect(&m_positionReceiver, &MiniPlayerPositionReceiver::positionReported,
+            this, &DesktopIntegration::miniPlayerPositionReported);
+
     updatePluginStates();
 }
 
 DesktopIntegration::~DesktopIntegration() {
+    if (!m_trackerPluginName.isEmpty()) {
+        // Blocking: an asynchronous call may never leave the process while it shuts down.
+        QDBusMessage unloadMsg = QDBusMessage::createMethodCall(
+            QStringLiteral("org.kde.KWin"), QStringLiteral("/Scripting"),
+            QStringLiteral("org.kde.kwin.Scripting"), QStringLiteral("unloadScript"));
+        unloadMsg << m_trackerPluginName;
+        QDBusConnection::sessionBus().call(unloadMsg, QDBus::Block, 500);
+        m_trackerPluginName.clear();
+    }
+    if (m_positionReceiverRegistered) {
+        QDBusConnection::sessionBus().unregisterObject(QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath));
+    }
     delete m_trayMenu;
     m_trayMenu = nullptr;
 }
@@ -317,41 +334,101 @@ bool DesktopIntegration::kwinIntegrationAvailable() const {
     return iface && iface->isServiceRegistered(QStringLiteral("org.kde.KWin"));
 }
 
-QString DesktopIntegration::kwinPinScript(const QString& windowTitle, bool alwaysOnTop) {
-    QString winTitle = windowTitle;
-    winTitle.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+// JS escaping for a string placed inside double quotes in a KWin script.
+static QString kwinJsString(QString value) {
+    value.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    value.replace(QLatin1Char('\n'), QStringLiteral("\\n")).replace(QLatin1Char('\r'), QStringLiteral("\\r"));
+    return value;
+}
 
-    // Target strictly this process's own mini player window:
-    // 1. Process identity: match our PID if present; for native Wayland clients where KWin
-    //    reports pid=0/undefined, fall back to matching resourceClass/desktopFileName "go-for-it-qt".
-    // 2. Caption identity: the caption or normalCaption equals the (already translated) mini player
-    //    title or starts with it (KWin may append suffixes). Keyword matching such as "Mini" is not
-    //    used: our main window and task dialogs carry user-chosen list/task names (KB-131).
-    const QString script = QStringLiteral(
-        "function applyTo(w) {\n"
-        "    if (!w) return;\n"
+// `isGofiMiniPlayer(w)`: true only for this process's own mini player window.
+// 1. Process identity: match our PID if present; for native Wayland clients where KWin
+//    reports pid=0/undefined, fall back to matching resourceClass/desktopFileName "go-for-it-qt".
+// 2. Caption identity: the caption or normalCaption equals the (already translated) mini player
+//    title or starts with it (KWin may append suffixes). Keyword matching such as "Mini" is not
+//    used: our main window and task dialogs carry user-chosen list/task names (KB-131).
+static QString kwinMiniPlayerMatcher(const QString& windowTitle) {
+    return QStringLiteral(
+        "function isGofiMiniPlayer(w) {\n"
+        "    if (!w) return false;\n"
         "    var isOwn = (w.pid && w.pid === %1) || (!w.pid && (w.resourceClass === \"go-for-it-qt\" || (w.desktopFileName && w.desktopFileName.indexOf(\"go-for-it\") !== -1)));\n"
-        "    if (!isOwn) return;\n"
+        "    if (!isOwn) return false;\n"
         "    var c = w.caption || \"\";\n"
         "    var nc = (typeof w.normalCaption !== \"undefined\" && w.normalCaption) ? w.normalCaption : \"\";\n"
-        "    var match = (c === \"%2\" || nc === \"%2\" || c.indexOf(\"%2\") === 0 || nc.indexOf(\"%2\") === 0);\n"
-        "    if (match) {\n"
-        "        w.keepAbove = %3;\n"
-        "        w.onAllDesktops = %3;\n"
+        "    return (c === \"%2\" || nc === \"%2\" || c.indexOf(\"%2\") === 0 || nc.indexOf(\"%2\") === 0);\n"
+        "}\n"
+    ).arg(QString::number(QCoreApplication::applicationPid()), kwinJsString(windowTitle));
+}
+
+QString DesktopIntegration::kwinPinScript(const QString& windowTitle, bool alwaysOnTop) {
+    return kwinMiniPlayerMatcher(windowTitle) + QStringLiteral(
+        "function applyTo(w) {\n"
+        "    if (isGofiMiniPlayer(w)) {\n"
+        "        w.keepAbove = %1;\n"
+        "        w.onAllDesktops = %1;\n"
         "    }\n"
         "}\n"
         "for (var i = 0; i < workspace.windowList().length; ++i) {\n"
         "    applyTo(workspace.windowList()[i]);\n"
         "}\n"
-    ).arg(QString::number(QCoreApplication::applicationPid()), winTitle, alwaysOnTop ? QStringLiteral("true") : QStringLiteral("false"));
-    return script;
+    ).arg(alwaysOnTop ? QStringLiteral("true") : QStringLiteral("false"));
+}
+
+QString DesktopIntegration::kwinMiniPlayerTrackerScript(const QString& windowTitle, std::optional<QPoint> position,
+                                                        const QString& replyService) {
+    // The window may not be mapped yet when the script runs, so also watch windowAdded. KWin 6
+    // hands out frameGeometry as a read-only KWin::RectF copy (setting .x on it does nothing) and
+    // has no Qt.rect, so the move assigns a plain {x, y, width, height} object.
+    return kwinMiniPlayerMatcher(windowTitle) + QStringLiteral(
+        "var gofiTracked = [];\n"
+        "function gofiTrack(w) {\n"
+        "    if (!isGofiMiniPlayer(w) || gofiTracked.indexOf(w) !== -1) return;\n"
+        "    gofiTracked.push(w);\n"
+        "    if (%1) {\n"
+        "        var g = w.frameGeometry;\n"
+        "        w.frameGeometry = {x: %2, y: %3, width: g.width, height: g.height};\n"
+        "    }\n"
+        "    w.interactiveMoveResizeFinished.connect(function() {\n"
+        "        var f = w.frameGeometry;\n"
+        "        callDBus(\"%4\", \"%5\", \"%6\", \"reportPosition\", Math.round(f.x), Math.round(f.y));\n"
+        "    });\n"
+        "}\n"
+        "var gofiWindows = workspace.windowList();\n"
+        "for (var i = 0; i < gofiWindows.length; ++i) {\n"
+        "    gofiTrack(gofiWindows[i]);\n"
+        "}\n"
+        "workspace.windowAdded.connect(gofiTrack);\n"
+    ).arg(position ? QStringLiteral("true") : QStringLiteral("false"),
+          QString::number(position ? position->x() : 0),
+          QString::number(position ? position->y() : 0),
+          kwinJsString(replyService),
+          QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath),
+          QStringLiteral("io.github.bladeroot.GoForItQt.MiniPlayer"));
+}
+
+std::optional<QPoint> DesktopIntegration::restorableMiniPlayerPosition(std::optional<QPoint> saved, const QSize& size,
+                                                                       const QList<QRect>& screenAreas) {
+    if (!saved) {
+        return std::nullopt;
+    }
+    const QPoint centre = QRect(*saved, size.isValid() ? size : QSize(1, 1)).center();
+    for (const QRect& area : screenAreas) {
+        if (area.contains(centre)) {
+            return saved;
+        }
+    }
+    return std::nullopt;
 }
 
 static void executeKWinPinScript(const QString& script) {
     DesktopIntegration::runKWinScript(script, QDBusConnection::sessionBus(), QStringLiteral("org.kde.KWin"));
 }
 
-void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnection& connection, const QString& service) {
+// Loads `script` into KWin under `pluginName` and runs it. The temporary file is kept until KWin has
+// answered `run` (it reads the file asynchronously). With `unloadAfterRun` the script is unloaded
+// right after it ran; otherwise it stays loaded (with its signal connections) until unloaded.
+static void loadAndRunKWinScript(const QString& script, const QDBusConnection& connection, const QString& service,
+                                 const QString& pluginName, bool unloadAfterRun) {
     QDBusConnection bus = connection;
     if (!bus.isConnected()) return;
 
@@ -363,12 +440,6 @@ void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnect
     tempFile->close();
     const QString tempPath = tempFile->fileName();
 
-    static std::atomic<quint64> s_scriptSeq{0};
-    const QString pluginName = QStringLiteral("gofi_pin_%1_%2_%3")
-        .arg(QCoreApplication::applicationPid())
-        .arg(QDateTime::currentMSecsSinceEpoch())
-        .arg(++s_scriptSeq);
-
     QDBusMessage loadMsg = QDBusMessage::createMethodCall(
         service,
         QStringLiteral("/Scripting"),
@@ -378,7 +449,7 @@ void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnect
     loadMsg << tempPath << pluginName;
 
     auto* loadWatcher = new QDBusPendingCallWatcher(bus.asyncCall(loadMsg, 1500));
-    QObject::connect(loadWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile](QDBusPendingCallWatcher* watcher) {
+    QObject::connect(loadWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile, unloadAfterRun](QDBusPendingCallWatcher* watcher) {
         watcher->deleteLater();
         QDBusPendingReply<int> reply = *watcher;
         if (reply.isValid() && reply.value() >= 0) {
@@ -391,19 +462,41 @@ void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnect
                 QStringLiteral("run")
             );
             auto* runWatcher = new QDBusPendingCallWatcher(bus.asyncCall(runMsg, 1500));
-            QObject::connect(runWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile](QDBusPendingCallWatcher* rw) {
+            QObject::connect(runWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile, unloadAfterRun](QDBusPendingCallWatcher* rw) {
                 rw->deleteLater();
-                QDBusMessage unloadMsg = QDBusMessage::createMethodCall(
-                    service,
-                    QStringLiteral("/Scripting"),
-                    QStringLiteral("org.kde.kwin.Scripting"),
-                    QStringLiteral("unloadScript")
-                );
-                unloadMsg << pluginName;
-                bus.asyncCall(unloadMsg, 1500);
+                if (unloadAfterRun) {
+                    DesktopIntegration::unloadKWinScript(bus, service, pluginName);
+                }
             });
         }
     });
+}
+
+void DesktopIntegration::runKWinScript(const QString& script, const QDBusConnection& connection, const QString& service) {
+    static std::atomic<quint64> s_scriptSeq{0};
+    const QString pluginName = QStringLiteral("gofi_pin_%1_%2_%3")
+        .arg(QCoreApplication::applicationPid())
+        .arg(QDateTime::currentMSecsSinceEpoch())
+        .arg(++s_scriptSeq);
+    loadAndRunKWinScript(script, connection, service, pluginName, true);
+}
+
+void DesktopIntegration::startKWinScript(const QString& script, const QDBusConnection& connection, const QString& service,
+                                         const QString& pluginName) {
+    loadAndRunKWinScript(script, connection, service, pluginName, false);
+}
+
+void DesktopIntegration::unloadKWinScript(const QDBusConnection& connection, const QString& service, const QString& pluginName) {
+    QDBusConnection bus = connection;
+    if (!bus.isConnected() || pluginName.isEmpty()) return;
+    QDBusMessage unloadMsg = QDBusMessage::createMethodCall(
+        service,
+        QStringLiteral("/Scripting"),
+        QStringLiteral("org.kde.kwin.Scripting"),
+        QStringLiteral("unloadScript")
+    );
+    unloadMsg << pluginName;
+    bus.asyncCall(unloadMsg, 1500);
 }
 
 void DesktopIntegration::schedulePinScript(QWindow* win, bool alwaysOnTop, const std::function<void(const QString&)>& execute) {
@@ -432,6 +525,40 @@ void DesktopIntegration::schedulePinScript(QWindow* win, bool alwaysOnTop, const
             execute(script);
         });
     }
+}
+
+void DesktopIntegration::startMiniPlayerTracking(QWindow* win, std::optional<QPoint> position) {
+    stopMiniPlayerTracking();
+    if (!win || QStandardPaths::isTestModeEnabled()) {
+        return;
+    }
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) {
+        return;
+    }
+    if (!m_positionReceiverRegistered) {
+        m_positionReceiverRegistered = bus.registerObject(QString::fromLatin1(MiniPlayerPositionReceiver::ObjectPath),
+                                                          &m_positionReceiver,
+                                                          QDBusConnection::ExportScriptableSlots);
+        if (!m_positionReceiverRegistered) {
+            qWarning() << "Mini player position: cannot register the D-Bus receiver";
+            return;
+        }
+    }
+    static std::atomic<quint64> s_trackerSeq{0};
+    m_trackerPluginName = QStringLiteral("gofi_miniplayer_%1_%2")
+        .arg(QCoreApplication::applicationPid())
+        .arg(++s_trackerSeq);
+    startKWinScript(kwinMiniPlayerTrackerScript(win->title(), position, bus.baseService()),
+                    bus, QStringLiteral("org.kde.KWin"), m_trackerPluginName);
+}
+
+void DesktopIntegration::stopMiniPlayerTracking() {
+    if (m_trackerPluginName.isEmpty()) {
+        return;
+    }
+    unloadKWinScript(QDBusConnection::sessionBus(), QStringLiteral("org.kde.KWin"), m_trackerPluginName);
+    m_trackerPluginName.clear();
 }
 
 void DesktopIntegration::setKWinWindowProperties(QWindow* win, bool alwaysOnTop) {

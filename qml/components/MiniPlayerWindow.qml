@@ -35,11 +35,21 @@ Window {
     }
 
     onVisibleChanged: {
-        if (visible && typeof app !== "undefined" && app && app.configureMiniPlayerWindow) {
-            app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
-            pinRetryTimer.restart()
+        if (typeof app === "undefined" || !app) return
+        if (visible) {
+            if (app.miniPlayerShown) app.miniPlayerShown(miniPlayer)
+            if (app.configureMiniPlayerWindow) {
+                app.configureMiniPlayerWindow(miniPlayer, miniPlayer.alwaysOnTop)
+                pinRetryTimer.restart()
+            }
+        } else if (app.miniPlayerHidden) {
+            app.miniPlayerHidden()
         }
     }
+
+    // Remember where the user put the mini player (X11 and other platforms that report positions).
+    onXChanged: if (visible && typeof app !== "undefined" && app && app.miniPlayerMoved) app.miniPlayerMoved(miniPlayer)
+    onYChanged: if (visible && typeof app !== "undefined" && app && app.miniPlayerMoved) app.miniPlayerMoved(miniPlayer)
 
     function toggleAlwaysOnTop() {
         const wasVisible = miniPlayer.visible

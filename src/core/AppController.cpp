@@ -5,7 +5,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QProcess>
+#include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
@@ -59,6 +61,9 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     connect(&m_desktopIntegration, &DesktopIntegration::showWindowRequested, this, &AppController::showWindowRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::toggleMiniPlayerRequested, this, &AppController::toggleMiniPlayerRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::quitRequested, this, &AppController::quitRequested);
+    connect(&m_desktopIntegration, &DesktopIntegration::miniPlayerPositionReported, this, [this](const QPoint& pos) {
+        m_settings.setMiniPlayerPosition(pos);
+    });
     connect(&m_issueTracker, &IssueTrackerService::listStatusMappingUpdated, &m_listManager, &ListManagerModel::updateListStatusMapping);
 
     m_issueTracker.setActiveTaskChecker([this](const QString& listId, const QString& jiraKey) {
@@ -1291,6 +1296,43 @@ void AppController::configureMiniPlayerWindow(QObject* windowObject, bool always
     if (m_desktopIntegration.kwinIntegrationAvailable()) {
         m_desktopIntegration.setKWinWindowProperties(win, alwaysOnTop);
     }
+}
+
+static bool isWaylandPlatform() {
+    return QGuiApplication::platformName().startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
+}
+
+void AppController::miniPlayerShown(QObject* windowObject) {
+    QWindow* win = qobject_cast<QWindow*>(windowObject);
+    if (!win) return;
+
+    QList<QRect> screenAreas;
+    for (const QScreen* screen : QGuiApplication::screens()) {
+        screenAreas.append(screen->availableGeometry());
+    }
+    const std::optional<QPoint> position = DesktopIntegration::restorableMiniPlayerPosition(
+        m_settings.miniPlayerPosition(), win->size(), screenAreas);
+
+    if (isWaylandPlatform()) {
+        if (m_desktopIntegration.kwinIntegrationAvailable()) {
+            m_desktopIntegration.startMiniPlayerTracking(win, position);
+        }
+        return;
+    }
+    if (position && win->position() != *position) {
+        win->setPosition(*position);
+    }
+}
+
+void AppController::miniPlayerHidden() {
+    m_desktopIntegration.stopMiniPlayerTracking();
+}
+
+void AppController::miniPlayerMoved(QObject* windowObject) {
+    QWindow* win = qobject_cast<QWindow*>(windowObject);
+    // On Wayland QWindow::position() is not the global position; KWin reports it instead.
+    if (!win || !win->isVisible() || isWaylandPlatform()) return;
+    m_settings.setMiniPlayerPosition(win->position());
 }
 
 } // namespace gofi

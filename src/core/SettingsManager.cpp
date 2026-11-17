@@ -360,6 +360,18 @@ void SettingsManager::setWindowPosition(const QPoint& pos) {
     m_settings.setValue(QStringLiteral("SavedState/window_pos"), pos);
 }
 
+std::optional<QPoint> SettingsManager::miniPlayerPosition() const {
+    const QVariant value = m_settings.value(QStringLiteral("SavedState/mini_player_pos"));
+    if (!value.isValid() || !value.canConvert<QPoint>()) {
+        return std::nullopt;
+    }
+    return value.toPoint();
+}
+
+void SettingsManager::setMiniPlayerPosition(const QPoint& pos) {
+    m_settings.setValue(QStringLiteral("SavedState/mini_player_pos"), pos);
+}
+
 void SettingsManager::setWindowWidth(int w) {
     const int clamped = qMax(320, w);
     const QSize cur = windowSize();

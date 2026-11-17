@@ -6,6 +6,7 @@
 #include <QSettings>
 #include <QSize>
 #include <QVariantList>
+#include <optional>
 
 namespace gofi {
 
@@ -159,6 +160,10 @@ public:
 
     [[nodiscard]] QPoint windowPosition() const;
     void setWindowPosition(const QPoint& pos);
+
+    // Last position of the mini player in global screen coordinates; empty until it is first moved.
+    [[nodiscard]] std::optional<QPoint> miniPlayerPosition() const;
+    void setMiniPlayerPosition(const QPoint& pos);
 
     [[nodiscard]] int windowWidth() const { return qMax(320, windowSize().width()); }
     void setWindowWidth(int w);
