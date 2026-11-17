@@ -9,6 +9,8 @@ go-for-it-qt (2.0.5-1) unstable; urgency=medium
     fails.
   * Mini player: "Always on Top" works on KDE Plasma (Wayland), touches
     only the mini player window and is not re-applied after unpinning.
+  * Mini player reopens where it was last moved to (on KDE Plasma Wayland
+    through a KWin script).
 
  -- Yurii Myronchuk <bladeroot@gmail.com>  Mon, 16 Nov 2026 12:00:00 +0100
 

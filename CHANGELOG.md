@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sync: a sync that failed part-way now says the list may be incomplete instead of reporting success (KB-137).
 - Desktop: unpinning the mini player right after it appears no longer gets undone by pending pin retries (KB-140).
 - Packaging: the Arch `.SRCINFO` files point at the release tag, as `PKGBUILD` does, instead of the `main` branch (KB-141).
+- Desktop: the mini player reopens where it was last moved to, also on KDE Plasma Wayland via a KWin script (KB-142).
 
 ---
 
