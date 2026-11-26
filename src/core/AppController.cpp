@@ -45,6 +45,13 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     });
 
     m_todoProxy.setSourceModel(m_taskManager.todoModel());
+    // hasNextTask/hasPreviousTask depend on the active row and on what the filter shows.
+    connect(this, &AppController::activeTodoRowChanged, this, &AppController::taskNavigationChanged);
+    connect(&m_todoProxy, &QAbstractItemModel::rowsInserted, this, &AppController::taskNavigationChanged);
+    connect(&m_todoProxy, &QAbstractItemModel::rowsRemoved, this, &AppController::taskNavigationChanged);
+    connect(&m_todoProxy, &QAbstractItemModel::rowsMoved, this, &AppController::taskNavigationChanged);
+    connect(&m_todoProxy, &QAbstractItemModel::modelReset, this, &AppController::taskNavigationChanged);
+    connect(&m_todoProxy, &QAbstractItemModel::layoutChanged, this, &AppController::taskNavigationChanged);
     m_doneProxy.setSourceModel(m_taskManager.doneModel());
 
     connect(&m_timer, &TaskTimer::timerStopped, this, &AppController::onTimerStopped);
@@ -855,16 +862,39 @@ void AppController::moveActiveTaskByOffset(int delta) {
     }
 }
 
+int AppController::adjacentVisibleTodoRow(int step) const {
+    const int visible = m_todoProxy.rowCount();
+    if (visible == 0) return -1;
+    const int activeProxyRow = m_activeTodoRow >= 0 ? m_todoProxy.mapFromSourceRow(m_activeTodoRow) : -1;
+    if (activeProxyRow >= 0) {
+        const int target = activeProxyRow + step;
+        return (target >= 0 && target < visible) ? m_todoProxy.mapToSourceRow(target) : -1;
+    }
+    // The active task is hidden by the filter (or there is none): take the nearest visible task
+    // in that direction.
+    if (step > 0) {
+        for (int p = 0; p < visible; ++p) {
+            const int src = m_todoProxy.mapToSourceRow(p);
+            if (src > m_activeTodoRow) return src;
+        }
+        return -1;
+    }
+    if (m_activeTodoRow < 0) return -1;
+    for (int p = visible - 1; p >= 0; --p) {
+        const int src = m_todoProxy.mapToSourceRow(p);
+        if (src < m_activeTodoRow) return src;
+    }
+    return -1;
+}
+
 void AppController::switchToNextTask() {
-    const int count = m_taskManager.todoModel()->rowCount();
-    if (count == 0) return;
-    setActiveTodoRow(qMin(count - 1, m_activeTodoRow + 1));
+    const int row = adjacentVisibleTodoRow(1);
+    if (row >= 0) setActiveTodoRow(row);
 }
 
 void AppController::switchToPreviousTask() {
-    const int count = m_taskManager.todoModel()->rowCount();
-    if (count == 0) return;
-    setActiveTodoRow(qMax(0, m_activeTodoRow - 1));
+    const int row = adjacentVisibleTodoRow(-1);
+    if (row >= 0) setActiveTodoRow(row);
 }
 
 void AppController::markActiveTaskDone() {

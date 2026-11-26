@@ -134,7 +134,7 @@ Window {
                 Layout.maximumHeight: 28
                 Layout.alignment: Qt.AlignVCenter
                 padding: 0
-                enabled: app.activeTodoRow > 0
+                enabled: app.hasPreviousTask
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Previous Task")
                 onClicked: app.switchToPreviousTask()
@@ -224,12 +224,13 @@ Window {
                 Layout.alignment: Qt.AlignVCenter
                 padding: 0
                 ToolTip.visible: hovered
+                enabled: app.hasNextTask
                 ToolTip.text: qsTr("Next Task")
                 onClicked: app.switchToNextTask()
                 contentItem: Text {
                     text: "▶"
                     font.pixelSize: 11
-                    color: palette.buttonText
+                    color: parent.enabled ? palette.buttonText : "#7f8c8d"
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }

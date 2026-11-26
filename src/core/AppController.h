@@ -45,6 +45,8 @@ class AppController : public QObject {
     Q_PROPERTY(QString databasePath READ databasePath NOTIFY storagePathChanged)
     Q_PROPERTY(QString configFilePath READ configFilePath CONSTANT)
     Q_PROPERTY(int activeTodoRow READ activeTodoRow WRITE setActiveTodoRow NOTIFY activeTodoRowChanged)
+    Q_PROPERTY(bool hasNextTask READ hasNextTask NOTIFY taskNavigationChanged)
+    Q_PROPERTY(bool hasPreviousTask READ hasPreviousTask NOTIFY taskNavigationChanged)
     Q_PROPERTY(int unviewedTodoCount READ unviewedTodoCount NOTIFY todoCountsChanged)
     Q_PROPERTY(int totalTodoCount READ totalTodoCount NOTIFY totalTodoCountChanged)
     Q_PROPERTY(QVariantList availableLanguages READ availableLanguages NOTIFY languageChanged)
@@ -86,6 +88,9 @@ public:
     [[nodiscard]] QString configFilePath() const;
 
     [[nodiscard]] int activeTodoRow() const noexcept { return m_activeTodoRow; }
+    // Whether switchToNextTask/switchToPreviousTask would move within the visible (filtered) to-do list.
+    [[nodiscard]] bool hasNextTask() const { return adjacentVisibleTodoRow(1) >= 0; }
+    [[nodiscard]] bool hasPreviousTask() const { return adjacentVisibleTodoRow(-1) >= 0; }
     void setActiveTodoRow(int sourceRow);
 
     [[nodiscard]] int unviewedTodoCount() const;
@@ -149,6 +154,7 @@ signals:
     void storagePathChanged();
     void languageChanged();
     void activeTodoRowChanged();
+    void taskNavigationChanged();
     void todoCountsChanged();
     void totalTodoCountChanged();
     void notificationRequested(const QString& title, const QString& body);
@@ -163,6 +169,8 @@ private slots:
     void onTodoListCountChanged();
 
 private:
+    // Source row of the visible to-do task next to the active one (`step` +1 / -1), or -1.
+    [[nodiscard]] int adjacentVisibleTodoRow(int step) const;
     void syncActiveTaskToTimer();
     int findActiveTodoRowById(qint64 taskId) const;
     void applyLanguageTranslator();

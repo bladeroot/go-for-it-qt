@@ -3454,6 +3454,71 @@ private slots:
                                                + missing.join(QStringLiteral(" | "))));
     }
 
+    // KB-143: switchToNextTask/switchToPreviousTask (Alt+Down/Up, tray, mini player) stepped through
+    // the unfiltered source rows, so with a filter active they made hidden tasks the active one.
+    void testNextAndPreviousTaskFollowTheFilteredList() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb143_switch.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB143"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+        for (const char* text : {"kb143 one +shown", "kb143 two +hidden", "kb143 three +hidden", "kb143 four +shown",
+                                 "kb143 five +hidden"}) {
+            ctrl.addNewTask(QString::fromUtf8(text));
+        }
+        auto* source = qobject_cast<TaskStoreModel*>(ctrl.todoProxyModel()->sourceModel());
+        QVERIFY(source);
+        QCOMPARE(source->rowCount(), 5);
+        auto sourceRowOf = [&](const QString& text) {
+            for (int i = 0; i < source->rowCount(); ++i) {
+                if (source->taskAt(i).description().startsWith(text)) return i;
+            }
+            return -1;
+        };
+        auto activeText = [&]() { return source->taskAt(ctrl.activeTodoRow()).description(); };
+
+        ctrl.todoProxyModel()->setFilterQuery(QStringLiteral("+shown"));
+        QCOMPARE(ctrl.todoProxyModel()->rowCount(), 2);
+        ctrl.setActiveTodoRow(sourceRowOf(QStringLiteral("kb143 one")));
+        QVERIFY(ctrl.hasNextTask());
+        QVERIFY(!ctrl.hasPreviousTask());
+
+        ctrl.switchToNextTask();
+        QVERIFY2(activeText().startsWith(QStringLiteral("kb143 four")), qPrintable(activeText()));
+        QVERIFY(!ctrl.hasNextTask());
+        QVERIFY(ctrl.hasPreviousTask());
+        ctrl.switchToNextTask();  // already the last visible task
+        QVERIFY2(activeText().startsWith(QStringLiteral("kb143 four")), qPrintable(activeText()));
+
+        ctrl.switchToPreviousTask();
+        QVERIFY2(activeText().startsWith(QStringLiteral("kb143 one")), qPrintable(activeText()));
+
+        // The active task itself is filtered out: step to the nearest visible one in that direction.
+        ctrl.todoProxyModel()->setFilterQuery(QString());
+        ctrl.setActiveTodoRow(sourceRowOf(QStringLiteral("kb143 two")));
+        ctrl.todoProxyModel()->setFilterQuery(QStringLiteral("+shown"));
+        QVERIFY(ctrl.hasNextTask());
+        QVERIFY(ctrl.hasPreviousTask());
+        ctrl.switchToNextTask();
+        QVERIFY2(activeText().startsWith(QStringLiteral("kb143 four")), qPrintable(activeText()));
+        ctrl.todoProxyModel()->setFilterQuery(QString());
+        ctrl.setActiveTodoRow(sourceRowOf(QStringLiteral("kb143 three")));
+        ctrl.todoProxyModel()->setFilterQuery(QStringLiteral("+shown"));
+        ctrl.switchToPreviousTask();
+        QVERIFY2(activeText().startsWith(QStringLiteral("kb143 one")), qPrintable(activeText()));
+
+        // Nothing visible: nothing to switch to.
+        ctrl.todoProxyModel()->setFilterQuery(QStringLiteral("+nomatch"));
+        QVERIFY(!ctrl.hasNextTask());
+        QVERIFY(!ctrl.hasPreviousTask());
+        const int before = ctrl.activeTodoRow();
+        ctrl.switchToNextTask();
+        ctrl.switchToPreviousTask();
+        QCOMPARE(ctrl.activeTodoRow(), before);
+        ctrl.todoProxyModel()->setFilterQuery(QString());
+    }
+
     void testUkTranslatorPluralHandling() {
         const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
         QFile::remove(dbPath);
