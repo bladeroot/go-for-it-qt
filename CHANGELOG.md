@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Lists can be switched from the toolbar: the button with the current list's name opens a menu with the views, all lists and "Manage lists…"; a list's checkbox adds it to (or removes it from) the lists shown together.
+- TUI: the list picker (`L`) checks the lists already shown, so `Space` adds lists to the current view or removes them and `Enter` applies it; without changes `Enter` still opens the highlighted list.
+
+### Changed
+- The "Switch View / Filter" submenu moved out of the ☰ menu into the toolbar list switcher.
+
 ---
 
 ## [2.0.5] - 2026-11-16
