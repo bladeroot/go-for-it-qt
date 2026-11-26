@@ -37,6 +37,10 @@ public:
     bool deleteDoneTasks(const QString& listId);
     bool deleteDoneTasks(const QStringList& listIds);
     bool replaceListTasksOrders(const QString& listId, bool done, const QVector<TxtTask>& tasks);
+    // Renames a remote issue key in one list (tasks and activity_log), e.g. when a tracker changes
+    // its id scheme. Does nothing if the new key is already used in that list. Returns false on
+    // a database error.
+    bool renameRemoteIssueKey(const QString& listId, const QString& oldKey, const QString& newKey);
     bool upsertRemoteIssueTask(const QString& listId,
                                const QString& issueKey,
                                const QString& description,

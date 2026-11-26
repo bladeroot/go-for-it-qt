@@ -302,6 +302,10 @@ bool DatabaseManager::replaceListTasksOrders(const QString& listId, bool done, c
     return m_taskRepo.replaceListTasksOrders(listId, done, tasks);
 }
 
+bool DatabaseManager::renameRemoteIssueKey(const QString& listId, const QString& oldKey, const QString& newKey) {
+    return m_taskRepo.renameRemoteIssueKey(listId, oldKey, newKey);
+}
+
 bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
                                             const QString& issueKey,
                                             const QString& description,

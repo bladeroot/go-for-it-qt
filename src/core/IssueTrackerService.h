@@ -149,7 +149,15 @@ private:
     void fetchGitHubIssues(const TodoListEntry& entry);
     void fetchGitLabIssues(const TodoListEntry& entry);
     void fetchRedmineIssues(const TodoListEntry& entry);
+    struct TodoistSyncState;
+    struct TodoistIdBatch;
     void fetchTodoistTasks(const TodoListEntry& entry);
+    void migrateTodoistIds(const TodoListEntry& entry, const std::shared_ptr<TodoistSyncState>& state,
+                           const std::function<void(bool, const QString&)>& done);
+    void migrateTodoistIdBatch(const TodoListEntry& entry, const std::shared_ptr<TodoistSyncState>& state,
+                               const std::shared_ptr<QList<TodoistIdBatch>>& batches,
+                               const std::function<void(bool, const QString&)>& done);
+    void fetchTodoistPage(const TodoListEntry& entry, const std::shared_ptr<TodoistSyncState>& state, const QString& cursor);
     void fetchNextcloudTasks(const TodoListEntry& entry);
     void processSyncedItems(const TodoListEntry& entry, const QVector<RemoteIssueItem>& items, const QString& providerName, bool pageLimitReached = false, bool hasError = false, bool explicitZeroTotal = false);
 

@@ -74,6 +74,7 @@ public:
     bool deleteDoneTasks(const QString& listId);
     bool deleteDoneTasks(const QStringList& listIds);
     bool replaceListTasksOrders(const QString& listId, bool done, const QVector<TxtTask>& tasks);
+    bool renameRemoteIssueKey(const QString& listId, const QString& oldKey, const QString& newKey);
     bool upsertRemoteIssueTask(const QString& listId,
                                const QString& issueKey,
                                const QString& description,

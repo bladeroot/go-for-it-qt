@@ -487,6 +487,33 @@ bool TaskRepository::replaceListTasksOrders(const QString& listId, bool done, co
     return database.commit();
 }
 
+bool TaskRepository::renameRemoteIssueKey(const QString& listId, const QString& oldKey, const QString& newKey) {
+    if (listId.isEmpty() || oldKey.isEmpty() || newKey.isEmpty() || oldKey == newKey) return true;
+    QSqlDatabase database = db();
+    QSqlQuery taken(database);
+    taken.prepare(QStringLiteral("SELECT 1 FROM tasks WHERE list_id = :list_id AND jira_key = :new_key LIMIT 1"));
+    taken.bindValue(QStringLiteral(":list_id"), listId);
+    taken.bindValue(QStringLiteral(":new_key"), newKey);
+    if (!taken.exec()) {
+        qWarning() << "TaskRepository::renameRemoteIssueKey check failed:" << taken.lastError().text();
+        return false;
+    }
+    if (taken.next()) return true;  // already synced under the new key: keep both rows as they are
+
+    for (const QString& table : {QStringLiteral("tasks"), QStringLiteral("activity_log")}) {
+        QSqlQuery upd(database);
+        upd.prepare(QStringLiteral("UPDATE %1 SET jira_key = :new_key WHERE list_id = :list_id AND jira_key = :old_key").arg(table));
+        upd.bindValue(QStringLiteral(":new_key"), newKey);
+        upd.bindValue(QStringLiteral(":list_id"), listId);
+        upd.bindValue(QStringLiteral(":old_key"), oldKey);
+        if (!upd.exec()) {
+            qWarning() << "TaskRepository::renameRemoteIssueKey failed on" << table << ":" << upd.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TaskRepository::upsertRemoteIssueTask(const QString& listId,
                                            const QString& issueKey,
                                            const QString& description,

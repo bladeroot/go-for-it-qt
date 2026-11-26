@@ -43,9 +43,48 @@
 #include <QTest>
 #include <QTimeZone>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QtTest>
 
 using namespace gofi;
+
+// Local stand-in for the Todoist API (see testTodoist*): records requests, answers by path.
+struct TodoistFake {
+    QStringList requests;  // "METHOD target"
+    QHash<QByteArray, QByteArray> routes;  // path (without query) -> JSON body
+    QByteArray lastBody;
+};
+static void serveTodoist(QTcpServer& server, TodoistFake& fake) {
+    serveHttpFull(server, [&fake](const QByteArray& method, const QByteArray& target, const QByteArray&, const QByteArray& body) {
+        fake.requests << QString::fromUtf8(method + ' ' + target);
+        fake.lastBody = body;
+        const QByteArray path = target.split('?').first();
+        if (path.startsWith("/rest/v2")) {
+            return httpResponse("410 Gone", "application/json", "{\"error\":\"gone\"}");
+        }
+        if (fake.routes.contains(path + '?' + target.split('?').value(1))) {
+            return httpResponse("200 OK", "application/json", fake.routes.value(path + '?' + target.split('?').value(1)));
+        }
+        if (fake.routes.contains(path)) {
+            return httpResponse("200 OK", "application/json", fake.routes.value(path));
+        }
+        if (method == "POST") {
+            return httpResponse("204 No Content", "application/json", "");
+        }
+        return httpResponse("404 Not Found", "application/json", "{\"error\":\"not found\"}");
+    });
+}
+static TodoListEntry todoistEntry(const QTcpServer& server, const QString& id, const QString& query = QString()) {
+    TodoListEntry entry;
+    entry.id = id;
+    entry.name = id;
+    entry.provider = QStringLiteral("Todoist");
+    entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+    entry.apiToken = QStringLiteral("token");
+    entry.jiraJql = query;
+    return entry;
+}
+
 
 class TestTrackers : public QObject {
     Q_OBJECT
@@ -618,6 +657,188 @@ private slots:
     }
 
 
+    // KB-151: Todoist shut down REST v2 (its endpoints answer 410 Gone); the integration still
+    // called https://api.todoist.com/rest/v2/... and ignored the list's server URL. API v1 lists
+    // tasks page by page as {"results": [...], "next_cursor": ...} with string ids and "checked".
+    void testTodoistSyncUsesApiV1WithPagination() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) QSKIP("Cannot bind to loopback port in restricted sandbox");
+        TodoistFake fake;
+        fake.routes.insert("/api/v1/tasks?limit=200", R"({"results":[
+            {"id":"6XGgmFVcrG5RRjVr","content":"Write report","description":"Q3 numbers","checked":false,"priority":4,"labels":["work"]}
+          ],"next_cursor":"page-2"})");
+        fake.routes.insert("/api/v1/tasks?limit=200&cursor=page-2", R"({"results":[
+            {"id":"6XGgmFVcrG5RRjVs","content":"Book flights","description":"","checked":false,"priority":1,"labels":[]}
+          ],"next_cursor":null})");
+        serveTodoist(server, fake);
+
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("kb151_sync.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+        const TodoListEntry entry = todoistEntry(server, QStringLiteral("kb151_sync"));
+        QVERIFY(db.saveList(entry, 0));
+
+        IssueTrackerService svc;
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 10000);
+        QVERIFY2(failSpy.isEmpty(), qPrintable(failSpy.isEmpty() ? QString() : failSpy.first().at(1).toString()));
+        QCOMPARE(fake.requests, (QStringList{QStringLiteral("GET /api/v1/tasks?limit=200"),
+                                             QStringLiteral("GET /api/v1/tasks?limit=200&cursor=page-2")}));
+        QStringList keys;
+        for (const TxtTask& t : db.loadTasks(entry.id, false)) keys << t.jiraKey();
+        keys.sort();
+        QCOMPARE(keys, (QStringList{QStringLiteral("TD#6XGgmFVcrG5RRjVr"), QStringLiteral("TD#6XGgmFVcrG5RRjVs")}));
+
+        // The task closed on Todoist disappears from the next sync and is reconciled locally.
+        fake.requests.clear();
+        fake.routes.insert("/api/v1/tasks?limit=200", R"({"results":[
+            {"id":"6XGgmFVcrG5RRjVs","content":"Book flights","description":"","checked":false,"priority":1,"labels":[]}
+          ],"next_cursor":null})");
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 10000);
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 1);
+        QCOMPARE(db.loadTasks(entry.id, true).size(), 1);
+        DatabaseManager::instance().close();
+        server.close();
+    }
+
+    void testTodoistFilterQueryUsesFilterEndpoint() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) QSKIP("Cannot bind to loopback port in restricted sandbox");
+        TodoistFake fake;
+        fake.routes.insert("/api/v1/tasks/filter", R"({"results":[],"next_cursor":null})");
+        fake.routes.insert("/api/v1/tasks", R"({"results":[],"next_cursor":null})");
+        serveTodoist(server, fake);
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("kb151_filter.db"));
+        QFile::remove(testDb);
+        QVERIFY(DatabaseManager::instance().initialize(testDb));
+
+        IssueTrackerService svc;
+        auto syncWith = [&](const QString& query) {
+            fake.requests.clear();
+            const TodoListEntry entry = todoistEntry(server, QStringLiteral("kb151_filter"), query);
+            svc.syncListIssues(entry);
+            QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 10000);
+        };
+        // The list dialog suggests "filter=today | overdue" (REST v2 syntax).
+        syncWith(QStringLiteral("filter=today | overdue"));
+        QCOMPARE(fake.requests.size(), 1);
+        QCOMPARE(QUrl(fake.requests.first().section(QLatin1Char(' '), 1)).path(), QStringLiteral("/api/v1/tasks/filter"));
+        QCOMPARE(QUrlQuery(QUrl(fake.requests.first().section(QLatin1Char(' '), 1))).queryItemValue(QStringLiteral("query"), QUrl::FullyDecoded),
+                 QStringLiteral("today | overdue"));
+        // A bare filter expression works too.
+        syncWith(QStringLiteral("p1 & today"));
+        QCOMPARE(QUrlQuery(QUrl(fake.requests.first().section(QLatin1Char(' '), 1))).queryItemValue(QStringLiteral("query"), QUrl::FullyDecoded),
+                 QStringLiteral("p1 & today"));
+        // Other parameters stay on /tasks.
+        syncWith(QStringLiteral("label=work"));
+        QCOMPARE(fake.requests.first(), QStringLiteral("GET /api/v1/tasks?label=work&limit=200"));
+        DatabaseManager::instance().close();
+        server.close();
+    }
+
+    // KB-151: API v1 rejects the old numeric ids. Stored keys "TD#<old id>" are translated with
+    // /api/v1/id_mappings before the first sync, so the tasks keep their rows instead of being
+    // re-created under the new ids while the old ones are closed as "removed on the tracker".
+    void testTodoistTranslatesOldNumericIds() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) QSKIP("Cannot bind to loopback port in restricted sandbox");
+        TodoistFake fake;
+        fake.routes.insert("/api/v1/id_mappings/tasks/7723910", R"([{"old_id":"7723910","new_id":"6Xnew1"}])");
+        fake.routes.insert("/api/v1/id_mappings/projects/2203306141", R"([{"old_id":"2203306141","new_id":"6Xproj"}])");
+        fake.routes.insert("/api/v1/tasks?project_id=6Xproj&limit=200", R"({"results":[
+            {"id":"6Xnew1","content":"Refactor database migration","description":"","checked":false,"priority":4,"labels":[]}
+          ],"next_cursor":null})");
+        serveTodoist(server, fake);
+
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("kb151_ids.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+        const TodoListEntry entry = todoistEntry(server, QStringLiteral("kb151_ids"), QStringLiteral("project_id=2203306141"));
+        QVERIFY(db.saveList(entry, 0));
+        TxtTask old = TxtTask::fromSimpleTxt(QStringLiteral("TD#7723910 Refactor database migration"), false, false);
+        old.setJiraKey(QStringLiteral("TD#7723910"));
+        const qint64 rowId = db.insertTask(entry.id, old, 0);
+        QVERIFY(rowId >= 0);
+
+        IssueTrackerService svc;
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 10000);
+        QVERIFY2(failSpy.isEmpty(), qPrintable(failSpy.isEmpty() ? QString() : failSpy.first().at(1).toString()));
+        QVERIFY2(fake.requests.contains(QStringLiteral("GET /api/v1/tasks?project_id=6Xproj&limit=200")), qPrintable(fake.requests.join(QLatin1Char('\n'))));
+
+        const QVector<TxtTask> open = db.loadTasks(entry.id, false);
+        QCOMPARE(open.size(), 1);
+        QCOMPARE(open.first().jiraKey(), QStringLiteral("TD#6Xnew1"));
+        QCOMPARE(open.first().id(), rowId);  // same row, not a new task
+        QCOMPARE(db.loadTasks(entry.id, true).size(), 0);
+        DatabaseManager::instance().close();
+        server.close();
+    }
+
+    // If the old ids cannot be translated the sync stops before touching any task.
+    void testTodoistSyncStopsWhenIdsCannotBeTranslated() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) QSKIP("Cannot bind to loopback port in restricted sandbox");
+        TodoistFake fake;  // no id_mappings route: 404
+        fake.routes.insert("/api/v1/tasks", R"({"results":[],"next_cursor":null})");
+        serveTodoist(server, fake);
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("kb151_idfail.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+        const TodoListEntry entry = todoistEntry(server, QStringLiteral("kb151_idfail"));
+        QVERIFY(db.saveList(entry, 0));
+        TxtTask old = TxtTask::fromSimpleTxt(QStringLiteral("TD#555 Old task"), false, false);
+        old.setJiraKey(QStringLiteral("TD#555"));
+        QVERIFY(db.insertTask(entry.id, old, 0) >= 0);
+
+        IssueTrackerService svc;
+        QSignalSpy failSpy(&svc, &IssueTrackerService::syncFailed);
+        svc.syncListIssues(entry);
+        QTRY_VERIFY_WITH_TIMEOUT(!svc.isSyncing(), 10000);
+        QCOMPARE(failSpy.size(), 1);
+        QVERIFY(!fake.requests.contains(QStringLiteral("GET /api/v1/tasks?limit=200")));
+        QCOMPARE(db.loadTasks(entry.id, false).size(), 1);
+        QCOMPARE(db.loadTasks(entry.id, false).first().jiraKey(), QStringLiteral("TD#555"));
+        DatabaseManager::instance().close();
+        server.close();
+    }
+
+    void testTodoistWritesUseApiV1() {
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) QSKIP("Cannot bind to loopback port in restricted sandbox");
+        TodoistFake fake;
+        fake.routes.insert("/api/v1/comments", R"({"id":"c1"})");
+        fake.routes.insert("/api/v1/tasks/6Xabc", R"({"id":"6Xabc"})");
+        serveTodoist(server, fake);
+        RemoteWritesEnabled enabled;
+        IssueTrackerService svc;
+        TodoListEntry entry = todoistEntry(server, QStringLiteral("kb151_writes"));
+        entry.syncStatusToRemote = true;
+
+        svc.updateIssueStatusRemote(entry, QStringLiteral("TD#6Xabc"), true, QStringLiteral("done"));
+        QTRY_VERIFY_WITH_TIMEOUT(fake.requests.contains(QStringLiteral("POST /api/v1/tasks/6Xabc/close")), 5000);
+        svc.updateIssueStatusRemote(entry, QStringLiteral("TD#6Xabc"), false, QStringLiteral("todo"));
+        QTRY_VERIFY_WITH_TIMEOUT(fake.requests.contains(QStringLiteral("POST /api/v1/tasks/6Xabc/reopen")), 5000);
+        svc.updateIssueDescription(entry, QStringLiteral("TD#6Xabc"), QStringLiteral("New notes"));
+        QTRY_VERIFY_WITH_TIMEOUT(fake.requests.contains(QStringLiteral("POST /api/v1/tasks/6Xabc")), 5000);
+        QCOMPARE(QJsonDocument::fromJson(fake.lastBody).object().value(QStringLiteral("description")).toString(), QStringLiteral("New notes"));
+        svc.postIssueComment(entry, QStringLiteral("TD#6Xabc"), QStringLiteral("Looks good"));
+        QTRY_VERIFY_WITH_TIMEOUT(fake.requests.contains(QStringLiteral("POST /api/v1/comments")), 5000);
+        const QJsonObject comment = QJsonDocument::fromJson(fake.lastBody).object();
+        QCOMPARE(comment.value(QStringLiteral("task_id")).toString(), QStringLiteral("6Xabc"));
+        QCOMPARE(comment.value(QStringLiteral("content")).toString(), QStringLiteral("Looks good"));
+        for (const QString& r : std::as_const(fake.requests)) {
+            QVERIFY2(!r.contains(QStringLiteral("/rest/v2")), qPrintable(r));
+        }
+        server.close();
+    }
+
     void testNextcloudCalDavTasksParser() {
         const QByteArray icsData = QByteArray(
             "BEGIN:VCALENDAR\r\n"
@@ -712,7 +933,10 @@ private slots:
         TodoListEntry tdEntry;
         tdEntry.provider = QStringLiteral("Todoist");
         const QUrl tdUrl = IssueTrackerService::buildIssueBrowserUrl(tdEntry, QStringLiteral("TD#99887766"));
-        QCOMPARE(tdUrl.toString(), QStringLiteral("https://todoist.com/app/task/99887766"));
+        QCOMPARE(tdUrl.toString(), QStringLiteral("https://app.todoist.com/app/task/99887766"));
+        // KB-151: API v1 ids are opaque strings; the old builder kept only the digits.
+        const QUrl tdV1Url = IssueTrackerService::buildIssueBrowserUrl(tdEntry, QStringLiteral("TD#6XGgmFVcrG5RRjVr"));
+        QCOMPARE(tdV1Url.toString(), QStringLiteral("https://app.todoist.com/app/task/6XGgmFVcrG5RRjVr"));
 
         // Nextcloud
         TodoListEntry ncEntry;
