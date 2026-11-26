@@ -1465,6 +1465,33 @@ private slots:
         QCOMPARE(controller.settings()->windowPosition(), QPoint(70, 80));
     }
 
+    // KB-150: on Wayland desktops other than KDE Plasma the pin button did nothing (the compositor
+    // ignores Qt::WindowStaysOnTopHint); it is hidden there.
+    void testWindowPinningSupportedOnlyWhereItWorks() {
+        QVERIFY(AppController::windowPinningSupportedOn(QStringLiteral("xcb"), false));
+        QVERIFY(AppController::windowPinningSupportedOn(QStringLiteral("wayland"), true));
+        QVERIFY(!AppController::windowPinningSupportedOn(QStringLiteral("wayland"), false));
+        QVERIFY(!AppController::windowPinningSupportedOn(QStringLiteral("wayland-egl"), false));
+
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb150.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb150_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QObject* pin = root->findChild<QObject*>(QStringLiteral("miniAlwaysOnTopToggle"));
+        QVERIFY(pin);
+        // offscreen reports positions like X11, so pinning counts as supported and the button stays.
+        QVERIFY(controller.windowPinningSupported());
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "toggleMiniPlayer"));
+        QTRY_VERIFY(pin->property("visible").toBool());
+    }
+
     void testRestorableWindowPositionNeedsAVisibleScreen() {
         const QSize size(440, 58);
         const QList<QRect> screens = {QRect(0, 0, 1920, 1080), QRect(1920, 0, 2560, 1440)};

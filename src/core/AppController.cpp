@@ -1363,6 +1363,15 @@ bool AppController::platformReportsWindowPosition(const QString& platformName) {
     return !platformName.startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
 }
 
+bool AppController::windowPinningSupportedOn(const QString& platformName, bool kwinAvailable) {
+    // X11 window managers honour Qt::WindowStaysOnTopHint; on Wayland only KWin (via its scripts) does.
+    return platformReportsWindowPosition(platformName) || kwinAvailable;
+}
+
+bool AppController::windowPinningSupported() const {
+    return windowPinningSupportedOn(QGuiApplication::platformName(), m_desktopIntegration.kwinIntegrationAvailable());
+}
+
 static bool isWaylandPlatform() {
     return !AppController::platformReportsWindowPosition(QGuiApplication::platformName());
 }

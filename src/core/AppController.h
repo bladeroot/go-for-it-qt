@@ -45,6 +45,9 @@ class AppController : public QObject {
     Q_PROPERTY(QString databasePath READ databasePath NOTIFY storagePathChanged)
     Q_PROPERTY(QString configFilePath READ configFilePath CONSTANT)
     Q_PROPERTY(int activeTodoRow READ activeTodoRow WRITE setActiveTodoRow NOTIFY activeTodoRowChanged)
+    // False on Wayland desktops other than KDE Plasma (GNOME, Sway…): they ignore requests to keep a
+    // window above others, so the mini player hides its pin button there.
+    Q_PROPERTY(bool windowPinningSupported READ windowPinningSupported CONSTANT)
     Q_PROPERTY(bool hasNextTask READ hasNextTask NOTIFY taskNavigationChanged)
     Q_PROPERTY(bool hasPreviousTask READ hasPreviousTask NOTIFY taskNavigationChanged)
     Q_PROPERTY(int unviewedTodoCount READ unviewedTodoCount NOTIFY todoCountsChanged)
@@ -148,6 +151,8 @@ public:
     Q_INVOKABLE void persistMainWindowGeometry(QObject* windowObject);
     // False on Wayland, where a client can neither read nor set its global window position.
     [[nodiscard]] static bool platformReportsWindowPosition(const QString& platformName);
+    [[nodiscard]] static bool windowPinningSupportedOn(const QString& platformName, bool kwinAvailable);
+    [[nodiscard]] bool windowPinningSupported() const;
     Q_INVOKABLE void miniPlayerHidden();
     Q_INVOKABLE void miniPlayerMoved(QObject* windowObject);
     Q_INVOKABLE void checkDueReminders();

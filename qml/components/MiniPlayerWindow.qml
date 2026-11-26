@@ -301,6 +301,7 @@ Window {
             ToolButton {
                 id: pinBtn
                 objectName: "miniAlwaysOnTopToggle"
+                visible: app.windowPinningSupported
                 Layout.preferredWidth: 26
                 Layout.preferredHeight: 26
                 Layout.minimumWidth: 26
