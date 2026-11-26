@@ -29,7 +29,13 @@ ApplicationWindow {
     palette.highlightedText: "#ffffff"
 
     function persistGeometry() {
-        app.settings.saveWindowGeometry(rootWindow.width, rootWindow.height, rootWindow.x, rootWindow.y)
+        app.persistMainWindowGeometry(rootWindow)
+    }
+
+    // Wayland + KWin: restore the position and keep saving it (see AppController::mainWindowShown).
+    onVisibleChanged: {
+        if (visible) app.mainWindowShown(rootWindow)
+        else app.mainWindowHidden()
     }
 
     function toggleMiniPlayer() {
@@ -97,6 +103,7 @@ ApplicationWindow {
     onHeightChanged: if (visible) app.settings.windowHeight = height
 
     Component.onCompleted: {
+        if (rootWindow.visible) app.mainWindowShown(rootWindow)
         if (app.settings.windowX >= 0 && app.settings.windowY >= 0) {
             rootWindow.x = app.settings.windowX
             rootWindow.y = app.settings.windowY

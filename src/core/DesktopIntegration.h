@@ -3,6 +3,7 @@
 #include "SettingsManager.h"
 #include "TaskTimer.h"
 #include <QAction>
+#include <QHash>
 #include <QMenu>
 #include <QObject>
 #include <QPoint>
@@ -17,21 +18,23 @@ namespace gofi {
 
 class AppController;
 
-// D-Bus endpoint that the KWin mini player tracker script calls (via callDBus) after the user
-// moves the mini player, since a Wayland client cannot read its own global position.
-class MiniPlayerPositionReceiver : public QObject {
+// D-Bus endpoint that the KWin window tracker scripts call (via callDBus) after the user moves one
+// of our windows, since a Wayland client cannot read its own global position. `role` names the
+// window (DesktopIntegration::MainWindowRole / MiniPlayerRole).
+class WindowPositionReceiver : public QObject {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "io.github.bladeroot.GoForItQt.MiniPlayer")
+    Q_CLASSINFO("D-Bus Interface", "io.github.bladeroot.GoForItQt.WindowPosition")
 
 public:
-    static constexpr const char* ObjectPath = "/io/github/bladeroot/GoForItQt/MiniPlayer";
+    static constexpr const char* ObjectPath = "/io/github/bladeroot/GoForItQt/WindowPosition";
+    static constexpr const char* Interface = "io.github.bladeroot.GoForItQt.WindowPosition";
     using QObject::QObject;
 
 public slots:
-    Q_SCRIPTABLE void reportPosition(int x, int y) { emit positionReported(QPoint(x, y)); }
+    Q_SCRIPTABLE void reportPosition(const QString& role, int x, int y) { emit positionReported(role, QPoint(x, y)); }
 
 signals:
-    void positionReported(const QPoint& pos);
+    void positionReported(const QString& role, const QPoint& pos);
 };
 
 class DesktopIntegration : public QObject {
@@ -59,21 +62,24 @@ public:
     // Calls `execute` with the pin script now and again on the retry schedule (the compositor maps a
     // new window asynchronously). A later call for the same window cancels the pending retries of
     // earlier calls, so a stale pin/unpin never runs after a newer state.
-    // KWin script that moves this process's mini player to `position` (when given) as soon as it
-    // is mapped, and reports every finished interactive move of it to `replyService` through
-    // MiniPlayerPositionReceiver. It stays loaded while the mini player is visible.
-    [[nodiscard]] static QString kwinMiniPlayerTrackerScript(const QString& windowTitle,
-                                                             std::optional<QPoint> position,
-                                                             const QString& replyService);
+    static constexpr const char* MainWindowRole = "main";
+    static constexpr const char* MiniPlayerRole = "mini_player";
+    // KWin script that moves this process's window titled `windowTitle` to `position` (when given)
+    // as soon as it is mapped, and reports every finished interactive move of it, tagged with
+    // `role`, to `replyService` through WindowPositionReceiver. It stays loaded while the window is shown.
+    [[nodiscard]] static QString kwinWindowTrackerScript(const QString& role,
+                                                         const QString& windowTitle,
+                                                         std::optional<QPoint> position,
+                                                         const QString& replyService);
     // `saved` if a `size` window placed there would have its centre on one of `screenAreas`;
     // otherwise empty, so the window system places it (e.g. after a monitor was unplugged).
-    [[nodiscard]] static std::optional<QPoint> restorableMiniPlayerPosition(std::optional<QPoint> saved,
-                                                                            const QSize& size,
-                                                                            const QList<QRect>& screenAreas);
-    // Wayland + KWin: place the mini player at `position` and keep reporting its moves through
-    // miniPlayerPositionReported until stopMiniPlayerTracking(). No-op in test mode.
-    void startMiniPlayerTracking(QWindow* win, std::optional<QPoint> position);
-    void stopMiniPlayerTracking();
+    [[nodiscard]] static std::optional<QPoint> restorableWindowPosition(std::optional<QPoint> saved,
+                                                                        const QSize& size,
+                                                                        const QList<QRect>& screenAreas);
+    // Wayland + KWin: place `win` at `position` and keep reporting its moves through
+    // windowPositionReported(role, …) until stopWindowTracking(role). No-op in test mode.
+    void startWindowTracking(const QString& role, QWindow* win, std::optional<QPoint> position);
+    void stopWindowTracking(const QString& role);
     static void schedulePinScript(QWindow* win, bool alwaysOnTop, const std::function<void(const QString&)>& execute);
     [[nodiscard]] QMenu* trayMenu() const noexcept { return m_trayMenu; }
     [[nodiscard]] QAction* toggleMiniPlayerAction() const noexcept { return m_toggleMiniPlayerAction; }
@@ -82,7 +88,7 @@ signals:
     void showWindowRequested();
     void toggleMiniPlayerRequested();
     void quitRequested();
-    void miniPlayerPositionReported(const QPoint& pos);
+    void windowPositionReported(const QString& role, const QPoint& pos);
 
 private slots:
     void updatePluginStates();
@@ -108,9 +114,10 @@ private:
     QAction* m_prevTaskAction = nullptr;
     QAction* m_toggleTimerAction = nullptr;
 
-    MiniPlayerPositionReceiver m_positionReceiver;
+    WindowPositionReceiver m_positionReceiver;
     bool m_positionReceiverRegistered = false;
-    QString m_trackerPluginName;
+    QHash<QString, QString> m_trackerPlugins;  // role -> loaded KWin script name
+    QHash<QString, QString> m_trackerTitles;   // role -> window title the loaded script matches
 
     qint64 m_lastLauncherBadgeCount = -1;
     bool m_lastLauncherBadgeVisible = false;

@@ -79,8 +79,13 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     connect(&m_desktopIntegration, &DesktopIntegration::showWindowRequested, this, &AppController::showWindowRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::toggleMiniPlayerRequested, this, &AppController::toggleMiniPlayerRequested);
     connect(&m_desktopIntegration, &DesktopIntegration::quitRequested, this, &AppController::quitRequested);
-    connect(&m_desktopIntegration, &DesktopIntegration::miniPlayerPositionReported, this, [this](const QPoint& pos) {
-        m_settings.setMiniPlayerPosition(pos);
+    connect(&m_desktopIntegration, &DesktopIntegration::windowPositionReported, this,
+            [this](const QString& role, const QPoint& pos) {
+        if (role == QLatin1String(DesktopIntegration::MiniPlayerRole)) {
+            m_settings.setMiniPlayerPosition(pos);
+        } else if (role == QLatin1String(DesktopIntegration::MainWindowRole)) {
+            m_settings.setMainWindowPosition(pos);
+        }
     });
     connect(&m_issueTracker, &IssueTrackerService::listStatusMappingUpdated, &m_listManager, &ListManagerModel::updateListStatusMapping);
 
@@ -1354,24 +1359,32 @@ void AppController::configureMiniPlayerWindow(QObject* windowObject, bool always
     }
 }
 
+bool AppController::platformReportsWindowPosition(const QString& platformName) {
+    return !platformName.startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
+}
+
 static bool isWaylandPlatform() {
-    return QGuiApplication::platformName().startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
+    return !AppController::platformReportsWindowPosition(QGuiApplication::platformName());
+}
+
+static QList<QRect> availableScreenAreas() {
+    QList<QRect> screenAreas;
+    for (const QScreen* screen : QGuiApplication::screens()) {
+        screenAreas.append(screen->availableGeometry());
+    }
+    return screenAreas;
 }
 
 void AppController::miniPlayerShown(QObject* windowObject) {
     QWindow* win = qobject_cast<QWindow*>(windowObject);
     if (!win) return;
 
-    QList<QRect> screenAreas;
-    for (const QScreen* screen : QGuiApplication::screens()) {
-        screenAreas.append(screen->availableGeometry());
-    }
-    const std::optional<QPoint> position = DesktopIntegration::restorableMiniPlayerPosition(
-        m_settings.miniPlayerPosition(), win->size(), screenAreas);
+    const std::optional<QPoint> position = DesktopIntegration::restorableWindowPosition(
+        m_settings.miniPlayerPosition(), win->size(), availableScreenAreas());
 
     if (isWaylandPlatform()) {
         if (m_desktopIntegration.kwinIntegrationAvailable()) {
-            m_desktopIntegration.startMiniPlayerTracking(win, position);
+            m_desktopIntegration.startWindowTracking(QString::fromLatin1(DesktopIntegration::MiniPlayerRole), win, position);
         }
         return;
     }
@@ -1381,7 +1394,26 @@ void AppController::miniPlayerShown(QObject* windowObject) {
 }
 
 void AppController::miniPlayerHidden() {
-    m_desktopIntegration.stopMiniPlayerTracking();
+    m_desktopIntegration.stopWindowTracking(QString::fromLatin1(DesktopIntegration::MiniPlayerRole));
+}
+
+void AppController::mainWindowShown(QObject* windowObject) {
+    QWindow* win = qobject_cast<QWindow*>(windowObject);
+    if (!win || !isWaylandPlatform() || !m_desktopIntegration.kwinIntegrationAvailable()) return;
+    const std::optional<QPoint> position = DesktopIntegration::restorableWindowPosition(
+        m_settings.mainWindowPosition(), win->size(), availableScreenAreas());
+    m_desktopIntegration.startWindowTracking(QString::fromLatin1(DesktopIntegration::MainWindowRole), win, position);
+}
+
+void AppController::mainWindowHidden() {
+    m_desktopIntegration.stopWindowTracking(QString::fromLatin1(DesktopIntegration::MainWindowRole));
+}
+
+void AppController::persistMainWindowGeometry(QObject* windowObject) {
+    QWindow* win = qobject_cast<QWindow*>(windowObject);
+    if (!win) return;
+    const bool knowsPosition = !isWaylandPlatform();
+    m_settings.saveWindowGeometry(win->width(), win->height(), knowsPosition ? win->x() : -1, knowsPosition ? win->y() : -1);
 }
 
 void AppController::miniPlayerMoved(QObject* windowObject) {

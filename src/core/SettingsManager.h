@@ -167,6 +167,11 @@ public:
     [[nodiscard]] double ambientVolume() const;
     void setAmbientVolume(double volume);
 
+    // Last position of the main window as reported by the compositor (Wayland + KWin); empty until
+    // the window is first moved. windowPosition() is what Qt reports, which on Wayland is always 0,0.
+    [[nodiscard]] std::optional<QPoint> mainWindowPosition() const;
+    void setMainWindowPosition(const QPoint& pos);
+
     // Last position of the mini player in global screen coordinates; empty until it is first moved.
     [[nodiscard]] std::optional<QPoint> miniPlayerPosition() const;
     void setMiniPlayerPosition(const QPoint& pos);

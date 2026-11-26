@@ -140,6 +140,14 @@ public:
     // Mini player position: restored on show and saved after moves. On Wayland a client can neither
     // read nor set its global position, so there it goes through a KWin script (when KWin runs).
     Q_INVOKABLE void miniPlayerShown(QObject* windowObject);
+    // Main window: on Wayland + KWin its position is restored and saved through a KWin script;
+    // elsewhere Main.qml sets x/y itself. persistMainWindowGeometry stores the size, and the
+    // position only where Qt knows it (not on Wayland, where it reads 0,0).
+    Q_INVOKABLE void mainWindowShown(QObject* windowObject);
+    Q_INVOKABLE void mainWindowHidden();
+    Q_INVOKABLE void persistMainWindowGeometry(QObject* windowObject);
+    // False on Wayland, where a client can neither read nor set its global window position.
+    [[nodiscard]] static bool platformReportsWindowPosition(const QString& platformName);
     Q_INVOKABLE void miniPlayerHidden();
     Q_INVOKABLE void miniPlayerMoved(QObject* windowObject);
     Q_INVOKABLE void checkDueReminders();

@@ -378,6 +378,18 @@ void SettingsManager::setAmbientVolume(double volume) {
     m_settings.setValue(QStringLiteral("Ambient/volume"), qBound(0.0, volume, 1.0));
 }
 
+std::optional<QPoint> SettingsManager::mainWindowPosition() const {
+    const QVariant value = m_settings.value(QStringLiteral("SavedState/main_window_pos"));
+    if (!value.isValid() || !value.canConvert<QPoint>()) {
+        return std::nullopt;
+    }
+    return value.toPoint();
+}
+
+void SettingsManager::setMainWindowPosition(const QPoint& pos) {
+    m_settings.setValue(QStringLiteral("SavedState/main_window_pos"), pos);
+}
+
 std::optional<QPoint> SettingsManager::miniPlayerPosition() const {
     const QVariant value = m_settings.value(QStringLiteral("SavedState/mini_player_pos"));
     if (!value.isValid() || !value.canConvert<QPoint>()) {
