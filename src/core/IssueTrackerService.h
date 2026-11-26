@@ -29,6 +29,10 @@ struct RemoteIssueItem {
     QString remotePriority;
     quint8 priority = TxtTask::NoPriority;
     quint32 durationSeconds = 0;
+    // Set by parsers whose sync response always carries the field: an empty value then means it was
+    // removed on the tracker (and is cleared locally), not that it was not fetched.
+    bool detailsFetched = false;
+    bool commentsFetched = false;
 };
 
 class IssueTrackerService : public QObject {

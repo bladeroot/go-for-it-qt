@@ -347,6 +347,8 @@ QVector<RemoteIssueItem> IssueTrackerService::parseJiraIssuesJson(const QByteArr
         item.key = key;
         item.description = desc;
         item.details = fullDetails;
+        item.detailsFetched = true;
+        item.commentsFetched = true;
         item.comments = parsedComments;
         item.remoteStatus = rawStatusName;
         item.remoteStatusCategory = statusCategoryKey;

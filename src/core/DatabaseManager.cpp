@@ -311,9 +311,12 @@ bool DatabaseManager::upsertRemoteIssueTask(const QString& listId,
                                             const QString& details,
                                             const QVariantList& comments,
                                             bool* outIsNew,
-                                            QString* outOldStatus)
+                                            QString* outOldStatus,
+                                            bool replaceDetails,
+                                            bool replaceComments)
 {
-    return m_taskRepo.upsertRemoteIssueTask(listId, issueKey, description, localStatus, priority, durationSeconds, details, comments, outIsNew, outOldStatus);
+    return m_taskRepo.upsertRemoteIssueTask(listId, issueKey, description, localStatus, priority, durationSeconds, details, comments,
+                                            outIsNew, outOldStatus, replaceDetails, replaceComments);
 }
 
 qint64 DatabaseManager::insertActivityLog(const QString& listId,

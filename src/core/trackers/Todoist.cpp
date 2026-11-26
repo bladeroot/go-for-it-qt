@@ -53,6 +53,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseTodoistTasksJson(const QByteA
         item.key = displayKey;
         item.description = desc;
         item.details = description;
+        item.detailsFetched = true;
         item.remoteStatus = isCompleted ? QStringLiteral("completed") : QStringLiteral("open");
         item.remotePriority = QStringLiteral("Priority %1").arg(priorityNum);
         item.priority = prio;

@@ -89,6 +89,8 @@ QVector<RemoteIssueItem> IssueTrackerService::parseYouTrackIssuesJson(const QByt
         item.key = key;
         item.description = desc;
         item.details = fullDetails;
+        item.detailsFetched = true;
+        item.commentsFetched = true;
         item.comments = parsedComments;
         item.remoteStatus = rawStateName;
         item.remoteStatusCategory = isResolved ? QStringLiteral("done") : QStringLiteral("");

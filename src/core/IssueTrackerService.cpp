@@ -269,7 +269,8 @@ void IssueTrackerService::processSyncedItems(const TodoListEntry& entry,
         QString oldStatus;
         const bool ok = db.upsertRemoteIssueTask(
             entry.id, item.key, item.description, localStatus, localPriority,
-            item.durationSeconds, item.details, item.comments, &isNew, &oldStatus
+            item.durationSeconds, item.details, item.comments, &isNew, &oldStatus,
+            item.detailsFetched, item.commentsFetched
         );
         if (!ok) {
             hasDbError = true;

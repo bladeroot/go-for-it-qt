@@ -496,7 +496,9 @@ bool TaskRepository::upsertRemoteIssueTask(const QString& listId,
                                            const QString& details,
                                            const QVariantList& comments,
                                            bool* outIsNew,
-                                           QString* outOldStatus)
+                                           QString* outOldStatus,
+                                           bool replaceDetails,
+                                           bool replaceComments)
 {
     if (outIsNew) *outIsNew = false;
     if (outOldStatus) outOldStatus->clear();
@@ -581,8 +583,10 @@ bool TaskRepository::upsertRemoteIssueTask(const QString& listId,
         upd.bindValue(QStringLiteral(":sort_order"), targetOrder);
         upd.bindValue(QStringLiteral(":priority"), static_cast<int>(priority));
         upd.bindValue(QStringLiteral(":duration"), durationSeconds > 0 ? durationSeconds : existingDur);
-        upd.bindValue(QStringLiteral(":details"), !details.trimmed().isEmpty() ? nonNullString(details) : nonNullString(existingDetails));
-        const QString commentsJson = !comments.isEmpty() ? serializeCommentsList(comments) : existingCommentsJson;
+        const bool keepDetails = !replaceDetails && details.trimmed().isEmpty();
+        upd.bindValue(QStringLiteral(":details"), nonNullString(keepDetails ? existingDetails : details));
+        const bool keepComments = !replaceComments && comments.isEmpty();
+        const QString commentsJson = keepComments ? existingCommentsJson : serializeCommentsList(comments);
         upd.bindValue(QStringLiteral(":comments_json"), nonNullString(commentsJson));
         upd.bindValue(QStringLiteral(":id"), existingId);
         if (!upd.exec() || upd.numRowsAffected() <= 0) {

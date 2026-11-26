@@ -189,6 +189,8 @@ QVector<RemoteIssueItem> IssueTrackerService::parseNextcloudTasksIcs(const QByte
         item.key = key;
         item.description = desc;
         item.details = description;
+        item.detailsFetched = true;
+        item.commentsFetched = true;
         item.comments = comments;
         item.remoteStatus = statusStr.isEmpty() ? QStringLiteral("needs-action") : statusStr;
         item.remotePriority = priorityNum > 0 ? QString::number(priorityNum) : QString();

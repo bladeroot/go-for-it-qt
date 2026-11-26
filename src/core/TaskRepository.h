@@ -46,7 +46,11 @@ public:
                                const QString& details = {},
                                const QVariantList& comments = {},
                                bool* outIsNew = nullptr,
-                               QString* outOldStatus = nullptr);
+                               QString* outOldStatus = nullptr,
+                               // true: `details` / `comments` are the tracker's complete current value, so an
+                               // empty one clears the stored value; false: empty means "not fetched", keep it.
+                               bool replaceDetails = false,
+                               bool replaceComments = false);
 
 private:
     [[nodiscard]] QSqlDatabase db() const;

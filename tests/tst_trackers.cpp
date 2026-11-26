@@ -329,6 +329,73 @@ private slots:
         SystemHookService::setSystemIntegrationEnabled(false);
     }
 
+    // KB-146: processSyncedItems kept a task's old details (and comments) whenever a sync returned
+    // them empty, so a description or comments removed on the tracker stayed in the app forever.
+    // Every parser reads the description from the response, so an empty one is authoritative;
+    // comments only where the sync request returns them (Jira, YouTrack, Nextcloud).
+    void testSyncClearsDetailsAndCommentsRemovedOnTracker() {
+        const QString testDb = m_testSandbox.filePath(QStringLiteral("kb146_stale.db"));
+        QFile::remove(testDb);
+        DatabaseManager& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(testDb));
+        IssueTrackerService svc;
+        auto taskFor = [&](const QString& listId, const QString& key) {
+            for (const TxtTask& t : db.loadTasks(listId, false)) {
+                if (t.jiraKey() == key) return t;
+            }
+            return TxtTask();
+        };
+        auto makeList = [&](const QString& provider) {
+            TodoListEntry entry;
+            entry.id = QStringLiteral("kb146_%1").arg(provider.toLower());
+            entry.name = provider;
+            entry.provider = provider;
+            entry.jiraUrl = QStringLiteral("https://example.com");
+            [&] { QVERIFY(db.saveList(entry, 0)); }();
+            return entry;
+        };
+
+        // Jira: description and comments come with every sync.
+        const TodoListEntry jira = makeList(QStringLiteral("Jira"));
+        const QByteArray jiraWith = R"({"issues":[{"key":"KB146-1","fields":{"summary":"Spec",
+            "description":"Old description","comment":{"comments":[{"author":{"displayName":"Alice"},
+            "created":"2026-11-05T14:20:00.000+0000","body":"Old comment"}]},"status":{"name":"To Do"}}}]})";
+        const QByteArray jiraWithout = R"({"issues":[{"key":"KB146-1","fields":{"summary":"Spec",
+            "description":null,"comment":{"comments":[]},"status":{"name":"To Do"}}}]})";
+        svc.processSyncedItems(jira, IssueTrackerService::parseJiraIssuesJson(jiraWith), QStringLiteral("Jira"));
+        QCOMPARE(taskFor(jira.id, QStringLiteral("KB146-1")).details(), QStringLiteral("Old description"));
+        QCOMPARE(taskFor(jira.id, QStringLiteral("KB146-1")).comments().size(), 1);
+        svc.processSyncedItems(jira, IssueTrackerService::parseJiraIssuesJson(jiraWithout), QStringLiteral("Jira"));
+        QCOMPARE(taskFor(jira.id, QStringLiteral("KB146-1")).details(), QString());
+        QCOMPARE(taskFor(jira.id, QStringLiteral("KB146-1")).comments().size(), 0);
+
+        // GitHub: the body comes with every sync, comments never do, so stored comments stay.
+        const TodoListEntry gh = makeList(QStringLiteral("GitHub"));
+        auto ghJson = [](const char* body) {
+            const char* tmpl = R"({"total_count":1,"items":[{"number":7,"title":"Bug","body":%1,"state":"open",
+                "repository_url":"https://api.github.com/repos/owner/repo"}]})";
+            return QString::fromUtf8(tmpl).arg(QString::fromUtf8(body)).toUtf8();
+        };
+        QVector<RemoteIssueItem> ghItems = IssueTrackerService::parseGitHubIssuesJson(ghJson("\"Old body\""));
+        QCOMPARE(ghItems.size(), 1);
+        const QString ghKey = ghItems.first().key;
+        ghItems.first().comments = {QVariantMap{{QStringLiteral("author"), QStringLiteral("me")},
+                                                {QStringLiteral("body"), QStringLiteral("Kept comment")}}};
+        svc.processSyncedItems(gh, ghItems, QStringLiteral("GitHub"));
+        QCOMPARE(taskFor(gh.id, ghKey).details(), QStringLiteral("Old body"));
+        QCOMPARE(taskFor(gh.id, ghKey).comments().size(), 1);
+        svc.processSyncedItems(gh, IssueTrackerService::parseGitHubIssuesJson(ghJson("null")), QStringLiteral("GitHub"));
+        QCOMPARE(taskFor(gh.id, ghKey).details(), QString());
+        QCOMPARE(taskFor(gh.id, ghKey).comments().size(), 1);
+
+        // Which parsers report details / comments as complete.
+        QVERIFY(IssueTrackerService::parseJiraIssuesJson(jiraWithout).first().detailsFetched);
+        QVERIFY(IssueTrackerService::parseJiraIssuesJson(jiraWithout).first().commentsFetched);
+        QVERIFY(IssueTrackerService::parseGitHubIssuesJson(ghJson("null")).first().detailsFetched);
+        QVERIFY(!IssueTrackerService::parseGitHubIssuesJson(ghJson("null")).first().commentsFetched);
+        DatabaseManager::instance().close();
+    }
+
     void testJiraAndYouTrackIntegration() {
         const QByteArray jiraSample = R"({
             "issues": [

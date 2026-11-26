@@ -129,6 +129,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitHubIssuesJson(const QByteA
         item.key = key;
         item.description = desc;
         item.details = body;
+        item.detailsFetched = true;
         item.remoteStatus = remoteStatus;
         item.remotePriority = detectedPriorityName;
         item.priority = prio;

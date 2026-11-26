@@ -105,6 +105,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseRedmineIssuesJson(const QByte
         item.key = key;
         item.description = desc;
         item.details = description;
+        item.detailsFetched = true;
         item.remoteStatus = statusName.isEmpty() ? (isClosed ? QStringLiteral("Closed") : QStringLiteral("open")) : statusName;
         if (isClosed) {
             item.remoteStatusCategory = QStringLiteral("done");

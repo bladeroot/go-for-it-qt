@@ -87,6 +87,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabIssuesJson(const QByteA
         item.key = key;
         item.description = desc;
         item.details = description;
+        item.detailsFetched = true;
         item.remoteStatus = state;
         item.remotePriority = detectedPriorityName;
         item.priority = prio;
@@ -180,6 +181,7 @@ QVector<RemoteIssueItem> IssueTrackerService::parseGitLabMergeRequestsJson(const
         item.key = key;
         item.description = desc;
         item.details = description;
+        item.detailsFetched = true;
         item.remoteStatus = remoteStatus;
         item.remotePriority = detectedPriorityName;
         item.priority = prio;
