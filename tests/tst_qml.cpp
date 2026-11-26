@@ -29,6 +29,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeySequence>
+#include <QScopeGuard>
 #include <QScreen>
 #include <QGuiApplication>
 #include <QObject>
@@ -1335,6 +1336,40 @@ private slots:
         QCOMPARE(pin->property("hint").toString(), QCoreApplication::translate("MiniPlayerWindow", "Keep the mini player on top of other windows"));
         QVERIFY(QMetaObject::invokeMethod(pin, "clicked"));
         QVERIFY(mini->property("alwaysOnTop").toBool());
+    }
+
+    // KB-147: the timer view's ambient sound combo took its names from a one-shot availableModes()
+    // call, so after switching the UI language it kept showing the old language.
+    void testAmbientComboFollowsLanguageChange() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb147_qml.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString previousLanguage = controller.settings()->language();
+        auto restore = qScopeGuard([&] {
+            controller.settings()->setLanguage(previousLanguage);
+            controller.ambient()->setAmbientMode(QStringLiteral("none"));
+        });
+        controller.settings()->setLanguage(QStringLiteral("en"));
+        controller.ambient()->setAmbientMode(QStringLiteral("rain"));
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb147_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QObject* combo = root->findChild<QObject*>(QStringLiteral("timerAmbientCombo"));
+        QVERIFY(combo);
+        QTRY_COMPARE(combo->property("currentText").toString(), QStringLiteral("Gentle Rain (Rainfall)"));
+
+        controller.settings()->setLanguage(QStringLiteral("de"));
+        const QString german = QCoreApplication::translate("AmbientSoundService", "Gentle Rain (Rainfall)");
+        QVERIFY(german != QStringLiteral("Gentle Rain (Rainfall)"));
+        QTRY_COMPARE(combo->property("currentText").toString(), german);
+        QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("rain"));
+        QCOMPARE(controller.ambient()->ambientModeName(), german);
     }
 
     // KB-142 on platforms where Qt knows window positions (X11; here offscreen): Main.qml's mini

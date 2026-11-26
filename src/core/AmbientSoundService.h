@@ -13,7 +13,9 @@ namespace gofi {
 class AmbientSoundService : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString ambientMode READ ambientMode WRITE setAmbientMode NOTIFY ambientModeChanged)
-    Q_PROPERTY(QString ambientModeName READ ambientModeName NOTIFY ambientModeChanged)
+    Q_PROPERTY(QString ambientModeName READ ambientModeName NOTIFY ambientModeNameChanged)
+    // Re-read on language changes (modesChanged), unlike the one-shot availableModes() call.
+    Q_PROPERTY(QVariantList modes READ availableModes NOTIFY modesChanged)
     Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool isPlaying READ isPlaying NOTIFY playingChanged)
 
@@ -32,11 +34,16 @@ public:
     [[nodiscard]] bool isPlaying() const noexcept { return m_isPlaying; }
 
     Q_INVOKABLE QVariantList availableModes() const;
+    [[nodiscard]] static bool isKnownMode(const QString& mode);
+    // Re-emits the translated names (call after the UI language changed).
+    void retranslate();
 
     static bool generateAmbientWav(const QString& type, const QString& destinationPath);
 
 signals:
     void ambientModeChanged();
+    void ambientModeNameChanged();
+    void modesChanged();
     void volumeChanged();
     void playingChanged();
 

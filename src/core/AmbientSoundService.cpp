@@ -93,11 +93,23 @@ void AmbientSoundService::setVolume(double vol) {
     emit volumeChanged();
 }
 
+bool AmbientSoundService::isKnownMode(const QString& mode) {
+    static const QStringList known = {QStringLiteral("none"), QStringLiteral("white_noise"), QStringLiteral("rain"),
+                                      QStringLiteral("ocean"), QStringLiteral("clock")};
+    return known.contains(mode.trimmed().toLower());
+}
+
+void AmbientSoundService::retranslate() {
+    emit modesChanged();
+    emit ambientModeNameChanged();
+}
+
 void AmbientSoundService::setAmbientMode(const QString& mode) {
     const QString norm = mode.trimmed().toLower();
-    if (m_mode == norm) return;
+    if (m_mode == norm || !isKnownMode(norm)) return;
     m_mode = norm;
     emit ambientModeChanged();
+    emit ambientModeNameChanged();
 
     if (m_mode == QStringLiteral("none") || QStandardPaths::isTestModeEnabled()) {
         if (m_player) m_player->stop();

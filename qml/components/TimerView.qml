@@ -182,7 +182,9 @@ Item {
                 implicitWidth: 210
                 textRole: "name"
                 valueRole: "id"
-                model: app.ambient ? app.ambient.availableModes() : []
+                model: app.ambient ? app.ambient.modes : []
+                // The names are re-read after a language change; keep the selected mode.
+                onModelChanged: Qt.callLater(syncMode)
                 function syncMode() {
                     if (!app.ambient) return
                     for (let i = 0; i < count; ++i) {

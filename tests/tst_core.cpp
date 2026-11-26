@@ -3567,6 +3567,37 @@ private slots:
         QCOMPARE(titles(), QStringList{dueToday});
     }
 
+    // KB-147: the ambient sound chosen in the timer view or mini player was lost on every restart.
+    void testAmbientSoundChoiceSurvivesRestart() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb147_ambient.db"));
+        QFile::remove(dbPath);
+        {
+            AppController ctrl(QString(), dbPath);
+            QCOMPARE(ctrl.ambient()->ambientMode(), QStringLiteral("none"));
+            ctrl.ambient()->setAmbientMode(QStringLiteral("rain"));
+            ctrl.ambient()->setVolume(0.3);
+        }
+        DatabaseManager::instance().close();
+        {
+            AppController ctrl(QString(), dbPath);
+            QCOMPARE(ctrl.ambient()->ambientMode(), QStringLiteral("rain"));
+            QVERIFY(qFuzzyCompare(ctrl.ambient()->volume(), 0.3));
+            ctrl.ambient()->setAmbientMode(QStringLiteral("none"));
+            ctrl.ambient()->setVolume(0.5);
+        }
+        DatabaseManager::instance().close();
+        {
+            // An unknown stored value (hand-edited or from a future version) falls back to "none".
+            AppController ctrl(QString(), dbPath);
+            ctrl.settings()->setAmbientMode(QStringLiteral("whale_song"));
+        }
+        DatabaseManager::instance().close();
+        {
+            AppController ctrl(QString(), dbPath);
+            QCOMPARE(ctrl.ambient()->ambientMode(), QStringLiteral("none"));
+        }
+    }
+
     void testUkTranslatorPluralHandling() {
         const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
         QFile::remove(dbPath);

@@ -360,6 +360,24 @@ void SettingsManager::setWindowPosition(const QPoint& pos) {
     m_settings.setValue(QStringLiteral("SavedState/window_pos"), pos);
 }
 
+QString SettingsManager::ambientMode() const {
+    return m_settings.value(QStringLiteral("Ambient/mode"), QStringLiteral("none")).toString();
+}
+
+void SettingsManager::setAmbientMode(const QString& mode) {
+    m_settings.setValue(QStringLiteral("Ambient/mode"), mode);
+}
+
+double SettingsManager::ambientVolume() const {
+    bool ok = false;
+    const double v = m_settings.value(QStringLiteral("Ambient/volume"), 0.5).toDouble(&ok);
+    return ok ? qBound(0.0, v, 1.0) : 0.5;
+}
+
+void SettingsManager::setAmbientVolume(double volume) {
+    m_settings.setValue(QStringLiteral("Ambient/volume"), qBound(0.0, volume, 1.0));
+}
+
 std::optional<QPoint> SettingsManager::miniPlayerPosition() const {
     const QVariant value = m_settings.value(QStringLiteral("SavedState/mini_player_pos"));
     if (!value.isValid() || !value.canConvert<QPoint>()) {

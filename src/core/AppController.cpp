@@ -43,6 +43,17 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         applyLanguageTranslator();
         emit languageChanged();
     });
+    connect(this, &AppController::languageChanged, &m_ambient, &AmbientSoundService::retranslate);
+
+    // Restore the ambient sound chosen last time and remember later changes.
+    m_ambient.setVolume(m_settings.ambientVolume());
+    m_ambient.setAmbientMode(m_settings.ambientMode());
+    connect(&m_ambient, &AmbientSoundService::ambientModeChanged, this, [this]() {
+        m_settings.setAmbientMode(m_ambient.ambientMode());
+    });
+    connect(&m_ambient, &AmbientSoundService::volumeChanged, this, [this]() {
+        m_settings.setAmbientVolume(m_ambient.volume());
+    });
 
     m_todoProxy.setSourceModel(m_taskManager.todoModel());
     // hasNextTask/hasPreviousTask depend on the active row and on what the filter shows.

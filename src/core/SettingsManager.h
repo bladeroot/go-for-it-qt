@@ -161,6 +161,12 @@ public:
     [[nodiscard]] QPoint windowPosition() const;
     void setWindowPosition(const QPoint& pos);
 
+    // Ambient sound chosen in the timer view / mini player, restored on the next start.
+    [[nodiscard]] QString ambientMode() const;
+    void setAmbientMode(const QString& mode);
+    [[nodiscard]] double ambientVolume() const;
+    void setAmbientVolume(double volume);
+
     // Last position of the mini player in global screen coordinates; empty until it is first moved.
     [[nodiscard]] std::optional<QPoint> miniPlayerPosition() const;
     void setMiniPlayerPosition(const QPoint& pos);
