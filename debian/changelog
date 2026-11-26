@@ -1,3 +1,13 @@
+go-for-it-qt (2.0.6-1) unstable; urgency=medium
+
+  * Release 2.0.6.
+  * Switch lists from a toolbar menu; checkboxes show several lists
+    together. The "Switch View / Filter" submenu moved there.
+  * TUI: the list picker (L) checks the lists already shown, so Space
+    adds lists to the current view or removes them.
+
+ -- Yurii Myronchuk <bladeroot@gmail.com>  Thu, 26 Nov 2026 12:00:00 +0100
+
 go-for-it-qt (2.0.5-1) unstable; urgency=medium
 
   * Release 2.0.5.
