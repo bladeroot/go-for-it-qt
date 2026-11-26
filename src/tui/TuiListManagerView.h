@@ -49,6 +49,9 @@ private:
     AppController* m_app = nullptr;
     int m_listPickerRow = 0;
     QSet<QString> m_selectedListIds;
+    // Lists checked when the picker opened (those already shown). Enter applies the checkboxes
+    // only once they differ from this; otherwise it opens the highlighted list (KB-79).
+    QSet<QString> m_initialSelection;
     int m_listEditRow = 0;
     QVariantMap m_editingListCfg;
 };

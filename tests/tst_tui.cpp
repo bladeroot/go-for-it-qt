@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "tui/TuiListManagerView.h"
 
 #include "core/ActivityLog.h"
 #include "core/AnalyticsService.h"
@@ -694,6 +695,86 @@ private slots:
         ::close(fds[1]);
 
         QCOMPARE(ctrl.currentListId(), listB);
+        DatabaseManager::instance().close();
+        QFile::remove(dbPath);
+    }
+
+    // The TUI list picker (L) checks the lists the task view shows, so Space adds a list to the
+    // current one or removes it, and Enter applies that; without changes Enter still opens the
+    // highlighted list alone (KB-79).
+    void testTuiListPickerCombinesListsWithCurrentView() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("tui_picker_multi.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString listA = ctrl.listManager()->addList(QStringLiteral("Picker A"));
+        const QString listB = ctrl.listManager()->addList(QStringLiteral("Picker B"));
+        const QString listC = ctrl.listManager()->addList(QStringLiteral("Picker C"));
+        const int rowA = ctrl.listManager()->indexOfId(listA);
+        const int rowB = ctrl.listManager()->indexOfId(listB);
+        const int rowC = ctrl.listManager()->indexOfId(listC);
+        ctrl.selectListById(listA);
+
+        TuiListManagerView picker(&ctrl);
+        QString status;
+        auto press = [&](const QByteArray& key) { return picker.handlePickerKey(key, status); };
+        auto activeSet = [&]() {
+            const QStringList ids = ctrl.activeListIds();
+            return QSet<QString>(ids.begin(), ids.end());
+        };
+
+        // A is open; check B as well and apply: both are shown.
+        picker.openPicker();
+        QCOMPARE(picker.pickerRow(), rowA);
+        picker.setPickerRow(rowB);
+        press(" ");
+        QCOMPARE(press("\r"), ListPickerKeyResult::Applied);
+        QVERIFY(ctrl.isMultiListView());
+        QCOMPARE(activeSet(), (QSet<QString>{listA, listB}));
+
+        // Reopened: A and B are checked; add C, drop A.
+        picker.openPicker();
+        picker.setPickerRow(rowC);
+        press(" ");
+        picker.setPickerRow(rowA);
+        press(" ");
+        press("\r");
+        QCOMPARE(activeSet(), (QSet<QString>{listB, listC}));
+
+        // Unchecking all but one shows that list alone.
+        picker.openPicker();
+        picker.setPickerRow(rowB);
+        press(" ");
+        press("\r");
+        QVERIFY(!ctrl.isMultiListView());
+        QCOMPARE(ctrl.currentListId(), listC);
+
+        // No checkbox changed: Enter opens the highlighted list alone.
+        picker.openPicker();
+        picker.setPickerRow(rowA);
+        press("\r");
+        QVERIFY(!ctrl.isMultiListView());
+        QCOMPARE(ctrl.currentListId(), listA);
+
+        // From "All Lists" (everything checked) unchecking one shows all the others.
+        ctrl.showAllLists();
+        picker.openPicker();
+        picker.setPickerRow(rowB);
+        press(" ");
+        press("\r");
+        QSet<QString> expected;
+        for (int i = 0; i < ctrl.listManager()->rowCount(); ++i) expected.insert(ctrl.listManager()->entry(i).id);
+        expected.remove(listB);
+        QVERIFY(ctrl.isMultiListView());
+        QCOMPARE(activeSet(), expected);
+
+        // Checking everything again switches to the "All Lists" view.
+        picker.openPicker();
+        picker.setPickerRow(rowB);
+        press(" ");
+        press("\r");
+        QVERIFY(ctrl.isMultiListView());
+        QVERIFY(ctrl.activeListIds().isEmpty());
+
         DatabaseManager::instance().close();
         QFile::remove(dbPath);
     }

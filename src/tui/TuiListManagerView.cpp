@@ -19,13 +19,20 @@ void TuiListManagerView::setController(AppController* controller) {
 void TuiListManagerView::openPicker() {
     if (!m_app) return;
     m_listPickerRow = qMax(0, m_app->listManager()->indexOfId(m_app->currentListId()));
+    // Check the lists the task view shows now, so Space adds lists to (or removes them from) it.
     m_selectedListIds.clear();
-    if (m_app->isMultiListView()) {
-        const QStringList active = m_app->activeListIds();
-        for (const QString& id : active) {
+    if (!m_app->isMultiListView()) {
+        if (!m_app->currentListId().isEmpty()) m_selectedListIds.insert(m_app->currentListId());
+    } else if (m_app->activeListIds().isEmpty()) {  // "All Lists"
+        for (int i = 0; i < m_app->listManager()->rowCount(); ++i) {
+            m_selectedListIds.insert(m_app->listManager()->entry(i).id);
+        }
+    } else {
+        for (const QString& id : m_app->activeListIds()) {
             m_selectedListIds.insert(id);
         }
     }
+    m_initialSelection = m_selectedListIds;
 }
 
 ListPickerKeyResult TuiListManagerView::handlePickerKey(const QByteArray& seq, QString& statusMessage) {
@@ -101,18 +108,30 @@ ListPickerKeyResult TuiListManagerView::handlePickerKey(const QByteArray& seq, Q
     if (seq == "d" && nLists > 1 && m_listPickerRow >= 0 && m_listPickerRow < nLists) {
         const TodoListEntry entry = m_app->listManager()->entry(m_listPickerRow);
         m_selectedListIds.remove(entry.id);
+        m_initialSelection.remove(entry.id);
         m_app->listManager()->removeListById(entry.id);
         m_listPickerRow = qBound(0, m_listPickerRow, m_app->listManager()->rowCount() - 1);
         statusMessage = QCoreApplication::translate("TuiApp", "Removed list '%1'.").arg(entry.name);
         return ListPickerKeyResult::Handled;
     }
-    // Apply selection: Enter
+    // Enter: apply the checkboxes if they were changed, otherwise open the highlighted list alone.
     if (seq == "\r" || seq == "\n") {
-        if (m_selectedListIds.size() > 1) {
-            QStringList ids = m_selectedListIds.values();
-            m_app->setMultiListFilter(ids, QCoreApplication::translate("TuiApp", "Selected Lists (%1)").arg(ids.size()));
-            statusMessage = QCoreApplication::translate("TuiApp", "Showing %1 selected lists.").arg(ids.size());
-        } else if (m_selectedListIds.size() == 1) {
+        const bool selectionChanged = !m_selectedListIds.isEmpty() && m_selectedListIds != m_initialSelection;
+        if (selectionChanged && m_selectedListIds.size() > 1) {
+            // Keep the list manager's order, and use the "All Lists" view when everything is checked.
+            QStringList ids;
+            for (int i = 0; i < nLists; ++i) {
+                const QString id = m_app->listManager()->entry(i).id;
+                if (m_selectedListIds.contains(id)) ids.append(id);
+            }
+            if (ids.size() == nLists) {
+                m_app->showAllLists();
+                statusMessage = QCoreApplication::translate("TuiApp", "Switched to All Lists (%1 lists).").arg(nLists);
+            } else {
+                m_app->setMultiListFilter(ids, QCoreApplication::translate("TuiApp", "Selected Lists (%1)").arg(ids.size()));
+                statusMessage = QCoreApplication::translate("TuiApp", "Showing %1 selected lists.").arg(ids.size());
+            }
+        } else if (selectionChanged) {
             const QString selId = *m_selectedListIds.begin();
             m_app->selectListById(selId);
             statusMessage = QCoreApplication::translate("TuiApp", "Switched to list '%1'.").arg(m_app->currentListName());
