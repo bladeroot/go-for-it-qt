@@ -13,7 +13,7 @@
 #include "TaskFilterProxyModel.h"
 #include "TaskManager.h"
 #include "TaskTimer.h"
-#include "UkTranslator.h"
+#include "JsonTranslator.h"
 #include <QObject>
 #include <QTimer>
 
@@ -194,7 +194,7 @@ private:
     bool changeTaskStatusSource(bool fromDoneList, int sourceRow, const QString& newStatus);
 
     SettingsManager m_settings;
-    UkTranslator m_ukTranslator;
+    JsonTranslator m_translator;
     ShortcutManager m_shortcuts;
     TaskTimer m_timer;
     NotificationService m_notifications;

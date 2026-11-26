@@ -55,7 +55,7 @@ directory when finished. There is no configured linter or formatter.
   are exact English source strings. Keep the language files' key sets aligned.
   Build-tree data is copied at CMake configure time, so reconfigure after
   editing translations. Preserve the resource initialization in
-  `UkTranslator.cpp` when changing embedded translations.
+  `JsonTranslator.cpp` when changing embedded translations.
 - Use a throwaway `--db` path for manual runs that may write data. User
   preferences are split between `go-for-it.ini`, `shortcuts.ini`, and
   `settings.ini`; do not treat legacy `lists.ini` as active configuration.

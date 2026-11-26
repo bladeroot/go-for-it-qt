@@ -8,10 +8,10 @@
 
 namespace gofi {
 
-class UkTranslator : public QTranslator {
+class JsonTranslator : public QTranslator {
     Q_OBJECT
 public:
-    explicit UkTranslator(QObject* parent = nullptr);
+    explicit JsonTranslator(QObject* parent = nullptr);
 
     void setLanguageCode(const QString& code);
     [[nodiscard]] QString languageCode() const { return m_langCode; }

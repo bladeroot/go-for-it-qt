@@ -1,4 +1,4 @@
-#include "UkTranslator.h"
+#include "JsonTranslator.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -16,13 +16,13 @@ static void initTranslationsResource() {
 
 namespace gofi {
 
-UkTranslator::UkTranslator(QObject* parent)
+JsonTranslator::JsonTranslator(QObject* parent)
     : QTranslator(parent)
 {
     reloadTranslations();
 }
 
-void UkTranslator::reloadTranslations() {
+void JsonTranslator::reloadTranslations() {
     initTranslationsResource();
     m_dicts.clear();
     m_availableLanguages.clear();
@@ -60,7 +60,7 @@ void UkTranslator::reloadTranslations() {
     }
 }
 
-bool UkTranslator::loadTranslationsFromJson(const QString& filePath, const QString& langCode) {
+bool JsonTranslator::loadTranslationsFromJson(const QString& filePath, const QString& langCode) {
     QFile f(filePath);
     if (!f.open(QIODevice::ReadOnly)) return false;
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
@@ -80,7 +80,7 @@ bool UkTranslator::loadTranslationsFromJson(const QString& filePath, const QStri
     return true;
 }
 
-void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
+void JsonTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
     if (dirPath.isEmpty()) return;
     QDir dir(dirPath);
     if (!dir.exists()) return;
@@ -99,11 +99,11 @@ void UkTranslator::loadTranslationsFromDirectory(const QString& dirPath) {
     }
 }
 
-void UkTranslator::setLanguageCode(const QString& code) {
+void JsonTranslator::setLanguageCode(const QString& code) {
     m_langCode = code.trimmed().toLower();
 }
 
-bool UkTranslator::hasLanguage(const QString& code) const {
+bool JsonTranslator::hasLanguage(const QString& code) const {
     const QString c = code.trimmed().toLower();
     if (c.isEmpty()) return false;
     if (m_dicts.contains(c) && !m_dicts.value(c).isEmpty()) return true;
@@ -114,7 +114,7 @@ bool UkTranslator::hasLanguage(const QString& code) const {
     return false;
 }
 
-QString UkTranslator::languageDisplayName(const QString& code) const {
+QString JsonTranslator::languageDisplayName(const QString& code) const {
     const QString c = code.trimmed().toLower();
     if (c == QStringLiteral("system")) {
         return tr("System (Auto)");
@@ -140,7 +140,7 @@ QString UkTranslator::languageDisplayName(const QString& code) const {
     return c;
 }
 
-QVariantList UkTranslator::availableLanguagesModel() const {
+QVariantList JsonTranslator::availableLanguagesModel() const {
     QVariantList list;
 
     // 1. System (Auto)
@@ -174,7 +174,7 @@ QVariantList UkTranslator::availableLanguagesModel() const {
     return list;
 }
 
-QStringList UkTranslator::availableLanguageCodes() const {
+QStringList JsonTranslator::availableLanguageCodes() const {
     QStringList list;
     list.append(QStringLiteral("system"));
     QStringList codes = m_availableLanguages;
@@ -194,7 +194,7 @@ QStringList UkTranslator::availableLanguageCodes() const {
     return list;
 }
 
-QString UkTranslator::resolveEffectiveLanguage(const QString& requestedCode) const {
+QString JsonTranslator::resolveEffectiveLanguage(const QString& requestedCode) const {
     const QString norm = requestedCode.trimmed().toLower();
     if (norm == QStringLiteral("en")) {
         return QStringLiteral("en");
@@ -225,7 +225,7 @@ QString UkTranslator::resolveEffectiveLanguage(const QString& requestedCode) con
     return QStringLiteral("en");
 }
 
-QString UkTranslator::translate(const char* context,
+QString JsonTranslator::translate(const char* context,
                                 const char* sourceText,
                                 const char* disambiguation,
                                 int n) const

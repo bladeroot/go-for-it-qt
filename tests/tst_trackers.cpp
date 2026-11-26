@@ -1065,9 +1065,9 @@ private slots:
             QCOMPARE(redmineStatuses.at(2).toMap().value(QStringLiteral("remoteId")).toInt(), 5);
         }
 
-        // Test 9: UkTranslator new translations and JSON loading
+        // Test 9: JsonTranslator new translations and JSON loading
         {
-            UkTranslator translator;
+            JsonTranslator translator;
             translator.setLanguageCode(QStringLiteral("uk"));
             const QString trSync = translator.translate("TxtListEditDialog", "Sync task completion back to tracker");
             QCOMPARE(trSync, QStringLiteral("Синхронізувати завершення задач із трекером"));

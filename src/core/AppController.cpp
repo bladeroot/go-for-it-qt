@@ -18,7 +18,7 @@ namespace gofi {
 AppController::AppController(const QString& logFilePath, const QString& customDbPath, QObject* parent)
     : QObject(parent)
     , m_settings(this)
-    , m_ukTranslator(this)
+    , m_translator(this)
     , m_shortcuts(this)
     , m_timer(&m_settings, this)
     , m_notifications(&m_settings, &m_timer, this)
@@ -37,7 +37,7 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
     if (!m_databaseReady) {
         qCritical() << "Error: Failed to initialize database at:" << (customDbPath.isEmpty() ? QStringLiteral("default") : customDbPath);
     }
-    m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
+    m_settings.setSupportedLanguages(m_translator.availableLanguageCodes());
     applyLanguageTranslator();
     connect(&m_settings, &SettingsManager::languageChanged, this, [this]() {
         applyLanguageTranslator();
@@ -1189,17 +1189,17 @@ void AppController::onTodoListCountChanged() {
 
 void AppController::applyLanguageTranslator() {
     if (!QCoreApplication::instance()) return;
-    QCoreApplication::removeTranslator(&m_ukTranslator);
+    QCoreApplication::removeTranslator(&m_translator);
     const QString eff = m_settings.effectiveLanguage();
     if (eff != QStringLiteral("en")) {
-        m_ukTranslator.setLanguageCode(eff);
-        QCoreApplication::installTranslator(&m_ukTranslator);
+        m_translator.setLanguageCode(eff);
+        QCoreApplication::installTranslator(&m_translator);
     }
 }
 
 void AppController::reloadTranslations() {
-    m_ukTranslator.reloadTranslations();
-    m_settings.setSupportedLanguages(m_ukTranslator.availableLanguageCodes());
+    m_translator.reloadTranslations();
+    m_settings.setSupportedLanguages(m_translator.availableLanguageCodes());
     applyLanguageTranslator();
     emit languageChanged();
 }
@@ -1209,15 +1209,15 @@ void AppController::setMiniPlayerVisible(bool visible) {
 }
 
 QVariantList AppController::availableLanguages() const {
-    return m_ukTranslator.availableLanguagesModel();
+    return m_translator.availableLanguagesModel();
 }
 
 QStringList AppController::availableLanguageCodes() const {
-    return m_ukTranslator.availableLanguageCodes();
+    return m_translator.availableLanguageCodes();
 }
 
 QString AppController::languageDisplayName(const QString& code) const {
-    return m_ukTranslator.languageDisplayName(code);
+    return m_translator.languageDisplayName(code);
 }
 
 void AppController::updateAutoSyncTimer() {

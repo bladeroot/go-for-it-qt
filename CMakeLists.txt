@@ -86,8 +86,8 @@ set(GOFI_CORE_SOURCES
     src/core/trackers/Jira.cpp
     src/core/SettingsManager.h
     src/core/SettingsManager.cpp
-    src/core/UkTranslator.h
-    src/core/UkTranslator.cpp
+    src/core/JsonTranslator.h
+    src/core/JsonTranslator.cpp
     data/translations.qrc
     src/core/ShortcutManager.h
     src/core/ShortcutManager.cpp

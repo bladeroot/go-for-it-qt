@@ -3066,7 +3066,7 @@ private slots:
 
     // KB-55: user-visible strings added by recent fixes are missing from every translation
     // dictionary (data/translations/{uk,de,fr,es,it}.json), so they appear in English in all
-    // five languages. UkTranslator looks up exact source strings, so each new tr() text must
+    // five languages. JsonTranslator looks up exact source strings, so each new tr() text must
     // be added to all five files.
     void testRecentTrStringsAreTranslated() {
         const QStringList keys = {
@@ -3092,7 +3092,7 @@ private slots:
             QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
             const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
             QVERIFY(!obj.isEmpty());
-            // Collect keys by iteration, as UkTranslator::loadTranslationsFromJson does: with Qt 6.12,
+            // Collect keys by iteration, as JsonTranslator::loadTranslationsFromJson does: with Qt 6.12,
             // QJsonObject::contains() misses existing keys near escaped ones (e.g. "Invalid number: \"%1\"…")
             // depending on unrelated insertions elsewhere in the file.
             QSet<QString> present;
@@ -3441,7 +3441,7 @@ private slots:
             QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.fileName()));
             const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
             QVERIFY(!obj.isEmpty());
-            // Collect keys by iteration, as UkTranslator::loadTranslationsFromJson does: with Qt 6.12,
+            // Collect keys by iteration, as JsonTranslator::loadTranslationsFromJson does: with Qt 6.12,
             // QJsonObject::contains() misses existing keys near escaped ones (e.g. "Invalid number: \"%1\"…")
             // depending on unrelated insertions elsewhere in the file.
             QSet<QString> present;
@@ -3598,7 +3598,7 @@ private slots:
         }
     }
 
-    void testUkTranslatorPluralHandling() {
+    void testJsonTranslatorPluralHandling() {
         const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
         QFile::remove(dbPath);
         AppController ctrl(QString(), dbPath);
