@@ -3426,7 +3426,9 @@ private slots:
             QStringLiteral("Invalid number: \"%1\" (value unchanged)"),
             QStringLiteral("Mon"),
             QStringLiteral("Wed"),
-            QStringLiteral("Fri")
+            QStringLiteral("Fri"),
+            QStringLiteral("Switch list"),
+            QStringLiteral("Manage lists…")
         };
         QStringList missing;
         // Build-tree copy of data/translations (refreshed on cmake configure).

@@ -45,6 +45,54 @@ ApplicationWindow {
         }
     }
 
+    function allListIds() {
+        let ids = []
+        for (let i = 0; i < app.listManager.count; ++i) {
+            ids.push(app.listManager.entryAt(i).id)
+        }
+        return ids
+    }
+
+    // Ids of the lists the task view currently shows (the "All Lists" view has no explicit ids).
+    function shownListIds() {
+        if (app.isMultiListView) {
+            return app.activeListIds.length === 0 ? allListIds() : app.activeListIds
+        }
+        return app.currentListId !== "" ? [app.currentListId] : []
+    }
+
+    function toggleListInView(listId) {
+        let ids = shownListIds().slice()
+        const pos = ids.indexOf(listId)
+        if (pos === -1) {
+            ids.push(listId)
+        } else if (ids.length > 1) {
+            ids.splice(pos, 1)
+        } else {
+            return // keep at least one list
+        }
+        const all = allListIds()
+        ids = all.filter(function(id) { return ids.indexOf(id) !== -1 })
+        if (ids.length === all.length && all.length > 1) {
+            app.showAllLists()
+        } else {
+            app.setMultiListFilter(ids)
+        }
+    }
+
+    function showRemoteTrackerLists() {
+        let trackerIds = []
+        for (let i = 0; i < app.listManager.count; ++i) {
+            const entry = app.listManager.entryAt(i)
+            if (entry.provider !== "SQLite" && entry.provider !== "Todo.txt") {
+                trackerIds.push(entry.id)
+            }
+        }
+        if (trackerIds.length > 0) {
+            app.setMultiListFilter(trackerIds)
+        }
+    }
+
     onWidthChanged: if (visible) app.settings.windowWidth = width
     onHeightChanged: if (visible) app.settings.windowHeight = height
 
@@ -225,14 +273,98 @@ ApplicationWindow {
 
             ToolButton {
                 id: overviewSwitchBtn
-                text: app.showingOverview ? "→" : "←"
+                visible: app.showingOverview
+                text: "→"
                 font.pixelSize: app.settings.useSmallToolbarIcons ? 13 : 16
                 ToolTip.visible: hovered
-                ToolTip.text: app.showingOverview
-                    ? qsTr("Go back to the to-do list")
-                    : qsTr("Go to overview")
+                ToolTip.text: qsTr("Go back to the to-do list")
                 enabled: app.currentListId !== ""
-                onClicked: app.showingOverview = !app.showingOverview
+                onClicked: app.showingOverview = false
+            }
+
+            // Current list / view; opens the list switcher so changing lists needs no trip
+            // through the overview page.
+            ToolButton {
+                id: listSwitcherButton
+                objectName: "listSwitcherButton"
+                visible: !app.showingOverview
+                Layout.maximumWidth: 200
+                font.pixelSize: app.settings.useSmallToolbarIcons ? 12 : 14
+                text: app.currentFilterTitle + " ▾"
+                contentItem: Label {
+                    text: listSwitcherButton.text
+                    font: listSwitcherButton.font
+                    elide: Text.ElideMiddle
+                    verticalAlignment: Text.AlignVCenter
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Switch list")
+                onClicked: listSwitcherMenu.open()
+
+                Menu {
+                    id: listSwitcherMenu
+                    objectName: "listSwitcherMenu"
+                    y: parent.height
+
+                    MenuItem {
+                        text: "🌐 " + qsTr("All Lists (Unified)")
+                        onTriggered: app.showAllLists()
+                    }
+                    MenuItem {
+                        text: "💻 " + qsTr("Local Lists Only")
+                        onTriggered: app.showProviderLists("SQLite")
+                    }
+                    MenuItem {
+                        text: "☁️ " + qsTr("Remote Trackers Only")
+                        onTriggered: rootWindow.showRemoteTrackerLists()
+                    }
+                    MenuSeparator {}
+                    // Clicking a list opens it alone; its checkbox adds it to / removes it from the
+                    // lists shown together, and keeps the menu open for further choices.
+                    Repeater {
+                        model: app.listManager
+                        MenuItem {
+                            id: listSwitcherItem
+                            required property string listId
+                            required property string name
+                            required property string provider
+                            objectName: "listSwitcherItem_" + listId
+                            readonly property bool current: !app.isMultiListView && app.currentListId === listId
+                            readonly property bool shown: rootWindow.shownListIds().indexOf(listId) !== -1
+                            text: name + " (" + provider + ")"
+                            font.bold: current
+                            contentItem: RowLayout {
+                                spacing: 6
+                                CheckBox {
+                                    id: listSwitcherCheck
+                                    objectName: "listSwitcherCheck_" + listSwitcherItem.listId
+                                    padding: 0
+                                    checked: listSwitcherItem.shown
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: qsTr("Select to view together with other lists")
+                                    onClicked: {
+                                        rootWindow.toggleListInView(listSwitcherItem.listId)
+                                        checked = Qt.binding(function() { return listSwitcherItem.shown })
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: listSwitcherItem.text
+                                    font: listSwitcherItem.font
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                            onTriggered: app.selectListById(listId)
+                        }
+                    }
+                    MenuSeparator {}
+                    MenuItem {
+                        objectName: "listSwitcherManage"
+                        text: "⚙ " + qsTr("Manage lists…")
+                        onTriggered: app.showingOverview = true
+                    }
+                }
             }
 
             Item { Layout.fillWidth: true }
@@ -320,46 +452,6 @@ ApplicationWindow {
                 Menu {
                     id: mainMenu
                     y: parent.height
-
-                    Menu {
-                        title: "📂 " + qsTr("Switch View / Filter")
-                        MenuItem {
-                            text: "🌐 " + qsTr("All Lists (Unified)")
-                            onTriggered: app.showAllLists()
-                        }
-                        MenuItem {
-                            text: "💻 " + qsTr("Local Lists Only")
-                            onTriggered: app.showProviderLists("SQLite")
-                        }
-                        MenuItem {
-                            text: "☁️ " + qsTr("Remote Trackers Only")
-                            onTriggered: {
-                                let trackerIds = []
-                                for (let i = 0; i < app.listManager.count; ++i) {
-                                    const entry = app.listManager.entryAt(i)
-                                    if (entry.provider !== "SQLite" && entry.provider !== "Todo.txt") {
-                                        trackerIds.push(entry.id)
-                                    }
-                                }
-                                if (trackerIds.length > 0) {
-                                    app.setMultiListFilter(trackerIds)
-                                }
-                            }
-                        }
-                        MenuSeparator {}
-                        Repeater {
-                            model: app.listManager
-                            MenuItem {
-                                required property string listId
-                                required property string name
-                                required property string provider
-                                text: name + " (" + provider + ")"
-                                onTriggered: app.selectListById(listId)
-                            }
-                        }
-                    }
-
-                    MenuSeparator {}
 
                     MenuItem {
                         contentItem: RowLayout {

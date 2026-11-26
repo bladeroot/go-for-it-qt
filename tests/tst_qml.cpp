@@ -1171,6 +1171,145 @@ private slots:
         QCOMPARE(fresh.evaluate(QStringLiteral("w.__finished.length")).toInt(), 1);
     }
 
+    // Lists are switched from the toolbar: a button showing the current list opens a menu with the
+    // views, every list (click: open it alone; checkbox: show it together with the others) and
+    // "Manage lists…" for the overview page.
+    void testToolbarListSwitcherChangesListsWithoutOverview() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("list_switcher.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString first = controller.listManager()->addList(QStringLiteral("Switcher One"));
+        const QString second = controller.listManager()->addList(QStringLiteral("Switcher Two"));
+        const QString third = controller.listManager()->addList(QStringLiteral("Switcher Three"));
+        QVERIFY(!first.isEmpty() && !second.isEmpty() && !third.isEmpty());
+        // Whatever lists a fresh database starts with also take part.
+        QStringList allIds;
+        for (int i = 0; i < controller.listManager()->rowCount(); ++i) {
+            allIds << controller.listManager()->entry(i).id;
+        }
+        controller.selectListById(first);
+        controller.setShowingOverview(false);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("list_switcher_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+
+        QObject* button = root->findChild<QObject*>(QStringLiteral("listSwitcherButton"));
+        QVERIFY(button);
+        QVERIFY(button->property("visible").toBool());
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Switcher One ▾"));
+
+        QObject* menu = root->findChild<QObject*>(QStringLiteral("listSwitcherMenu"));
+        QVERIFY(menu);
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+
+        auto menuItem = [&](const QString& name) -> QQuickItem* {
+            const int count = menu->property("count").toInt();
+            for (int i = 0; i < count; ++i) {
+                QQuickItem* item = nullptr;
+                QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, i));
+                if (item && item->objectName() == name) return item;
+            }
+            return nullptr;
+        };
+        auto checkFor = [&](const QString& listId) -> QObject* {
+            QQuickItem* item = menuItem(QStringLiteral("listSwitcherItem_") + listId);
+            return item ? item->findChild<QObject*>(QStringLiteral("listSwitcherCheck_") + listId) : nullptr;
+        };
+        auto activeSet = [&]() {
+            const QStringList ids = controller.activeListIds();
+            return QSet<QString>(ids.begin(), ids.end());
+        };
+        auto checked = [&](const QString& listId) {
+            QObject* check = checkFor(listId);
+            return check && check->property("checked").toBool();
+        };
+        QVERIFY(menuItem(QStringLiteral("listSwitcherItem_") + second));
+        QVERIFY(checkFor(first));
+        QVERIFY(checked(first));
+        QVERIFY(!checked(second));
+
+        // Clicking a list name opens that list alone.
+        QVERIFY(QMetaObject::invokeMethod(menuItem(QStringLiteral("listSwitcherItem_") + second), "triggered"));
+        QCOMPARE(controller.currentListId(), second);
+        QVERIFY(!controller.isMultiListView());
+        QVERIFY(!controller.showingOverview());
+        QCOMPARE(button->property("text").toString(), QStringLiteral("Switcher Two ▾"));
+        QVERIFY(checked(second));
+        QVERIFY(!checked(first));
+
+        // Checkboxes add lists to the view and remove them again. A real click on a checkbox keeps
+        // the menu open (only the list name closes it).
+        QQuickWindow* window = qobject_cast<QQuickWindow*>(root.get());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        auto clickCentre = [&](QObject* target) {
+            QQuickItem* item = qobject_cast<QQuickItem*>(target);
+            QVERIFY(item);
+            QTRY_VERIFY(item->isVisible() && item->width() > 0);
+            const QPointF centre = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centre.toPoint());
+        };
+        clickCentre(checkFor(third));
+        QTRY_VERIFY(controller.isMultiListView());
+        QCOMPARE(controller.activeListIds(), (QStringList{second, third}));
+        QTest::qWait(300);
+        QVERIFY(menu->property("opened").toBool());
+        QVERIFY(controller.isMultiListView());
+        QCOMPARE(controller.activeListIds(), (QStringList{second, third}));
+        QVERIFY(checked(second));
+        QVERIFY(checked(third));
+        QVERIFY(QMetaObject::invokeMethod(checkFor(first), "clicked"));
+        QCOMPARE(activeSet(), (QSet<QString>{first, second, third}));
+        QVERIFY(checked(first));
+        QVERIFY(QMetaObject::invokeMethod(checkFor(second), "clicked"));
+        QCOMPARE(activeSet(), (QSet<QString>{first, third}));
+        QVERIFY(!checked(second));
+        QVERIFY(QMetaObject::invokeMethod(checkFor(third), "clicked"));
+        QVERIFY(!controller.isMultiListView());
+        QCOMPARE(controller.currentListId(), first);
+        // The last shown list cannot be unchecked.
+        QVERIFY(QMetaObject::invokeMethod(checkFor(first), "clicked"));
+        QVERIFY(!controller.isMultiListView());
+        QCOMPARE(controller.currentListId(), first);
+        QVERIFY(checked(first));
+
+        // "All Lists" checks every list; unchecking one shows the others.
+        controller.showAllLists();
+        for (const QString& id : allIds) {
+            QVERIFY2(checked(id), qPrintable(id));
+        }
+        QVERIFY(QMetaObject::invokeMethod(checkFor(second), "clicked"));
+        QStringList expected = allIds;
+        expected.removeAll(second);
+        QCOMPARE(controller.activeListIds(), expected.size() == 1 ? QStringList{} : expected);
+
+        // A real click on a list name opens it alone and closes the menu.
+        QTRY_VERIFY(menu->property("opened").toBool());
+        QQuickItem* thirdItem = menuItem(QStringLiteral("listSwitcherItem_") + third);
+        QVERIFY(thirdItem);
+        const QPointF nameAt = thirdItem->mapToScene(QPointF(thirdItem->width() - 20, thirdItem->height() / 2));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, nameAt.toPoint());
+        QTRY_VERIFY(!menu->property("opened").toBool());
+        QVERIFY(!controller.isMultiListView());
+        QCOMPARE(controller.currentListId(), third);
+
+        QObject* manage = menuItem(QStringLiteral("listSwitcherManage"));
+        QVERIFY(manage);
+        QVERIFY(QMetaObject::invokeMethod(manage, "triggered"));
+        QVERIFY(controller.showingOverview());
+        QVERIFY(!button->property("visible").toBool());
+    }
+
     // KB-142 on platforms where Qt knows window positions (X11; here offscreen): Main.qml's mini
     // player reopens where it was and saves where the user moves it.
     void testMiniPlayerWindowRestoresAndSavesItsPosition() {
