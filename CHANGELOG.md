@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Due-date reminders repeat once a day: a task due today is reminded again when it becomes overdue, and a postponed task on its new date (KB-145).
 - Descriptions and comments removed on a tracker are removed locally on the next sync (KB-146).
 - The ambient sound and its volume are remembered between runs, and their names follow a language change (KB-147).
+- KDE Plasma (Wayland): the main window reopens where it was last moved to (KB-148).
+- KDE Plasma (Wayland): keeping the mini player on top and restoring window positions no longer stop working after the mini player was shown and hidden a few times (KB-149).
+- The mini player's pin button is hidden on Wayland desktops other than KDE Plasma, where it had no effect (KB-150).
 
 ---
 
