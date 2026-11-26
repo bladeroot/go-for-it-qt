@@ -143,6 +143,8 @@ public:
     Q_INVOKABLE void miniPlayerHidden();
     Q_INVOKABLE void miniPlayerMoved(QObject* windowObject);
     Q_INVOKABLE void checkDueReminders();
+    // checkDueReminders() as of `today`: each (task, due date, overdue/due-today) is reminded once per day.
+    void checkDueRemindersOn(const QDate& today);
     Q_INVOKABLE void reloadTranslations();
     [[nodiscard]] QVariantList availableLanguages() const;
     [[nodiscard]] QStringList availableLanguageCodes() const;
@@ -196,7 +198,8 @@ private:
     DesktopIntegration m_desktopIntegration;
     QTimer m_autoSyncTimer;
     QTimer m_dueReminderTimer;
-    QSet<qint64> m_notifiedDueTaskIds;
+    QSet<QString> m_notifiedDueReminders;  // "<task id>|<due date>|<kind>" reminded on m_dueRemindersDay
+    QDate m_dueRemindersDay;
 
     QString m_currentListId;
     QString m_currentListName;

@@ -3519,6 +3519,54 @@ private slots:
         ctrl.todoProxyModel()->setFilterQuery(QString());
     }
 
+    // KB-145: AppController::checkDueReminders remembered every notified task id for the whole
+    // process lifetime. A task reminded as "due today" got no "overdue" reminder the next day, an
+    // overdue task was reminded only once however long the app ran, and moving the due date gave no
+    // reminder for the new date either. Now each (task, due date, kind) is reminded once per day.
+    void testDueRemindersRepeatPerDayAndDueDate() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb145_due.db"));
+        QFile::remove(dbPath);
+        AppController ctrl(QString(), dbPath);
+        const QString listId = ctrl.listManager()->addList(QStringLiteral("KB145"));
+        ctrl.selectListById(listId);
+        while (ctrl.todoProxyModel()->rowCount() > 0) QVERIFY(ctrl.removeTask(false, 0));
+        // Far in the future, so the automatic check with the real date after each task change
+        // (onTodoListCountChanged) never reminds about it and only the explicit days below count.
+        const QDate day1(2099, 3, 10);
+        ctrl.addNewTask(QStringLiteral("kb145 report due:%1").arg(day1.toString(Qt::ISODate)));
+        QCOMPARE(ctrl.todoProxyModel()->rowCount(), 1);
+
+        QSignalSpy spy(&ctrl, &AppController::notificationRequested);
+        auto titles = [&]() {
+            QStringList t;
+            for (const QList<QVariant>& args : spy) t << args.at(0).toString();
+            spy.clear();
+            return t;
+        };
+        const QString dueToday = QCoreApplication::translate("AppController", "Task Due Today");
+        const QString overdue = QCoreApplication::translate("AppController", "Task Overdue");
+
+        ctrl.checkDueRemindersOn(day1);
+        QCOMPARE(titles(), QStringList{dueToday});
+        ctrl.checkDueRemindersOn(day1);  // every 15 minutes the same day: no repeat
+        QCOMPARE(titles(), QStringList{});
+
+        ctrl.checkDueRemindersOn(day1.addDays(1));  // next day it is overdue
+        QCOMPARE(titles(), QStringList{overdue});
+        ctrl.checkDueRemindersOn(day1.addDays(1));
+        QCOMPARE(titles(), QStringList{});
+        ctrl.checkDueRemindersOn(day1.addDays(2));  // still overdue: remind again once that day
+        QCOMPARE(titles(), QStringList{overdue});
+
+        // Postponed to the day after: reminded again when that day comes.
+        const QDate day4 = day1.addDays(3);
+        QVERIFY(ctrl.updateTaskText(false, 0, QStringLiteral("kb145 report due:%1").arg(day4.toString(Qt::ISODate))));
+        ctrl.checkDueRemindersOn(day1.addDays(2));
+        QCOMPARE(titles(), QStringList{});
+        ctrl.checkDueRemindersOn(day4);
+        QCOMPARE(titles(), QStringList{dueToday});
+    }
+
     void testUkTranslatorPluralHandling() {
         const QString dbPath = m_testSandbox.filePath(QStringLiteral("uk_plural.db"));
         QFile::remove(dbPath);

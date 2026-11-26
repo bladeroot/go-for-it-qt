@@ -1283,28 +1283,43 @@ void AppController::openUrlExternally(const QUrl& url) {
 }
 
 void AppController::checkDueReminders() {
+    checkDueRemindersOn(QDate::currentDate());
+}
+
+void AppController::checkDueRemindersOn(const QDate& today) {
     TaskStoreModel* model = m_taskManager.todoModel();
-    if (!model) return;
+    if (!model || !today.isValid()) return;
+
+    // A new day starts a new round: overdue tasks are reminded again, and tasks reminded as
+    // "due today" yesterday get their "overdue" reminder.
+    if (m_dueRemindersDay != today) {
+        m_notifiedDueReminders.clear();
+        m_dueRemindersDay = today;
+    }
 
     const int total = model->rowCount();
     for (int i = 0; i < total; ++i) {
         const TxtTask task = model->taskAt(i);
         if (task.isDone() || !task.dueDate().isValid()) continue;
 
-        if (m_notifiedDueTaskIds.contains(task.id())) continue;
+        const bool isOverdue = task.isOverdue(today);
+        if (!isOverdue && !task.isDueToday(today)) continue;
+        // Keyed by due date too, so a postponed task is reminded again for its new date.
+        const QString key = QStringLiteral("%1|%2|%3").arg(task.id()).arg(task.dueDate().toString(Qt::ISODate),
+                                                           isOverdue ? QStringLiteral("overdue") : QStringLiteral("today"));
+        if (m_notifiedDueReminders.contains(key)) continue;
+        m_notifiedDueReminders.insert(key);
 
-        if (task.isOverdue()) {
+        if (isOverdue) {
             m_notifications.notifyTaskEvent(
                 tr("Task Overdue"),
                 tr("Task '%1' is overdue (was due %2)").arg(task.description(), task.dueDateString())
             );
-            m_notifiedDueTaskIds.insert(task.id());
-        } else if (task.isDueToday()) {
+        } else {
             m_notifications.notifyTaskEvent(
                 tr("Task Due Today"),
                 tr("Task '%1' is due today!").arg(task.description())
             );
-            m_notifiedDueTaskIds.insert(task.id());
         }
     }
 }
