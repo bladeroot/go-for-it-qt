@@ -103,6 +103,8 @@
   "Aluminium bowl": "Aluminiumschale",
   "Always on Top Mini-Player": "Mini-Player immer im Vordergrund",
   "Always on Top Mini-Player (Ctrl+M)": "Mini-Player immer im Vordergrund (Ctrl+M)",
+  "Keep the mini player on top of other windows": "Mini-Player über anderen Fenstern halten",
+  "Stop keeping the mini player on top": "Mini-Player nicht mehr im Vordergrund halten",
   "Ambient Sound:": "Hintergrundton:",
   "Ambient focus sound turned off.": "Hintergrundton ausgeschaltet.",
   "Ambient focus sound: %1": "Hintergrundton: %1",

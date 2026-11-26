@@ -103,6 +103,8 @@
   "Aluminium bowl": "Bol en aluminium",
   "Always on Top Mini-Player": "Mini-lecteur toujours visible au premier plan",
   "Always on Top Mini-Player (Ctrl+M)": "Mini-lecteur au premier plan (Ctrl+M)",
+  "Keep the mini player on top of other windows": "Garder le mini-lecteur au-dessus des autres fenêtres",
+  "Stop keeping the mini player on top": "Ne plus garder le mini-lecteur au premier plan",
   "Ambient Sound:": "Son d'ambiance :",
   "Ambient focus sound turned off.": "Son d'ambiance désactivé.",
   "Ambient focus sound: %1": "Son d'ambiance : %1",

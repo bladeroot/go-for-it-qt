@@ -103,6 +103,8 @@
   "Aluminium bowl": "Cuenco de aluminio",
   "Always on Top Mini-Player": "Mini-reproductor siempre al frente",
   "Always on Top Mini-Player (Ctrl+M)": "Mini-reproductor siempre al frente (Ctrl+M)",
+  "Keep the mini player on top of other windows": "Mantener el mini-reproductor sobre las demás ventanas",
+  "Stop keeping the mini player on top": "Dejar de mantener el mini-reproductor al frente",
   "Ambient Sound:": "Sonido ambiental:",
   "Ambient focus sound turned off.": "Sonido ambiental desactivado.",
   "Ambient focus sound: %1": "Sonido ambiental: %1",

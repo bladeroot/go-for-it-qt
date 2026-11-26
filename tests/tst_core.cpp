@@ -3428,7 +3428,9 @@ private slots:
             QStringLiteral("Wed"),
             QStringLiteral("Fri"),
             QStringLiteral("Switch list"),
-            QStringLiteral("Manage lists…")
+            QStringLiteral("Manage lists…"),
+            QStringLiteral("Keep the mini player on top of other windows"),
+            QStringLiteral("Stop keeping the mini player on top")
         };
         QStringList missing;
         // Build-tree copy of data/translations (refreshed on cmake configure).

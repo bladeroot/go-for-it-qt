@@ -308,8 +308,12 @@ Window {
                 Layout.maximumHeight: 26
                 Layout.alignment: Qt.AlignVCenter
                 padding: 0
+                // Describes what a click does; Ctrl+M shows/hides the mini player, it does not pin it.
+                readonly property string hint: miniPlayer.alwaysOnTop
+                    ? qsTr("Stop keeping the mini player on top")
+                    : qsTr("Keep the mini player on top of other windows")
                 ToolTip.visible: hovered
-                ToolTip.text: qsTr("Always on Top Mini-Player (Ctrl+M)")
+                ToolTip.text: hint
                 onClicked: miniPlayer.toggleAlwaysOnTop()
                 background: Rectangle {
                     radius: 4

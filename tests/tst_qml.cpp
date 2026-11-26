@@ -1310,6 +1310,33 @@ private slots:
         QVERIFY(!button->property("visible").toBool());
     }
 
+    // KB-144: the mini player's pin button said "Always on Top Mini-Player (Ctrl+M)", but it only
+    // toggles keeping the window on top, and Ctrl+M shows/hides the mini player instead.
+    void testMiniPlayerPinButtonHintDescribesTheToggle() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb144.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb144_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QObject* mini = root->findChild<QObject*>(QStringLiteral("miniPlayerWindow"));
+        QObject* pin = root->findChild<QObject*>(QStringLiteral("miniAlwaysOnTopToggle"));
+        QVERIFY(mini && pin);
+
+        QVERIFY(mini->property("alwaysOnTop").toBool());
+        QCOMPARE(pin->property("hint").toString(), QCoreApplication::translate("MiniPlayerWindow", "Stop keeping the mini player on top"));
+        QVERIFY(QMetaObject::invokeMethod(pin, "clicked"));
+        QVERIFY(!mini->property("alwaysOnTop").toBool());
+        QCOMPARE(pin->property("hint").toString(), QCoreApplication::translate("MiniPlayerWindow", "Keep the mini player on top of other windows"));
+        QVERIFY(QMetaObject::invokeMethod(pin, "clicked"));
+        QVERIFY(mini->property("alwaysOnTop").toBool());
+    }
+
     // KB-142 on platforms where Qt knows window positions (X11; here offscreen): Main.qml's mini
     // player reopens where it was and saves where the user moves it.
     void testMiniPlayerWindowRestoresAndSavesItsPosition() {

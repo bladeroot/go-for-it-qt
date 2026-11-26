@@ -103,6 +103,8 @@
   "Aluminium bowl": "Алюмінієва чаша",
   "Always on Top Mini-Player": "Міні-плеєр поверх усіх вікон",
   "Always on Top Mini-Player (Ctrl+M)": "Міні-плеєр поверх усіх вікон (Ctrl+M)",
+  "Keep the mini player on top of other windows": "Тримати міні-плеєр поверх інших вікон",
+  "Stop keeping the mini player on top": "Не тримати міні-плеєр поверх інших вікон",
   "Ambient Sound:": "Фоновий звук:",
   "Ambient focus sound turned off.": "Фоновий звук вимкнено.",
   "Ambient focus sound: %1": "Фоновий звук: %1",
