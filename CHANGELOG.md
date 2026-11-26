@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Next/previous task (Alt+Down/Up, tray, mini player) stays within the filtered list (KB-143).
+- The mini player's pin button hint says what it does instead of naming Ctrl+M (KB-144).
+- Due-date reminders repeat once a day: a task due today is reminded again when it becomes overdue, and a postponed task on its new date (KB-145).
+- Descriptions and comments removed on a tracker are removed locally on the next sync (KB-146).
+- The ambient sound and its volume are remembered between runs, and their names follow a language change (KB-147).
+
 ---
 
 ## [2.0.6] - 2026-11-26
