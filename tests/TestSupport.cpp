@@ -62,6 +62,17 @@ ApplicationProxyGuard::~ApplicationProxyGuard() {
 FakeKWinScript::FakeKWinScript(FakeKWinScripting* owner, const QString& path, const QString& name)
     : QObject(nullptr), m_owner(owner), m_path(path), m_name(name) {}
 
+bool FakeKWinScript::evaluate() {
+    started = true;
+    QFile f(m_path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        ++m_owner->unreadable;
+        return false;
+    }
+    m_owner->executed.append(QString::fromUtf8(f.readAll()));
+    return true;
+}
+
 void FakeKWinScript::run() {
     setDelayedReply(true);
     const QDBusMessage msg = message();
@@ -70,13 +81,14 @@ void FakeKWinScript::run() {
     // KWin reads the file on a worker thread; model the latency so the order is deterministic.
     QTimer::singleShot(30, this, [self, msg, conn]() mutable {
         if (!self || self->unloaded) return; // unloaded while loading: never evaluated, never answered
-        QFile f(self->m_path);
-        if (!f.open(QIODevice::ReadOnly)) {
-            ++self->m_owner->unreadable;
+        if (self->started) {                // already running: KWin does not evaluate it again
+            conn.send(msg.createReply());
+            return;
+        }
+        if (!self->evaluate()) {
             conn.send(msg.createErrorReply(QStringLiteral("org.kde.kwin.Scripting.FileError"), QStringLiteral("unreadable")));
             return;
         }
-        self->m_owner->executed.append(QString::fromUtf8(f.readAll()));
         conn.send(msg.createReply());
     });
 }
@@ -84,21 +96,33 @@ void FakeKWinScript::run() {
 FakeKWinScripting::FakeKWinScripting(const QDBusConnection& conn) : m_conn(conn) {}
 
 FakeKWinScripting::~FakeKWinScripting() {
-    for (int i = 0; i < m_scripts.size(); ++i) {
+    for (int i = 0; i <= m_scripts.size(); ++i) {
         m_conn.unregisterObject(QStringLiteral("/Scripting/Script%1").arg(i));
     }
     qDeleteAll(m_scripts);
 }
 
 int FakeKWinScripting::loadScript(const QString& filePath, const QString& pluginName) {
+    int loaded = 0;
     for (FakeKWinScript* sc : std::as_const(m_scripts)) {
-        if (!sc->unloaded && sc->pluginName() == pluginName) return -1;
+        if (sc->unloaded) continue;
+        if (sc->pluginName() == pluginName) return -1;
+        ++loaded;
     }
-    const int id = static_cast<int>(m_scripts.size());
+    const int id = loaded;
     auto* sc = new FakeKWinScript(this, filePath, pluginName);
     m_scripts.append(sc);
+    // A path still held by an older script stays with it (registerObject fails), as in KWin.
     m_conn.registerObject(QStringLiteral("/Scripting/Script%1").arg(id), sc, QDBusConnection::ExportScriptableSlots);
     return id;
+}
+
+void FakeKWinScripting::start() {
+    for (FakeKWinScript* sc : std::as_const(m_scripts)) {
+        if (!sc->unloaded && !sc->started) {
+            sc->evaluate();
+        }
+    }
 }
 
 bool FakeKWinScripting::unloadScript(const QString& pluginName) {

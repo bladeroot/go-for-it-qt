@@ -149,6 +149,9 @@ public:
     FakeKWinScript(FakeKWinScripting* owner, const QString& path, const QString& name);
     QString pluginName() const { return m_name; }
     bool unloaded = false;
+    bool started = false;
+    // Reads and "evaluates" the file (as Scripting.start() does); false if it was unreadable.
+    bool evaluate();
 public slots:
     Q_SCRIPTABLE void run();
 private:
@@ -168,8 +171,12 @@ public:
     int unreadable = 0;     // runs that found the script file missing
     int unloads = 0;
 public slots:
+    // Like KWin 6.8, the returned id is the number of loaded scripts, so ids repeat after an unload
+    // and the /Scripting/Script<id> path may still belong to an older, running script.
     Q_SCRIPTABLE int loadScript(const QString& filePath, const QString& pluginName);
     Q_SCRIPTABLE bool unloadScript(const QString& pluginName);
+    // Runs every loaded script that has not been started yet.
+    Q_SCRIPTABLE void start();
 private:
     QDBusConnection m_conn;
     QList<FakeKWinScript*> m_scripts;

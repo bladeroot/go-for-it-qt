@@ -424,8 +424,8 @@ static void executeKWinPinScript(const QString& script) {
     DesktopIntegration::runKWinScript(script, QDBusConnection::sessionBus(), QStringLiteral("org.kde.KWin"));
 }
 
-// Loads `script` into KWin under `pluginName` and runs it. The temporary file is kept until KWin has
-// answered `run` (it reads the file asynchronously). With `unloadAfterRun` the script is unloaded
+// Loads `script` into KWin under `pluginName` and starts it. The temporary file is kept until KWin
+// has answered `start`. With `unloadAfterRun` the script is unloaded
 // right after it ran; otherwise it stays loaded (with its signal connections) until unloaded.
 static void loadAndRunKWinScript(const QString& script, const QDBusConnection& connection, const QString& service,
                                  const QString& pluginName, bool unloadAfterRun) {
@@ -452,23 +452,26 @@ static void loadAndRunKWinScript(const QString& script, const QDBusConnection& c
     QObject::connect(loadWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile, unloadAfterRun](QDBusPendingCallWatcher* watcher) {
         watcher->deleteLater();
         QDBusPendingReply<int> reply = *watcher;
-        if (reply.isValid() && reply.value() >= 0) {
-            const int scriptId = reply.value();
-            const QString scriptPath = QStringLiteral("/Scripting/Script%1").arg(scriptId);
-            QDBusMessage runMsg = QDBusMessage::createMethodCall(
-                service,
-                scriptPath,
-                QStringLiteral("org.kde.kwin.Script"),
-                QStringLiteral("run")
-            );
-            auto* runWatcher = new QDBusPendingCallWatcher(bus.asyncCall(runMsg, 1500));
-            QObject::connect(runWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile, unloadAfterRun](QDBusPendingCallWatcher* rw) {
-                rw->deleteLater();
-                if (unloadAfterRun) {
-                    DesktopIntegration::unloadKWinScript(bus, service, pluginName);
-                }
-            });
+        if (!reply.isValid() || reply.value() < 0) {
+            return;
         }
+        // Not /Scripting/Script<id>.run(): KWin 6 numbers scripts by how many are loaded, so after
+        // an unload the returned id (and its object path) can belong to an older script that is
+        // still running, and run() would re-run that one instead (KB-149). start() runs every
+        // loaded script that has not started yet.
+        QDBusMessage startMsg = QDBusMessage::createMethodCall(
+            service,
+            QStringLiteral("/Scripting"),
+            QStringLiteral("org.kde.kwin.Scripting"),
+            QStringLiteral("start")
+        );
+        auto* startWatcher = new QDBusPendingCallWatcher(bus.asyncCall(startMsg, 1500));
+        QObject::connect(startWatcher, &QDBusPendingCallWatcher::finished, [bus, service, pluginName, tempFile, unloadAfterRun](QDBusPendingCallWatcher* sw) {
+            sw->deleteLater();
+            if (unloadAfterRun) {
+                DesktopIntegration::unloadKWinScript(bus, service, pluginName);
+            }
+        });
     });
 }
 

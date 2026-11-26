@@ -1458,6 +1458,49 @@ private slots:
         QDBusConnection::disconnectFromBus(kwinName);
     }
 
+    // KB-149: KWin 6.8's loadScript returns the number of loaded scripts as the id, so after any
+    // unload a new script gets the id (and /Scripting/Script<id> path) of a script that is still
+    // running. Calling run() on that path re-ran the old script and the new one never ran: with a
+    // window tracker loaded, pin scripts were silently dropped. Scripting.start() runs every loaded
+    // script that has not started yet, whatever its id.
+    void testKWinScriptsRunDespiteRepeatedIds() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString fakeName = QStringLiteral("kb149_fake_kwin");
+        const QString clientName = QStringLiteral("kb149_client");
+        {
+            QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(fakeConn.isConnected());
+            QVERIFY(clientConn.isConnected());
+            const QString service = QStringLiteral("org.kde.KWin");
+            FakeKWinScripting kwin(fakeConn);
+            QVERIFY(fakeConn.registerService(service));
+            QVERIFY(fakeConn.registerObject(QStringLiteral("/Scripting"), &kwin, QDBusConnection::ExportScriptableSlots));
+
+            // Two trackers (ids 0 and 1), then the first is unloaded: one script, id 1, still runs.
+            const QString trackerA = QStringLiteral("// tracker A\\n");
+            const QString trackerB = QStringLiteral("// tracker B\\n");
+            DesktopIntegration::startKWinScript(trackerA, clientConn, service, QStringLiteral("kb149_a"));
+            QTRY_COMPARE_WITH_TIMEOUT(kwin.executed.size(), 1, 3000);
+            DesktopIntegration::startKWinScript(trackerB, clientConn, service, QStringLiteral("kb149_b"));
+            QTRY_COMPARE_WITH_TIMEOUT(kwin.executed.size(), 2, 3000);
+            DesktopIntegration::unloadKWinScript(clientConn, service, QStringLiteral("kb149_a"));
+            QTRY_COMPARE_WITH_TIMEOUT(kwin.unloads, 1, 3000);
+
+            // The next script gets id 1 again; it must still be evaluated.
+            const QString pin = DesktopIntegration::kwinPinScript(QStringLiteral("Go for It — Mini Player"), true);
+            DesktopIntegration::runKWinScript(pin, clientConn, service);
+            QTRY_VERIFY_WITH_TIMEOUT(kwin.executed.contains(pin), 3000);
+            QCOMPARE(kwin.executed.count(trackerB), 1);
+            QCOMPARE(kwin.unreadable, 0);
+        }
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+    }
+
     void testKWinTrackerScriptStaysLoadedUntilUnloaded() {
         PrivateDBus bus;
         if (bus.address.isEmpty()) {
