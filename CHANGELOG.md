@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - KDE Plasma (Wayland): the main window reopens where it was last moved to (KB-148).
 - KDE Plasma (Wayland): keeping the mini player on top and restoring window positions no longer stop working after the mini player was shown and hidden a few times (KB-149).
 - The mini player's pin button is hidden on Wayland desktops other than KDE Plasma, where it had no effect (KB-150).
+- Todoist works again: it uses Todoist API v1 now that REST v2 is shut down. Existing tasks are moved to the new Todoist ids automatically, and the list's server URL is honoured (KB-151).
 
 ---
 
