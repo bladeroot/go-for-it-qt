@@ -1,4 +1,6 @@
 #include "TestSupport.h"
+#include <QDBusConnectionInterface>
+#include <QScopeGuard>
 
 #include "core/AppController.h"
 #include "core/CredentialStore.h"
@@ -179,6 +181,47 @@ private slots:
         QFile::remove(credsPath);
         QFile::remove(backupPath);
         gofi::CredentialStore::instance().setFallbackFilePath(QString());
+    }
+
+    // KB-154: isKeyringAvailable() only asked whether the Secret Service was already running. A
+    // D-Bus-activatable one (kwalletd / gnome-keyring started on demand) that had not started yet
+    // counted as missing, so tokens went to the fallback file. It is now started when activatable.
+    void testActivatableSecretServiceCountsAsAvailable() {
+        const QString tool = QStandardPaths::findExecutable(QStringLiteral("dbus-test-tool"));
+        QVERIFY2(!tool.isEmpty(), "dbus-test-tool is required (Debian package dbus-tests, Arch package dbus)");
+        // Session bus activation reads $XDG_DATA_HOME/dbus-1/services, which points into the sandbox.
+        const QString serviceName = QStringLiteral("io.github.bladeroot.GoForItQt.TestSecrets");
+        const QString servicesDir = QDir(qEnvironmentVariable("XDG_DATA_HOME")).filePath(QStringLiteral("dbus-1/services"));
+        QVERIFY(QDir().mkpath(servicesDir));
+        QFile serviceFile(QDir(servicesDir).filePath(serviceName + QStringLiteral(".service")));
+        QVERIFY(serviceFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        serviceFile.write(QStringLiteral("[D-BUS Service]\nName=%1\nExec=%2 black-hole --session --name=%1\n")
+                              .arg(serviceName, tool).toUtf8());
+        serviceFile.close();
+        auto cleanup = qScopeGuard([&] { serviceFile.remove(); });
+
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        const QString clientName = QStringLiteral("kb154_client");
+        {
+            QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
+            QVERIFY(clientConn.isConnected());
+            QVERIFY(clientConn.interface()->activatableServiceNames().value().contains(serviceName));
+            QVERIFY(!clientConn.interface()->isServiceRegistered(serviceName));
+
+            auto& store = gofi::CredentialStore::instance();
+            store.setDBusConnection(clientConn, serviceName);
+            auto reset = qScopeGuard([&] { store.resetDBusConnection(); });
+            QVERIFY(store.isKeyringAvailable());
+            QVERIFY(clientConn.interface()->isServiceRegistered(serviceName));
+
+            // Neither running nor activatable: still unavailable.
+            store.setDBusConnection(clientConn, QStringLiteral("io.github.bladeroot.GoForItQt.NoSuchSecrets"));
+            QVERIFY(!store.isKeyringAvailable());
+        }
+        QDBusConnection::disconnectFromBus(clientName);
     }
 
     void testCredentialStoreKeyringAndMockSecretService() {

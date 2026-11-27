@@ -30,7 +30,7 @@ jobs:
             libqt6sql6-sqlite qml6-module-qtquick \
             qml6-module-qtquick-controls qml6-module-qtquick-layouts \
             qml6-module-qtquick-dialogs qml6-module-qtquick-window \
-            poppler-utils
+            poppler-utils dbus-daemon dbus-tests
 
       - name: Checkout code
         uses: actions/checkout@v4

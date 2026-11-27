@@ -114,10 +114,24 @@ bool CredentialStore::isKeyringAvailable() const {
         return false;
     }
     auto* iface = bus.interface();
-    if (!iface || !iface->isServiceRegistered(m_serviceName)) {
+    if (!iface) {
         return false;
     }
-    return true;
+    if (iface->isServiceRegistered(m_serviceName)) {
+        return true;
+    }
+    // KWallet / GNOME Keyring are usually started on demand by D-Bus activation: start it now
+    // instead of treating a not-yet-running service as missing (KB-154).
+    const QDBusReply<QStringList> activatable = iface->activatableServiceNames();
+    if (!activatable.isValid() || !activatable.value().contains(m_serviceName)) {
+        return false;
+    }
+    const QDBusReply<void> started = iface->startService(m_serviceName);
+    if (!started.isValid()) {
+        qWarning() << "CredentialStore: cannot start" << m_serviceName << ":" << started.error().message();
+        return false;
+    }
+    return iface->isServiceRegistered(m_serviceName);
 }
 
 QString CredentialStore::currentDbScope() const {
