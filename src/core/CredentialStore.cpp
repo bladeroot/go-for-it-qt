@@ -23,6 +23,7 @@
 #include <QTimer>
 #include <sys/stat.h>
 #include <memory>
+#include <utility>
 
 namespace gofi {
 
@@ -287,6 +288,33 @@ void CredentialStore::deliverUnlockResult() {
     Q_EMIT keyringUnlockFinished(unlocked);
 }
 
+void CredentialStore::dismissPrompt(const QString& promptPath) {
+    if (promptPath.isEmpty() || promptPath == QStringLiteral("/")) {
+        return;
+    }
+    QDBusMessage msg = QDBusMessage::createMethodCall(
+        m_serviceName, promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Dismiss"));
+    activeBus().asyncCall(msg);
+}
+
+QDBusObjectPath CredentialStore::defaultCollectionPath() const {
+    QDBusMessage msg = QDBusMessage::createMethodCall(
+        m_serviceName,
+        QStringLiteral("/org/freedesktop/secrets"),
+        QStringLiteral("org.freedesktop.Secret.Service"),
+        QStringLiteral("ReadAlias")
+    );
+    msg << QStringLiteral("default");
+    const QDBusMessage reply = activeBus().call(msg, QDBus::BlockWithGui, 1000);
+    if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
+        const QDBusObjectPath path = reply.arguments().at(0).value<QDBusObjectPath>();
+        if (!path.path().isEmpty() && path.path() != QStringLiteral("/")) {
+            return path;
+        }
+    }
+    return QDBusObjectPath(QStringLiteral("/org/freedesktop/secrets/aliases/default"));
+}
+
 void CredentialStore::unlockKeyringForCurrentDatabase() {
     BusyScope busy(*this);
     if (m_inMemory || !isKeyringAvailable() || m_unlockPromptDismissed) {
@@ -385,13 +413,31 @@ bool CredentialStore::storeInKeyring(const QString& listId, const QString& token
     msg << QVariant::fromValue(secret);
     msg << true;
 
-    const QDBusMessage reply = bus.call(msg, QDBus::BlockWithGui, 1500);
-    if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
-        return false;
-    }
+    const auto createItem = [&]() -> std::pair<bool, QString> {
+        const QDBusMessage reply = bus.call(msg, QDBus::BlockWithGui, 1500);
+        if (reply.type() != QDBusMessage::ReplyMessage || reply.arguments().isEmpty()) {
+            return {false, {}};
+        }
+        const QDBusObjectPath itemPath = reply.arguments().at(0).value<QDBusObjectPath>();
+        if (!itemPath.path().isEmpty() && itemPath.path() != QStringLiteral("/")) {
+            return {true, {}};
+        }
+        const QString prompt = reply.arguments().size() > 1
+            ? reply.arguments().at(1).value<QDBusObjectPath>().path() : QString();
+        return {false, prompt};
+    };
 
-    const QDBusObjectPath itemPath = reply.arguments().at(0).value<QDBusObjectPath>();
-    return !itemPath.path().isEmpty() && itemPath.path() != QStringLiteral("/");
+    auto [created, prompt] = createItem();
+    if (!created && !prompt.isEmpty() && prompt != QStringLiteral("/")) {
+        // The collection is locked (KB-156). Unlock it instead of leaving the token in the fallback
+        // file: either right away, then create the item again, or through the password prompt, after
+        // which loading the tokens moves the file token into the keyring.
+        dismissPrompt(prompt);
+        if (!unlockObjects({defaultCollectionPath()}).isEmpty()) {
+            created = createItem().first;
+        }
+    }
+    return created;
 }
 
 QString CredentialStore::loadFromKeyring(const QString& listId) {

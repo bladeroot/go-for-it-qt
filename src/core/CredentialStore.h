@@ -111,6 +111,8 @@ private:
         ~BusyScope();
         CredentialStore& store;
     };
+    void dismissPrompt(const QString& promptPath);
+    QDBusObjectPath defaultCollectionPath() const;
     bool storeInKeyring(const QString& listId, const QString& token);
     QString loadFromKeyring(const QString& listId);
     bool deleteFromKeyring(const QString& listId);

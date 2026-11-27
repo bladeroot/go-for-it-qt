@@ -148,6 +148,16 @@ bool FakeSecretService::handleMessage(const QDBusMessage& msg, const QDBusConnec
         conn.send(reply);
         return true;
     }
+    if (member == QStringLiteral("ReadAlias")) {
+        QDBusMessage reply = msg.createReply();
+        reply << QVariant::fromValue(QDBusObjectPath(QString::fromLatin1(CollectionPath)));
+        conn.send(reply);
+        return true;
+    }
+    if (member == QStringLiteral("Dismiss")) {
+        conn.send(msg.createReply());
+        return true;
+    }
     if (member == QStringLiteral("CreateItem") && createNeedsPrompt) {
         QDBusMessage reply = msg.createReply();
         reply << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")))
@@ -238,6 +248,13 @@ bool FakeSecretService::handleMessage(const QDBusMessage& msg, const QDBusConnec
                 requested = qdbus_cast<QList<QDBusObjectPath>>(v);
             }
         }
+        const auto unlockCollection = [this](const QList<QDBusObjectPath>& paths) {
+            for (const auto& p : paths) {
+                if (p.path() == QString::fromLatin1(CollectionPath)) {
+                    createNeedsPrompt = false;
+                }
+            }
+        };
         if (unlockNeedsPrompt) {
             pendingUnlock = requested;
             QDBusMessage reply = msg.createReply();
@@ -249,6 +266,7 @@ bool FakeSecretService::handleMessage(const QDBusMessage& msg, const QDBusConnec
         for (const auto& p : requested) {
             lockedPaths.remove(p.path());
         }
+        unlockCollection(requested);
         QDBusMessage reply = msg.createReply();
         reply << QVariant::fromValue(requested)
               << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")));
@@ -270,6 +288,9 @@ bool FakeSecretService::handleMessage(const QDBusMessage& msg, const QDBusConnec
             }
             for (const auto& p : pendingUnlock) {
                 lockedPaths.remove(p.path());
+                if (p.path() == QString::fromLatin1(CollectionPath)) {
+                    createNeedsPrompt = false;
+                }
             }
             QDBusMessage completed = QDBusMessage::createSignal(promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Completed"));
             completed << false << QVariant::fromValue(QDBusVariant(QVariant::fromValue(pendingUnlock)));

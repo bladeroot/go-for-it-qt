@@ -1052,6 +1052,40 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!controller.issueTracker()->isSyncing(), 5000);
         server.close();
     }
+
+    // CreateItem into a locked collection answers with a prompt. It was never completed, so a token saved
+    // while the wallet was closed silently stayed in the plaintext-equivalent fallback file although a
+    // keyring exists (KB-156).
+    void testTokenSavedIntoLockedCollectionReachesKeyring() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_create_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString credsPath = dir.filePath(QStringLiteral("credentials.json"));
+        FakeKeyring keyring(bus, QStringLiteral("cs_create"), credsPath);
+        QVERIFY(keyring.ok);
+        auto& store = gofi::CredentialStore::instance();
+
+        // The collection unlocks without a password (Unlock answers at once).
+        keyring.fake.createNeedsPrompt = true;
+        QVERIFY(store.storeToken(QStringLiteral("cs_create_one"), QStringLiteral("pat_create_one")));
+        QCOMPARE(keyring.fake.items.size(), 1);
+        QVERIFY(!fileContents(credsPath).contains("pat_create_one"));
+
+        // The collection needs the wallet password: the token waits in the file and moves to the keyring once
+        // the prompt is answered.
+        keyring.fake.createNeedsPrompt = true;
+        keyring.fake.unlockNeedsPrompt = true;
+        QSignalSpy unlockSpy(&store, &gofi::CredentialStore::keyringUnlockFinished);
+        QVERIFY(store.storeToken(QStringLiteral("cs_create_two"), QStringLiteral("pat_create_two")));
+        QVERIFY(unlockSpy.wait(5000));
+        QCOMPARE(unlockSpy.first().first().toBool(), true);
+        QCOMPARE(store.loadToken(QStringLiteral("cs_create_two")), QStringLiteral("pat_create_two"));
+        QCOMPARE(keyring.fake.items.size(), 2);
+        QVERIFY(!fileContents(credsPath).contains("pat_create_two"));
+    }
 };
 
 QTEST_MAIN(TestCredentials)

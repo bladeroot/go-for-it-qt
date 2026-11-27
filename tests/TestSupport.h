@@ -199,6 +199,7 @@ public:
     bool createNeedsPrompt = false;  // CreateItem into a locked collection answers with a prompt
     bool promptAnswered = false;     // the (possibly delayed) unlock prompt has sent Completed
     QList<QDBusObjectPath> pendingUnlock;
+    static constexpr const char* CollectionPath = "/org/freedesktop/secrets/collection/fake";
     int nextId = 0;
 
     QString introspect(const QString&) const override { return {}; }
