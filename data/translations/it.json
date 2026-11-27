@@ -650,5 +650,6 @@
   "📅 Activity Heatmap (Last 90 Days)": "📅 Heatmap attività (ultimi 90 giorni)",
   "📊 Export CSV": "📊 Esporta CSV",
   "📊 Productivity Dashboard & Reports": "📊 Dashboard di produttività & Report",
-  "📋 ACTIVE TASKS WORKED": "📋 ATTIVITÀ ATTIVE LAVORATE"
+  "📋 ACTIVE TASKS WORKED": "📋 ATTIVITÀ ATTIVE LAVORATE",
+  "Waiting for the keyring to be unlocked...": "In attesa dello sblocco del portachiavi..."
 }

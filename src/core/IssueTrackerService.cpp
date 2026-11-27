@@ -1,4 +1,5 @@
 #include "IssueTrackerService.h"
+#include "CredentialStore.h"
 #include "trackers/TrackerCommon.h"
 #include "trackers/GitHubProvider.h"
 #include "trackers/GitLabProvider.h"
@@ -224,6 +225,12 @@ void IssueTrackerService::fetchRemoteStatuses(const QString& provider,
 }
 
 void IssueTrackerService::syncListIssues(const TodoListEntry& listEntry) {
+    if (listEntry.apiToken.trimmed().isEmpty() && CredentialStore::instance().isUnlockInProgress()) {
+        // The token is probably in the keyring the user is unlocking right now: syncing without it
+        // would only report an authentication error. The list is synced once the prompt is answered.
+        setStatusMessage(tr("Waiting for the keyring to be unlocked..."));
+        return;
+    }
     if (auto* p = providerFor(listEntry.provider)) {
         p->syncList(listEntry);
     }

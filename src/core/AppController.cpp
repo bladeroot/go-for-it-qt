@@ -172,6 +172,12 @@ AppController::AppController(const QString& logFilePath, const QString& customDb
         m_notifications.notifyTaskEvent(tr("Database Error"), message);
         emit databaseError(message);
     });
+    connect(&m_listManager, &ListManagerModel::credentialsReloaded, this, [this](const QStringList&) {
+        // Syncs that waited for the keyring prompt (or ran without the token) run now.
+        if (isCurrentListRemote()) {
+            syncCurrentList();
+        }
+    });
     connect(&m_listManager, &ListManagerModel::errorOccurred, this, [this](const QString& message) {
         qCritical() << "ListManager database error:" << message;
         m_notifications.notifyTaskEvent(tr("Database Error"), message);

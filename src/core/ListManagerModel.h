@@ -43,6 +43,8 @@ public:
     Q_INVOKABLE void moveItem(int fromRow, int toRow);
     Q_INVOKABLE void updateListStatusMapping(const QString& listId, const QVariantMap& mapping);
     void reloadFromDatabase();
+    // Loads the tokens of remote lists again, e.g. once the keyring has been unlocked.
+    void reloadCredentials();
 
     [[nodiscard]] int indexOfId(const QString& id) const;
     [[nodiscard]] TodoListEntry entry(int row) const;
@@ -53,6 +55,8 @@ signals:
     void listRemoved(const QString& id);
     void listUpdated(const QString& id);
     void errorOccurred(const QString& message);
+    // After the keyring password prompt was answered; changedIds are the lists whose token changed.
+    void credentialsReloaded(const QStringList& changedIds);
 
 private:
     QVector<TodoListEntry> m_entries;

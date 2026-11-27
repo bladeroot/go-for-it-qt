@@ -650,5 +650,6 @@
   "📅 Activity Heatmap (Last 90 Days)": "📅 Теплова карта активності (останні 90 днів)",
   "📊 Export CSV": "📊 Експорт CSV",
   "📊 Productivity Dashboard & Reports": "📊 Панель продуктивності та звіти",
-  "📋 ACTIVE TASKS WORKED": "📋 АКТИВНІ ЗАДАЧІ В РОБОТІ"
+  "📋 ACTIVE TASKS WORKED": "📋 АКТИВНІ ЗАДАЧІ В РОБОТІ",
+  "Waiting for the keyring to be unlocked...": "Очікування розблокування сховища паролів..."
 }

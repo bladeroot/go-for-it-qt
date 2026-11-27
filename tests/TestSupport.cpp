@@ -261,6 +261,7 @@ bool FakeSecretService::handleMessage(const QDBusMessage& msg, const QDBusConnec
         const QString promptPath = msg.path();
         QDBusConnection c = conn;
         auto complete = [this, c, promptPath]() mutable {
+            promptAnswered = true;
             if (promptDismisses) {
                 QDBusMessage dismissed = QDBusMessage::createSignal(promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Completed"));
                 dismissed << true << QVariant::fromValue(QDBusVariant(QVariant::fromValue(QList<QDBusObjectPath>())));

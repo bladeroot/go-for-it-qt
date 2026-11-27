@@ -1,4 +1,5 @@
 #include "ListManagerModel.h"
+#include "CredentialStore.h"
 #include <QUuid>
 
 namespace gofi {
@@ -6,7 +7,30 @@ namespace gofi {
 ListManagerModel::ListManagerModel(QObject* parent)
     : QAbstractListModel(parent)
 {
+    // Lists load without waiting for the wallet password (KB-155); their tokens follow once it is typed.
+    connect(&CredentialStore::instance(), &CredentialStore::keyringUnlockFinished, this, [this](bool) {
+        reloadCredentials();
+    });
     reloadFromDatabase();
+}
+
+void ListManagerModel::reloadCredentials() {
+    if (!DatabaseManager::instance().isOpen()) {
+        return;
+    }
+    QStringList changed;
+    for (TodoListEntry& e : m_entries) {
+        if (e.id.isEmpty() || e.provider == QStringLiteral("SQLite") || e.provider == QStringLiteral("Todo.txt")
+            || e.provider.isEmpty()) {
+            continue;
+        }
+        const QString token = CredentialStore::instance().loadToken(e.id);
+        if (!token.isEmpty() && token != e.apiToken) {
+            e.apiToken = token;
+            changed << e.id;
+        }
+    }
+    emit credentialsReloaded(changed);
 }
 
 void ListManagerModel::reloadFromDatabase() {

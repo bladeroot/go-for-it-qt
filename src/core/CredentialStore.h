@@ -42,7 +42,15 @@ struct SecretServiceSecret {
     QString contentType;
 };
 
-class CredentialStore {
+// Tokens of tracker lists, kept in the Freedesktop Secret Service (KWallet, GNOME Keyring) or, when it is
+// unavailable or locked, in a 0600 JSON fallback file next to the database.
+//
+// Unlocking a locked keyring never waits for the user: when the service answers with a password prompt,
+// the prompt is shown asynchronously and the calling operation behaves as if the keyring were locked
+// (empty token, fallback file, pending deletion). keyringUnlockFinished() reports the user's answer;
+// callers then load the tokens again.
+class CredentialStore : public QObject {
+    Q_OBJECT
 public:
     static CredentialStore& instance();
 
@@ -65,6 +73,8 @@ public:
     // Batch unlock all items for the currently opened database upfront
     void unlockKeyringForCurrentDatabase();
     void resetPromptState();
+    // True while a keyring password prompt is open.
+    [[nodiscard]] bool isUnlockInProgress() const { return m_unlockInProgress; }
 
     // Token operations
     [[nodiscard]] QString loadToken(const QString& listId);
@@ -75,18 +85,34 @@ public:
     // Migration of legacy plaintext tokens from SQLite database
     int migratePlaintextDatabaseTokens();
 
+Q_SIGNALS:
+    // The user answered the keyring password prompt (unlocked == false: dismissed or failed).
+    void keyringUnlockFinished(bool unlocked);
+
 private:
     CredentialStore();
-    ~CredentialStore() = default;
+    ~CredentialStore() override = default;
 
     CredentialStore(const CredentialStore&) = delete;
     CredentialStore& operator=(const CredentialStore&) = delete;
 
     // Keystore operations (Freedesktop Secret Service)
     bool openSecretServiceSession(QString& sessionPath) const;
-    QList<QDBusObjectPath> unlockObjects(const QList<QDBusObjectPath>& locked) const;
+    QList<QDBusObjectPath> unlockObjects(const QList<QDBusObjectPath>& locked);
+    void startUnlockPrompt(const QString& promptPath);
+    void finishUnlock(quint64 generation, bool unlocked);
+    void deliverUnlockResult();
+
+    // Blocking D-Bus calls run a nested event loop, so the prompt's answer can arrive in the middle of
+    // a token operation. It is delivered (pending deletions, keyringUnlockFinished) only once no
+    // operation is running.
+    struct BusyScope {
+        explicit BusyScope(CredentialStore& store);
+        ~BusyScope();
+        CredentialStore& store;
+    };
     bool storeInKeyring(const QString& listId, const QString& token);
-    QString loadFromKeyring(const QString& listId) const;
+    QString loadFromKeyring(const QString& listId);
     bool deleteFromKeyring(const QString& listId);
 
     // Fallback file operations (JSON, 0600 file permissions)
@@ -110,7 +136,11 @@ private:
 
     mutable std::optional<QDBusConnection> m_customBus;
     QString m_serviceName = QStringLiteral("org.freedesktop.secrets");
-    mutable bool m_unlockPromptDismissed = false;
+    bool m_unlockPromptDismissed = false;
+    bool m_unlockInProgress = false;
+    quint64 m_unlockGeneration = 0;
+    int m_busyDepth = 0;
+    std::optional<bool> m_unlockResult;
 };
 
 } // namespace gofi

@@ -197,6 +197,7 @@ public:
     int promptDelayMs = 0;           // time the user needs to type the wallet password
     bool promptDismisses = false;    // the user closes the wallet password dialog
     bool createNeedsPrompt = false;  // CreateItem into a locked collection answers with a prompt
+    bool promptAnswered = false;     // the (possibly delayed) unlock prompt has sent Completed
     QList<QDBusObjectPath> pendingUnlock;
     int nextId = 0;
 

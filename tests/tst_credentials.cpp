@@ -14,9 +14,64 @@
 #include <QJsonObject>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QTcpServer>
 #include <QtTest>
+#include <memory>
 
 using namespace gofi;
+
+namespace {
+
+// A FakeSecretService on a private bus, wired into CredentialStore for the lifetime of the object.
+struct FakeKeyring {
+    FakeKeyring(const PrivateDBus& bus, const QString& prefix, const QString& credsPath)
+        : fakeName(prefix + QStringLiteral("_fake")), clientName(prefix + QStringLiteral("_client")) {
+        fakeConn = std::make_unique<QDBusConnection>(QDBusConnection::connectToBus(bus.address, fakeName));
+        clientConn = std::make_unique<QDBusConnection>(QDBusConnection::connectToBus(bus.address, clientName));
+        ok = fakeConn->isConnected() && clientConn->isConnected()
+            && fakeConn->registerService(service)
+            && fakeConn->registerVirtualObject(QStringLiteral("/org/freedesktop/secrets"), &fake, QDBusConnection::SubPath);
+        auto& store = gofi::CredentialStore::instance();
+        store.setInMemoryMode(false);
+        store.setFallbackFilePath(credsPath);
+        store.setDBusConnection(*clientConn, service);
+    }
+    ~FakeKeyring() {
+        auto& store = gofi::CredentialStore::instance();
+        store.resetDBusConnection();
+        store.setFallbackFilePath(QString());
+        fakeConn->unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
+        fakeConn->unregisterService(service);
+        fakeConn.reset();
+        clientConn.reset();
+        QDBusConnection::disconnectFromBus(fakeName);
+        QDBusConnection::disconnectFromBus(clientName);
+    }
+    const QString service = QStringLiteral("org.freedesktop.secrets");
+    QString fakeName;
+    QString clientName;
+    std::unique_ptr<QDBusConnection> fakeConn;
+    std::unique_ptr<QDBusConnection> clientConn;
+    FakeSecretService fake;
+    bool ok = false;
+};
+
+QByteArray fileContents(const QString& path) {
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+gofi::TodoListEntry trackerEntry(const QString& id, const QString& token) {
+    gofi::TodoListEntry entry;
+    entry.id = id;
+    entry.name = QStringLiteral("Tracker %1").arg(id);
+    entry.provider = QStringLiteral("GitHub");
+    entry.jiraUrl = QStringLiteral("https://example.invalid");
+    entry.apiToken = token;
+    return entry;
+}
+
+} // namespace
 
 class TestCredentials : public QObject {
     Q_OBJECT
@@ -405,7 +460,8 @@ private slots:
 
     void testCredentialStoreCompletesUnlockPromptForLockedItems() {
         // A locked KWallet / GNOME Keyring collection is unlocked through a prompt: Unlock returns no paths and a
-        // prompt object; the item becomes readable only after Prompt() completes.
+        // prompt object; the item becomes readable only after Prompt() completes. The prompt is not waited for
+        // (KB-155): loadToken() returns at once, keyringUnlockFinished(true) follows the answer.
         PrivateDBus bus;
         if (bus.address.isEmpty()) {
             QSKIP("dbus-daemon is not available");
@@ -414,8 +470,11 @@ private slots:
         const QString clientName = QStringLiteral("cs_prompt_client");
         const QString credsPath = m_testSandbox.filePath(QStringLiteral("cs_prompt_fallback.json"));
         QFile::remove(credsPath);
+        QString loadedWhileLocked;
         QString loaded;
         int unlockCalls = 0;
+        bool finished = false;
+        bool unlocked = false;
         {
             QDBusConnection fakeConn = QDBusConnection::connectToBus(bus.address, fakeName);
             QDBusConnection clientConn = QDBusConnection::connectToBus(bus.address, clientName);
@@ -436,6 +495,10 @@ private slots:
             fakeSecrets.lockedPaths.insert(fakeSecrets.items.firstKey());
             fakeSecrets.unlockNeedsPrompt = true;
 
+            QSignalSpy unlockSpy(&store, &gofi::CredentialStore::keyringUnlockFinished);
+            loadedWhileLocked = store.loadToken(QStringLiteral("cs_prompt_list"));
+            finished = unlockSpy.wait(5000);
+            unlocked = finished && unlockSpy.first().first().toBool();
             loaded = store.loadToken(QStringLiteral("cs_prompt_list"));
             unlockCalls = fakeSecrets.unlockCalls;
 
@@ -448,6 +511,9 @@ private slots:
         gofi::CredentialStore::instance().setFallbackFilePath(QString());
         QFile::remove(credsPath);
 
+        QCOMPARE(loadedWhileLocked, QString());
+        QVERIFY(finished);
+        QVERIFY(unlocked);
         QCOMPARE(unlockCalls, 1);
         QCOMPARE(loaded, QStringLiteral("pat_prompt_secret"));
     }
@@ -614,7 +680,8 @@ private slots:
 
     void testCredentialStoreWaitsForUserToAnswerUnlockPrompt() {
         // Typing a wallet password takes a human several seconds. A prompt answered after 8 s must still give
-        // the token instead of an empty one (which also leads to deleting it on the next settings save).
+        // the token (after keyringUnlockFinished) instead of an empty one (which also leads to deleting it on
+        // the next settings save).
         PrivateDBus bus;
         if (bus.address.isEmpty()) {
             QSKIP("dbus-daemon is not available");
@@ -644,8 +711,11 @@ private slots:
             fakeSecrets.unlockNeedsPrompt = true;
             fakeSecrets.promptDelayMs = 8000;
 
+            QSignalSpy unlockSpy(&store, &gofi::CredentialStore::keyringUnlockFinished);
+            QVERIFY(store.loadToken(QStringLiteral("cs_slowprompt_list")).isEmpty());
+            QVERIFY(unlockSpy.wait(15000));
+            QCOMPARE(unlockSpy.first().first().toBool(), true);
             loaded = store.loadToken(QStringLiteral("cs_slowprompt_list"));
-            QTRY_VERIFY_WITH_TIMEOUT(fakeSecrets.lockedPaths.isEmpty(), 10000);  // let the delayed reply finish
 
             store.resetDBusConnection();
             fakeConn.unregisterObject(QStringLiteral("/org/freedesktop/secrets"), QDBusConnection::UnregisterTree);
@@ -891,6 +961,96 @@ private slots:
         fakeConn.unregisterService(service);
         QDBusConnection::disconnectFromBus(fakeName);
         QDBusConnection::disconnectFromBus(clientName);
+    }
+    // ListManagerModel loads in AppController's constructor, before the main window exists. It waited
+    // there for the wallet password (up to 30 s + 120 s in a nested event loop), so the app showed no
+    // window, or a frozen one, until the dialog was answered (KB-155). Lists must load at once and get
+    // their tokens when the prompt is answered.
+    void testListsLoadWithoutWaitingForWalletPassword() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_async_XXXXXX")));
+        QVERIFY(dir.isValid());
+        const QString listId = QStringLiteral("cs_async_list");
+        FakeKeyring keyring(bus, QStringLiteral("cs_async"), dir.filePath(QStringLiteral("credentials.json")));
+        QVERIFY(keyring.ok);
+
+        auto& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(dir.filePath(QStringLiteral("async.db"))));
+        QVERIFY(db.saveList(trackerEntry(listId, QStringLiteral("pat_async_secret")), 0));
+        QCOMPARE(keyring.fake.items.size(), 1);
+
+        // Next start: the wallet is closed and the user needs a moment to type the password.
+        auto& store = gofi::CredentialStore::instance();
+        store.resetPromptState();
+        keyring.fake.lockedPaths.insert(keyring.fake.items.firstKey());
+        keyring.fake.unlockNeedsPrompt = true;
+        keyring.fake.promptDelayMs = 1500;
+
+        gofi::ListManagerModel model;
+        const bool answeredDuringLoad = keyring.fake.promptAnswered;
+        const bool promptOpenAfterLoad = store.isUnlockInProgress();
+        const QString tokenAfterLoad = model.entry(model.indexOfId(listId)).apiToken;
+        QSignalSpy reloaded(&model, &gofi::ListManagerModel::credentialsReloaded);
+
+        QVERIFY2(!answeredDuringLoad, "loading the lists waited for the wallet password");
+        QVERIFY(promptOpenAfterLoad);
+        QCOMPARE(tokenAfterLoad, QString());
+        QVERIFY(reloaded.wait(5000));
+        QCOMPARE(reloaded.first().first().toStringList(), QStringList{listId});
+        QCOMPARE(model.entry(model.indexOfId(listId)).apiToken, QStringLiteral("pat_async_secret"));
+        QVERIFY(!store.isUnlockInProgress());
+        db.close();
+    }
+
+    // The tracker list opened at start-up synced before the wallet password was typed, i.e. without its token:
+    // an authentication error, or anonymous results. It must wait for the prompt and then sync with the token.
+    void testTrackerSyncWaitsForWalletPassword() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        QTcpServer server;
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
+            QSKIP("Cannot bind to loopback port in restricted sandbox");
+        }
+        QStringList requestHeads;
+        serveHttpFull(server, [&requestHeads](const QByteArray&, const QByteArray&, const QByteArray& head, const QByteArray&) {
+            requestHeads << QString::fromUtf8(head);
+            return httpResponse("200 OK", "application/json", "{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}");
+        });
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_waitsync_XXXXXX")));
+        QVERIFY(dir.isValid());
+        FakeKeyring keyring(bus, QStringLiteral("cs_waitsync"), dir.filePath(QStringLiteral("credentials.json")));
+        QVERIFY(keyring.ok);
+        const QString dbPath = dir.filePath(QStringLiteral("waitsync.db"));
+
+        auto& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(dbPath));
+        gofi::TodoListEntry entry = trackerEntry(QStringLiteral("cs_waitsync_list"), QStringLiteral("pat_waitsync_secret"));
+        entry.jiraUrl = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+        entry.jiraJql = QStringLiteral("owner/repo");
+        QVERIFY(db.saveList(entry, 0));
+        db.close();
+
+        gofi::CredentialStore::instance().resetPromptState();
+        keyring.fake.lockedPaths.insert(keyring.fake.items.firstKey());
+        keyring.fake.unlockNeedsPrompt = true;
+        keyring.fake.promptDelayMs = 1500;
+
+        gofi::AppController controller(dir.filePath(QStringLiteral("activity.log")), dbPath);
+        const QString statusAtStart = controller.issueTracker()->lastStatusMessage();
+        QTest::qWait(500);
+        QVERIFY2(requestHeads.isEmpty(), "synced before the wallet password was typed");
+        QCOMPARE(statusAtStart,
+                 QCoreApplication::translate("gofi::IssueTrackerService", "Waiting for the keyring to be unlocked..."));
+
+        QTRY_COMPARE_WITH_TIMEOUT(requestHeads.size(), 1, 6000);
+        QVERIFY2(requestHeads.first().contains(QStringLiteral("pat_waitsync_secret")), qPrintable(requestHeads.first()));
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.issueTracker()->isSyncing(), 5000);
+        server.close();
     }
 };
 

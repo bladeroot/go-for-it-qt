@@ -7,6 +7,7 @@
 #include <QDBusInterface>
 #include <QDBusMessage>
 #include <QDBusMetaType>
+#include <QDBusPendingCallWatcher>
 #include <QDBusReply>
 #include <QDir>
 #include <QEventLoop>
@@ -15,11 +16,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QSaveFile>
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTimer>
 #include <sys/stat.h>
+#include <memory>
 
 namespace gofi {
 
@@ -85,17 +88,21 @@ void CredentialStore::clearInMemoryTokens() {
 void CredentialStore::setDBusConnection(const QDBusConnection& connection, const QString& serviceName) {
     m_customBus = connection;
     m_serviceName = serviceName;
-    m_unlockPromptDismissed = false;
+    resetPromptState();
 }
 
 void CredentialStore::resetDBusConnection() {
     m_customBus.reset();
     m_serviceName = QStringLiteral("org.freedesktop.secrets");
-    m_unlockPromptDismissed = false;
+    resetPromptState();
 }
 
 void CredentialStore::resetPromptState() {
     m_unlockPromptDismissed = false;
+    // A prompt still open belongs to the previous bus/session: its answer is ignored.
+    m_unlockInProgress = false;
+    ++m_unlockGeneration;
+    m_unlockResult.reset();
 }
 
 QDBusConnection CredentialStore::activeBus() const {
@@ -159,8 +166,8 @@ QString CredentialStore::defaultFallbackFilePath() const {
     return dataDir + QStringLiteral("/credentials.json");
 }
 
-QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPath>& locked) const {
-    if (locked.isEmpty() || m_unlockPromptDismissed) {
+QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPath>& locked) {
+    if (locked.isEmpty() || m_unlockPromptDismissed || m_unlockInProgress) {
         return {};
     }
     QDBusConnection bus = activeBus();
@@ -186,60 +193,102 @@ QList<QDBusObjectPath> CredentialStore::unlockObjects(const QList<QDBusObjectPat
     if (promptPath.path().isEmpty() || promptPath.path() == QStringLiteral("/")) {
         return {};
     }
+    // The user has to type the wallet password. Don't wait for it (KB-155): the window would not
+    // appear, or would freeze, until the dialog is answered. The caller goes on as if the keyring were
+    // locked; keyringUnlockFinished() tells when to load the tokens again.
+    startUnlockPrompt(promptPath.path());
+    return {};
+}
 
-    SecretPromptHelper helper;
-    QEventLoop loop;
-    QObject::connect(&helper, &SecretPromptHelper::done, &loop, &QEventLoop::quit);
+void CredentialStore::startUnlockPrompt(const QString& promptPath) {
+    QDBusConnection bus = activeBus();
+    const QString service = m_serviceName;
+    const quint64 generation = ++m_unlockGeneration;
+    m_unlockInProgress = true;
 
-    QTimer timer;
-    timer.setSingleShot(true);
-    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-
-    bus.connect(
-        m_serviceName,
-        promptPath.path(),
-        QStringLiteral("org.freedesktop.Secret.Prompt"),
-        QStringLiteral("Completed"),
-        &helper,
-        SLOT(completed(bool,QDBusVariant))
-    );
+    QPointer<SecretPromptHelper> helper = new SecretPromptHelper(this);
+    // Completed and a failed Prompt call may both arrive; only the first one counts.
+    auto released = std::make_shared<bool>(false);
+    const auto release = [bus, service, promptPath, helper, released]() {
+        if (*released) {
+            return false;
+        }
+        *released = true;
+        if (helper) {
+            QDBusConnection connection = bus;
+            connection.disconnect(service, promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"),
+                           QStringLiteral("Completed"), helper.data(), SLOT(completed(bool,QDBusVariant)));
+            helper->deleteLater();
+        }
+        return true;
+    };
+    bus.connect(service, promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"),
+                QStringLiteral("Completed"), helper.data(), SLOT(completed(bool,QDBusVariant)));
+    connect(helper.data(), &SecretPromptHelper::done, this, [this, generation, helper, release]() {
+        const bool unlocked = helper && !helper->dismissed;
+        if (release()) {
+            finishUnlock(generation, unlocked);
+        }
+    });
 
     QDBusMessage promptMsg = QDBusMessage::createMethodCall(
-        m_serviceName,
-        promptPath.path(),
-        QStringLiteral("org.freedesktop.Secret.Prompt"),
-        QStringLiteral("Prompt")
-    );
-    promptMsg << QStringLiteral("");
-    bus.call(promptMsg, QDBus::BlockWithGui, 30000);
+        service, promptPath, QStringLiteral("org.freedesktop.Secret.Prompt"), QStringLiteral("Prompt"));
+    promptMsg << QString();
+    // Prompt() should return at once, but an implementation that answers only when the dialog closes must
+    // not count as failed after the default 25 s.
+    auto* watcher = new QDBusPendingCallWatcher(bus.asyncCall(promptMsg, 10 * 60 * 1000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, generation, release](QDBusPendingCallWatcher* w) {
+        w->deleteLater();
+        if (!w->isError()) {
+            return;  // the answer comes with the Completed signal
+        }
+        qWarning() << "CredentialStore: keyring unlock prompt failed:" << w->error().message();
+        if (release()) {
+            finishUnlock(generation, false);
+        }
+    });
+}
 
-    if (!helper.finished) {
-        timer.start(120000);
-        loop.exec();
+CredentialStore::BusyScope::BusyScope(CredentialStore& s) : store(s) {
+    ++store.m_busyDepth;
+}
+
+CredentialStore::BusyScope::~BusyScope() {
+    if (--store.m_busyDepth == 0 && store.m_unlockResult.has_value()) {
+        QTimer::singleShot(0, &store, &CredentialStore::deliverUnlockResult);
     }
+}
 
-    bus.disconnect(
-        m_serviceName,
-        promptPath.path(),
-        QStringLiteral("org.freedesktop.Secret.Prompt"),
-        QStringLiteral("Completed"),
-        &helper,
-        SLOT(completed(bool,QDBusVariant))
-    );
-
-    if (helper.dismissed) {
+void CredentialStore::finishUnlock(quint64 generation, bool unlocked) {
+    if (generation != m_unlockGeneration) {
+        return;  // answer to a prompt of an earlier bus/session
+    }
+    m_unlockInProgress = false;
+    if (!unlocked) {
+        // One prompt per session: don't ask again on every token access.
         m_unlockPromptDismissed = true;
-        return {};
     }
+    m_unlockResult = unlocked;
+    if (m_busyDepth == 0) {
+        QTimer::singleShot(0, this, &CredentialStore::deliverUnlockResult);
+    }
+}
 
-    QList<QDBusObjectPath> unlockedFromPrompt = parseObjectPathList(helper.result);
-    if (unlockedFromPrompt.isEmpty()) {
-        unlockedFromPrompt = locked;
+void CredentialStore::deliverUnlockResult() {
+    if (!m_unlockResult.has_value() || m_busyDepth > 0) {
+        return;  // delivered when the running operation ends
     }
-    return unlockedFromPrompt;
+    const bool unlocked = *m_unlockResult;
+    m_unlockResult.reset();
+    if (unlocked) {
+        BusyScope busy(*this);
+        processPendingDeletions();
+    }
+    Q_EMIT keyringUnlockFinished(unlocked);
 }
 
 void CredentialStore::unlockKeyringForCurrentDatabase() {
+    BusyScope busy(*this);
     if (m_inMemory || !isKeyringAvailable() || m_unlockPromptDismissed) {
         return;
     }
@@ -269,7 +318,7 @@ void CredentialStore::unlockKeyringForCurrentDatabase() {
     if (!locked.isEmpty()) {
         unlockObjects(locked);
     }
-    if (!m_unlockPromptDismissed) {
+    if (!m_unlockPromptDismissed && !m_unlockInProgress) {
         processPendingDeletions();
     }
 }
@@ -345,7 +394,7 @@ bool CredentialStore::storeInKeyring(const QString& listId, const QString& token
     return !itemPath.path().isEmpty() && itemPath.path() != QStringLiteral("/");
 }
 
-QString CredentialStore::loadFromKeyring(const QString& listId) const {
+QString CredentialStore::loadFromKeyring(const QString& listId) {
     if (!isKeyringAvailable() || listId.isEmpty()) {
         return {};
     }
@@ -674,6 +723,7 @@ void CredentialStore::processPendingDeletions() {
 }
 
 bool CredentialStore::storeToken(const QString& listId, const QString& token) {
+    BusyScope busy(*this);
     if (listId.isEmpty()) {
         return false;
     }
@@ -700,6 +750,7 @@ bool CredentialStore::storeToken(const QString& listId, const QString& token) {
 }
 
 QString CredentialStore::loadToken(const QString& listId) {
+    BusyScope busy(*this);
     if (listId.isEmpty()) {
         return {};
     }
@@ -729,6 +780,7 @@ QString CredentialStore::loadToken(const QString& listId) {
 }
 
 bool CredentialStore::deleteToken(const QString& listId) {
+    BusyScope busy(*this);
     if (listId.isEmpty()) {
         return false;
     }
@@ -746,6 +798,7 @@ bool CredentialStore::deleteToken(const QString& listId) {
 }
 
 bool CredentialStore::removeListCredentials(const QString& listId) {
+    BusyScope busy(*this);
     if (listId.isEmpty()) {
         return false;
     }
@@ -767,6 +820,7 @@ bool CredentialStore::removeListCredentials(const QString& listId) {
 }
 
 int CredentialStore::migratePlaintextDatabaseTokens() {
+    BusyScope busy(*this);
     auto& dbMgr = DatabaseManager::instance();
     if (!dbMgr.isOpen()) {
         return 0;

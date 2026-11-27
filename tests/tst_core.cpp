@@ -3457,7 +3457,8 @@ private slots:
             QStringLiteral("Manage lists…"),
             QStringLiteral("Keep the mini player on top of other windows"),
             QStringLiteral("Stop keeping the mini player on top"),
-            QStringLiteral("Backup imported. Backups do not include API tokens; enter them again for: %1")
+            QStringLiteral("Backup imported. Backups do not include API tokens; enter them again for: %1"),
+            QStringLiteral("Waiting for the keyring to be unlocked...")
         };
         QStringList missing;
         // Build-tree copy of data/translations (refreshed on cmake configure).
