@@ -20,6 +20,26 @@ Item {
         return tasksView.itemAtIndex(proxyRow)
     }
 
+    // Makes the clicked task the active one. While the timer runs, switching stops it, so the
+    // switch waits out the double-click interval: a double-click only opens the details.
+    function activateRowAfterClick(sourceRow) {
+        if (app.timer.running && sourceRow !== app.activeTodoRow) {
+            pendingActivation.sourceRow = sourceRow
+            pendingActivation.restart()
+        } else {
+            pendingActivation.stop()
+            app.activeTodoRow = sourceRow
+        }
+    }
+
+    Timer {
+        id: pendingActivation
+        objectName: "pendingTaskActivation"
+        property int sourceRow: -1
+        interval: Qt.styleHints.mouseDoubleClickInterval
+        onTriggered: app.activeTodoRow = sourceRow
+    }
+
     function openDetailsForRow(proxyRow) {
         if (proxyRow < 0 || !listRoot.proxyModel || proxyRow >= tasksView.count) {
             return false
@@ -292,7 +312,7 @@ Item {
                     tasksView.currentIndex = index
                     tasksView.forceActiveFocus()
                     if (!listRoot.isDoneList) {
-                        app.activeTodoRow = listRoot.proxyModel.mapToSourceRow(index)
+                        listRoot.activateRowAfterClick(listRoot.proxyModel.mapToSourceRow(index))
                     }
                     app.markTaskViewed(listRoot.isDoneList, index)
                 }
@@ -306,6 +326,8 @@ Item {
                     }
                 }
                 onDetailsRequested: {
+                    // Second click of a double-click: keep the active task (and a running timer).
+                    pendingActivation.stop()
                     app.markTaskViewed(listRoot.isDoneList, index)
                     const webUrl = app.getTaskBrowserUrl(listId, jiraKey, description).toString()
                     taskDetailsDialog.openForTask(

@@ -31,6 +31,7 @@
 #include <QKeySequence>
 #include <QScopeGuard>
 #include <QScreen>
+#include <QStyleHints>
 #include <QGuiApplication>
 #include <QObject>
 #include <QQmlComponent>
@@ -530,6 +531,9 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(todoDialog, "close"));
         QCoreApplication::processEvents();
 
+        // Viewing details does not change the active task (KB-152): it is still row 0.
+        QCOMPARE(controller.activeTodoRow(), 0);
+
         // 3. In Timer view, pressing Return (or double-clicking the active task) opens its details dialog.
         root->setProperty("currentActivityTab", 1);
         QObject* timerViewObj = root->findChild<QObject*>(QStringLiteral("timerViewRoot"));
@@ -539,7 +543,7 @@ private slots:
         QTest::keyClick(mainWindow, Qt::Key_Return);
         QCoreApplication::processEvents();
         QCOMPARE(timerDialog->property("visible").toBool(), true);
-        QCOMPARE(timerDialog->property("taskDetails").toString(), QStringLiteral("Detailed markdown body 2"));
+        QCOMPARE(timerDialog->property("taskDetails").toString(), QStringLiteral("Detailed markdown body 1"));
         QVERIFY(QMetaObject::invokeMethod(timerDialog, "close"));
 
         mainWindow->hide();
@@ -1370,6 +1374,64 @@ private slots:
         QTRY_COMPARE(combo->property("currentText").toString(), german);
         QCOMPARE(controller.ambient()->ambientMode(), QStringLiteral("rain"));
         QCOMPARE(controller.ambient()->ambientModeName(), german);
+    }
+
+    // KB-152: double-clicking a task to read its details also made it the active task, because the
+    // first click of the double-click activated it, which stopped the timer running on another task.
+    // While the timer runs, a click now activates the task only after the double-click interval.
+    void testDoubleClickDetailsKeepsRunningTimer() {
+        const QString dbPath = m_testSandbox.filePath(QStringLiteral("kb152.db"));
+        QFile::remove(dbPath);
+        AppController controller(QString(), dbPath);
+        const QString listId = controller.listManager()->addList(QStringLiteral("KB152"));
+        controller.selectListById(listId);
+        while (controller.todoProxyModel()->rowCount() > 0) QVERIFY(controller.removeTask(false, 0));
+        controller.addNewTask(QStringLiteral("kb152 timed task"));
+        controller.addNewTask(QStringLiteral("kb152 other task"));
+        QVERIFY(controller.updateTaskDetails(false, 1, QStringLiteral("KB152 other details")));
+        controller.setActiveTodoRow(0);
+        controller.setShowingOverview(false);
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("app"), &controller);
+        engine.rootContext()->setContextProperty(QStringLiteral("showAboutOnStart"), false);
+        const QString qmlRoot = m_testSandbox.filePath(QStringLiteral("kb152_qml"));
+        QVERIFY(copyBuiltQmlTree(qmlRoot));
+        QQmlComponent comp(&engine, QUrl::fromLocalFile(qmlRoot + QStringLiteral("/Main.qml")));
+        std::unique_ptr<QObject> root(comp.create());
+        QVERIFY2(root, qPrintable(comp.errorString()));
+        QQuickWindow* window = qobject_cast<QQuickWindow*>(root.get());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject* listView = root->findChild<QObject*>(QStringLiteral("todoListView"));
+        QObject* dialog = root->findChild<QObject*>(QStringLiteral("todoTaskDetailsDialog"));
+        QVERIFY(listView && dialog);
+        auto rowCentre = [&](int proxyRow) {
+            QVariant v;
+            [&] { QVERIFY(QMetaObject::invokeMethod(listView, "delegateAt", Q_RETURN_ARG(QVariant, v), Q_ARG(QVariant, proxyRow))); }();
+            QQuickItem* item = qobject_cast<QQuickItem*>(v.value<QObject*>());
+            return item ? item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint() : QPoint();
+        };
+        const int timedRow = controller.activeTodoRow();
+        const QPoint other = rowCentre(controller.todoProxyModel()->mapFromSourceRow(1 - timedRow));
+        QVERIFY(!other.isNull());
+
+        controller.timer()->start();
+        QVERIFY(controller.timer()->isRunning());
+        QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, other);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QCOMPARE(dialog->property("taskDetails").toString(), QStringLiteral("KB152 other details"));
+        QTest::qWait(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 200);
+        QVERIFY2(controller.timer()->isRunning(), "a double-click to view details stopped the timer");
+        QCOMPARE(controller.activeTodoRow(), timedRow);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+
+        // A single click still switches the active task (and stops the timer), after the interval.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, other);
+        QTRY_COMPARE(controller.activeTodoRow(), 1 - timedRow);
+        QVERIFY(!controller.timer()->isRunning());
+        controller.timer()->stop();
     }
 
     // KB-142 on platforms where Qt knows window positions (X11; here offscreen): Main.qml's mini

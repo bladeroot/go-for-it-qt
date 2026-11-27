@@ -49,8 +49,9 @@ ItemDelegate {
             app.markTaskViewed(rowDelegate.isDoneList, rowDelegate.index)
         }
     }
+    // Viewing details is not choosing a task: a double-click must not make it the active task
+    // (that stops a running timer). TaskListView defers the first click's activation for this.
     onDoubleClicked: {
-        rowDelegate.rowClicked()
         rowDelegate.detailsRequested()
     }
     Keys.onReturnPressed: function(event) {
