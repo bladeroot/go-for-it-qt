@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Double-clicking a task to read its details no longer stops a timer running on another task (KB-152).
 - After importing a backup, the app names the tracker lists whose API token has to be entered again (KB-153).
 - A keyring (KWallet, GNOME Keyring) that is started on demand is used instead of the fallback file (KB-154).
+- The window opens at once while the wallet password dialog is shown; tracker lists sync with their tokens once it is answered (KB-155).
+- A token saved while the wallet is closed goes to the keyring once it is opened, not to the fallback file (KB-156).
+- Saving list settings no longer rewrites an unchanged token in the keyring (KB-157).
 
 ---
 
