@@ -104,6 +104,7 @@ void CredentialStore::resetPromptState() {
     m_unlockInProgress = false;
     ++m_unlockGeneration;
     m_unlockResult.reset();
+    m_keyringTokens.clear();
 }
 
 QDBusConnection CredentialStore::activeBus() const {
@@ -153,6 +154,11 @@ QString CredentialStore::currentDbScope() const {
         return canonical;
     }
     return fi.absoluteFilePath();
+}
+
+QString CredentialStore::scopedKey(const QString& listId) const {
+    const QString dbScope = currentDbScope();
+    return dbScope.isEmpty() ? listId : QStringLiteral("%1:%2").arg(dbScope, listId);
 }
 
 QString CredentialStore::defaultFallbackFilePath() const {
@@ -437,6 +443,9 @@ bool CredentialStore::storeInKeyring(const QString& listId, const QString& token
             created = createItem().first;
         }
     }
+    if (created) {
+        m_keyringTokens.insert(scopedKey(listId), token);
+    }
     return created;
 }
 
@@ -510,13 +519,18 @@ QString CredentialStore::loadFromKeyring(const QString& listId) {
         const QDBusArgument arg = secretArgVar.value<QDBusArgument>();
         arg >> secret;
     }
-    return QString::fromUtf8(secret.value);
+    const QString token = QString::fromUtf8(secret.value);
+    if (!token.isEmpty()) {
+        m_keyringTokens.insert(scopedKey(listId), token);
+    }
+    return token;
 }
 
 bool CredentialStore::deleteFromKeyring(const QString& listId) {
     if (!isKeyringAvailable() || listId.isEmpty()) {
         return false;
     }
+    m_keyringTokens.remove(scopedKey(listId));
     QDBusConnection bus = activeBus();
     QDBusMessage searchMsg = QDBusMessage::createMethodCall(
         m_serviceName,
@@ -630,6 +644,9 @@ bool CredentialStore::storeInFile(const QString& listId, const QString& token) {
     QJsonObject root = readFallbackJson();
     root[QStringLiteral("version")] = 1;
     QJsonObject tokens = root.value(QStringLiteral("tokens")).toObject();
+    if (token.isEmpty() && !tokens.contains(tokenKey) && !tokens.contains(listId)) {
+        return true;  // nothing to remove: don't rewrite (or create) the file
+    }
     if (token.isEmpty()) {
         tokens.remove(tokenKey);
         tokens.remove(listId);
@@ -787,9 +804,13 @@ bool CredentialStore::storeToken(const QString& listId, const QString& token) {
         return deleteToken(listId);
     }
 
-    if (isKeyringAvailable() && storeInKeyring(listId, token)) {
-        deleteFromFile(listId);
-        return true;
+    if (isKeyringAvailable()) {
+        // An unchanged token (every settings save) is not written again (KB-157).
+        const auto known = m_keyringTokens.constFind(scopedKey(listId));
+        if ((known != m_keyringTokens.constEnd() && *known == token) || storeInKeyring(listId, token)) {
+            deleteFromFile(listId);
+            return true;
+        }
     }
 
     return storeInFile(listId, token);

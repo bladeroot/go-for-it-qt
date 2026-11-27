@@ -130,6 +130,7 @@ private:
 
     QString defaultFallbackFilePath() const;
     QString currentDbScope() const;
+    QString scopedKey(const QString& listId) const;
     QDBusConnection activeBus() const;
 
     QString m_fallbackPath;
@@ -143,6 +144,9 @@ private:
     quint64 m_unlockGeneration = 0;
     int m_busyDepth = 0;
     std::optional<bool> m_unlockResult;
+    // Tokens known to be stored in the keyring (scopedKey -> token), so that saving an unchanged token does
+    // not delete and re-create the keyring item every time.
+    QHash<QString, QString> m_keyringTokens;
 };
 
 } // namespace gofi

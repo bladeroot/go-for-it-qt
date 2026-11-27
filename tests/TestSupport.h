@@ -197,6 +197,7 @@ public:
     int promptDelayMs = 0;           // time the user needs to type the wallet password
     bool promptDismisses = false;    // the user closes the wallet password dialog
     bool createNeedsPrompt = false;  // CreateItem into a locked collection answers with a prompt
+    int createCalls = 0;             // CreateItem calls, answered with a prompt or not
     bool promptAnswered = false;     // the (possibly delayed) unlock prompt has sent Completed
     QList<QDBusObjectPath> pendingUnlock;
     static constexpr const char* CollectionPath = "/org/freedesktop/secrets/collection/fake";

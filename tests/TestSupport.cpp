@@ -158,6 +158,9 @@ bool FakeSecretService::handleMessage(const QDBusMessage& msg, const QDBusConnec
         conn.send(msg.createReply());
         return true;
     }
+    if (member == QStringLiteral("CreateItem")) {
+        ++createCalls;
+    }
     if (member == QStringLiteral("CreateItem") && createNeedsPrompt) {
         QDBusMessage reply = msg.createReply();
         reply << QVariant::fromValue(QDBusObjectPath(QStringLiteral("/")))

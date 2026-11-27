@@ -1086,6 +1086,48 @@ private slots:
         QCOMPARE(keyring.fake.items.size(), 2);
         QVERIFY(!fileContents(credsPath).contains("pat_create_two"));
     }
+
+    // Every settings save deleted the list's keyring item and created it again, even when the token was
+    // unchanged: needless D-Bus round trips, a window where the token exists nowhere, and a wallet prompt
+    // when the collection is locked (KB-157).
+    void testSavingUnchangedTokenKeepsKeyringItem() {
+        PrivateDBus bus;
+        if (bus.address.isEmpty()) {
+            QSKIP("dbus-daemon is not available");
+        }
+        QTemporaryDir dir(m_testSandbox.filePath(QStringLiteral("cs_unchanged_XXXXXX")));
+        QVERIFY(dir.isValid());
+        FakeKeyring keyring(bus, QStringLiteral("cs_unchanged"), dir.filePath(QStringLiteral("credentials.json")));
+        QVERIFY(keyring.ok);
+        const QString dbPath = dir.filePath(QStringLiteral("unchanged.db"));
+
+        auto& db = DatabaseManager::instance();
+        QVERIFY(db.initialize(dbPath));
+        gofi::TodoListEntry entry = trackerEntry(QStringLiteral("cs_unchanged_list"), QStringLiteral("pat_unchanged"));
+        QVERIFY(db.saveList(entry, 0));
+        QCOMPARE(keyring.fake.createCalls, 1);
+        const QString itemPath = keyring.fake.items.firstKey();
+
+        entry.name = QStringLiteral("Renamed");
+        QVERIFY(db.saveList(entry, 0));
+        db.close();
+        // Next start: the token comes from the keyring, the user saves other settings.
+        QVERIFY(db.initialize(dbPath));
+        const auto lists = db.loadLists();
+        QCOMPARE(lists.size(), 1);
+        QCOMPARE(lists.first().apiToken, QStringLiteral("pat_unchanged"));
+        QVERIFY(db.saveList(lists.first(), 0));
+        QCOMPARE(keyring.fake.createCalls, 1);
+        QCOMPARE(keyring.fake.items.keys(), QStringList{itemPath});
+
+        // A changed token is written.
+        entry.apiToken = QStringLiteral("pat_rotated");
+        QVERIFY(db.saveList(entry, 0));
+        QCOMPARE(keyring.fake.createCalls, 2);
+        QCOMPARE(keyring.fake.items.size(), 1);
+        QCOMPARE(keyring.fake.items.first().secretValue, QByteArray("pat_rotated"));
+        db.close();
+    }
 };
 
 QTEST_MAIN(TestCredentials)
