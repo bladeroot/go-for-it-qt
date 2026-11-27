@@ -123,6 +123,7 @@
   "Backup & Restore Database": "Backup e ripristino del database",
   "Backup exported to: ": "Backup esportato in: ",
   "Backup exported to: %1": "Backup esportato in: %1",
+  "Backup imported. Backups do not include API tokens; enter them again for: %1": "Backup importato. I backup non contengono i token API; reinseriscili per: %1",
   "Backup imported successfully.": "Backup importato con successo.",
   "Behavior": "Comportamento",
   "Bell": "Campanella",

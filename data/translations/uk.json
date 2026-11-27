@@ -123,6 +123,7 @@
   "Backup & Restore Database": "Резервне копіювання та відновлення",
   "Backup exported to: ": "Резервну копію збережено у: ",
   "Backup exported to: %1": "Резервну копію збережено у: %1",
+  "Backup imported. Backups do not include API tokens; enter them again for: %1": "Резервну копію імпортовано. Копії не містять API-токенів; введіть їх знову для: %1",
   "Backup imported successfully.": "Резервну копію успішно імпортовано.",
   "Behavior": "Поведінка",
   "Bell": "Дзвіночок",

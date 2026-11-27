@@ -989,6 +989,18 @@ bool AppController::importBackup(const QString& sourceFilePath) {
     return true;
 }
 
+QStringList AppController::remoteListsWithoutToken() const {
+    QStringList names;
+    for (int i = 0; i < m_listManager.rowCount(); ++i) {
+        const TodoListEntry e = m_listManager.entry(i);
+        const bool remote = e.provider != QStringLiteral("SQLite") && e.provider != QStringLiteral("Todo.txt");
+        if (remote && e.apiToken.trimmed().isEmpty()) {
+            names << e.name;
+        }
+    }
+    return names;
+}
+
 void AppController::onTimerStopped(const QDateTime& startTimeUtc, uint runtimeSeconds) {
     if (m_timer.isBreakActive() || runtimeSeconds == 0) {
         return;

@@ -123,6 +123,7 @@
   "Backup & Restore Database": "Sauvegarde et restauration de la base de données",
   "Backup exported to: ": "Sauvegarde exportée vers : ",
   "Backup exported to: %1": "Sauvegarde exportée vers : %1",
+  "Backup imported. Backups do not include API tokens; enter them again for: %1": "Sauvegarde importée. Les sauvegardes ne contiennent pas les jetons d'API ; saisissez-les à nouveau pour : %1",
   "Backup imported successfully.": "Sauvegarde importée avec succès.",
   "Behavior": "Comportement",
   "Bell": "Cloche",

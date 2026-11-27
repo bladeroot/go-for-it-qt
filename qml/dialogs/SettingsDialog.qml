@@ -496,9 +496,13 @@ Dialog {
                             enabled: backupPathField.text.trim() !== ""
                             onClicked: {
                                 const ok = app.importBackup(backupPathField.text)
-                                storageStatusLabel.text = ok
-                                    ? qsTr("Backup imported successfully.")
-                                    : qsTr("Failed to import backup.")
+                                // Backups never contain API tokens: say which tracker lists need them again.
+                                const missing = ok ? app.remoteListsWithoutToken() : []
+                                storageStatusLabel.text = !ok
+                                    ? qsTr("Failed to import backup.")
+                                    : (missing.length > 0
+                                        ? qsTr("Backup imported. Backups do not include API tokens; enter them again for: %1").arg(missing.join(", "))
+                                        : qsTr("Backup imported successfully."))
                             }
                         }
                     }

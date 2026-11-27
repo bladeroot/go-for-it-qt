@@ -3022,6 +3022,32 @@ private slots:
     // (findActiveTodoRowById / loadTask), where the same autoincrement id names an unrelated
     // task, and books the session (activity record, CSV log and, for tracker lists with
     // autoWorklog, a remote worklog to that task's jira key) to it.
+    // KB-153: backups never contain API tokens (they live in the keyring, scoped to the database),
+    // so importing a backup made elsewhere left every tracker list without its token and the UI
+    // just said "Backup imported successfully.". The lists missing a token are now reported.
+    void testImportedTrackerListsWithoutTokenAreReported() {
+        const QString backupDb = m_testSandbox.filePath(QStringLiteral("kb153_backup.db"));
+        const QString liveDb = m_testSandbox.filePath(QStringLiteral("kb153_live.db"));
+        QFile::remove(backupDb);
+        QFile::remove(liveDb);
+        {
+            AppController other(QString(), backupDb);  // "the other machine"
+            QVariantMap cfg = other.listManager()->getListConfig(QString());
+            cfg[QStringLiteral("name")] = QStringLiteral("KB153 Jira");
+            cfg[QStringLiteral("provider")] = QStringLiteral("Jira");
+            cfg[QStringLiteral("jiraUrl")] = QStringLiteral("https://jira.example.com");
+            cfg[QStringLiteral("apiToken")] = QStringLiteral("kb153-token");
+            QVERIFY(!other.listManager()->saveListConfig(cfg).isEmpty());
+            QVERIFY(other.remoteListsWithoutToken().isEmpty());
+        }
+        DatabaseManager::instance().close();
+
+        AppController controller(QString(), liveDb);
+        QVERIFY(controller.remoteListsWithoutToken().isEmpty());
+        QVERIFY(controller.importBackup(backupDb));
+        QCOMPARE(controller.remoteListsWithoutToken(), QStringList{QStringLiteral("KB153 Jira")});
+    }
+
     void testImportBackupDoesNotRebindRunningTimerToOtherTask() {
         const QString backupDb = m_testSandbox.filePath(QStringLiteral("kb53_backup.db"));
         const QString liveDb = m_testSandbox.filePath(QStringLiteral("kb53_live.db"));
@@ -3430,7 +3456,8 @@ private slots:
             QStringLiteral("Switch list"),
             QStringLiteral("Manage lists…"),
             QStringLiteral("Keep the mini player on top of other windows"),
-            QStringLiteral("Stop keeping the mini player on top")
+            QStringLiteral("Stop keeping the mini player on top"),
+            QStringLiteral("Backup imported. Backups do not include API tokens; enter them again for: %1")
         };
         QStringList missing;
         // Build-tree copy of data/translations (refreshed on cmake configure).

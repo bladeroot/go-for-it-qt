@@ -133,6 +133,9 @@ public:
     Q_INVOKABLE bool changeDatabasePath(const QString& newDbPath, bool copyExisting = true);
     Q_INVOKABLE bool exportBackup(const QString& targetFilePath);
     Q_INVOKABLE bool importBackup(const QString& sourceFilePath);
+    // Names of tracker lists that have no API token, e.g. after importing a backup made on another
+    // machine (backups never contain tokens; they live in the keyring, scoped to the database).
+    Q_INVOKABLE QStringList remoteListsWithoutToken() const;
     Q_INVOKABLE QString readMarkdownFile(const QString& filePath) const;
     Q_INVOKABLE QUrl getTaskBrowserUrl(const QString& listId, const QString& jiraKey, const QString& description) const;
     Q_INVOKABLE QUrl taskBrowserUrl(bool fromDoneList, int proxyRow) const;

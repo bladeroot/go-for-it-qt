@@ -123,6 +123,7 @@
   "Backup & Restore Database": "Datenbank sichern & wiederherstellen",
   "Backup exported to: ": "Sicherung exportiert nach: ",
   "Backup exported to: %1": "Sicherung exportiert nach: %1",
+  "Backup imported. Backups do not include API tokens; enter them again for: %1": "Sicherung importiert. Sicherungen enthalten keine API-Tokens; bitte erneut eingeben für: %1",
   "Backup imported successfully.": "Sicherung erfolgreich importiert.",
   "Behavior": "Verhalten",
   "Bell": "Glocke",
