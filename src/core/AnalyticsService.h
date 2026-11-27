@@ -2,6 +2,7 @@
 
 #include "DatabaseManager.h"
 #include <QDateTime>
+#include <QDate>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -42,8 +43,14 @@ public:
     static QStringList extractProjects(const QString& text);
     static QStringList extractContexts(const QString& text);
 
+    // "Today" for periods and the heatmap; tests set a fixed date, an invalid date means the real one.
+    void setReferenceDate(const QDate& date) { m_referenceDate = date; }
+
 private:
     std::pair<QDateTime, QDateTime> resolvePeriodRange(const QString& period) const;
+    [[nodiscard]] QDate today() const { return m_referenceDate.isValid() ? m_referenceDate : QDate::currentDate(); }
+
+    QDate m_referenceDate;
 };
 
 } // namespace gofi

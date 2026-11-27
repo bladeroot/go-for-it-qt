@@ -78,7 +78,7 @@ QStringList AnalyticsService::extractContexts(const QString& text) {
 
 std::pair<QDateTime, QDateTime> AnalyticsService::resolvePeriodRange(const QString& period) const {
     const QString p = period.trimmed().toLower();
-    const QDate today = QDate::currentDate();
+    const QDate today = this->today();
 
     if (p == QStringLiteral("day") || p == QStringLiteral("today")) {
         const QDateTime start = QDateTime(today, QTime(0, 0, 0)).toUTC();
@@ -264,7 +264,7 @@ QVariantMap AnalyticsService::getProductivityStats(const QString& period, const 
 QVariantList AnalyticsService::getActivityHeatmap(int daysBack, const QString& listId) const {
     QVariantList list;
     const int numDays = qBound(7, daysBack, 365);
-    const QDate today = QDate::currentDate();
+    const QDate today = this->today();
     const QDate nominalStart = today.addDays(-(numDays - 1));
     const QDate startDate = nominalStart.addDays(-(nominalStart.dayOfWeek() - 1));
 

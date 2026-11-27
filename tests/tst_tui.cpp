@@ -1062,14 +1062,20 @@ private slots:
         const QString list = ctrl.listManager()->addList(QStringLiteral("KB115"));
         ctrl.selectListById(list);
 
-        // Record 3 hours today so today's heatmap cell has highest intensity ([█])
-        const QDateTime now = QDateTime::currentDateTimeUtc();
+        // A fixed Wednesday: the Monday-aligned 28-day heatmap then has 31 days. With the real date
+        // the count is 28 on Sundays, where a hardcoded "28-DAY" title would pass as well.
+        const QDate today(2026, 11, 25);
+        QCOMPARE(today.dayOfWeek(), 3);
+        ctrl.analytics()->setReferenceDate(today);
+
+        // Record 3 hours "today" so today's heatmap cell has highest intensity ([█])
+        const QDateTime end = QDateTime(today, QTime(15, 0)).toUTC();
         QVERIFY(DatabaseManager::instance().insertActivityLog(list, QStringLiteral("KB115"), -1, QString(),
-                QStringLiteral("Intensive Work Session"), now.addSecs(-10800), 10800, now, true, false) > 0);
+                QStringLiteral("Intensive Work Session"), end.addSecs(-10800), 10800, end, true, false) > 0);
 
         const QVariantList heatmap = ctrl.analytics()->getActivityHeatmap(28, ctrl.activeListFilter());
         const int actualDays = heatmap.size();
-        QVERIFY(actualDays >= 28 && actualDays <= 34);
+        QCOMPARE(actualDays, 31);
 
         QString screen;
         {
